@@ -1,0 +1,54 @@
+{
+    "name": "Marina Crane Booking",
+    "short_name": "CraneBook",
+    "description": "Sustav rezervacija dizalica u marini / Marina crane booking system",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#09090b",
+    "theme_color": "#3b82f6",
+    "orientation": "portrait-primary",
+    "lang": "hr",
+    "categories": [
+        "productivity",
+        "utilities"
+    ],
+    "icons": [
+        {
+            "src": "/icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any maskable"
+        },
+        {
+            "src": "/icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ],
+    "screenshots": [],
+    "shortcuts": [
+        {
+            "name": "Nova rezervacija",
+            "short_name": "Rezerviraj",
+            "url": "/new-reservation",
+            "icons": [
+                {
+                    "src": "/icons/icon-192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        },
+        {
+            "name": "Moje rezervacije",
+            "short_name": "Moje",
+            "url": "/my-reservations",
+            "icons": [
+                {
+                    "src": "/icons/icon-192.png",
+                    "sizes": "192x192"
+                }
+            ]
+        }
+    ]
+}

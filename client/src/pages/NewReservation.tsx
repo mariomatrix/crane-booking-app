@@ -12,27 +12,77 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, Loader2, Send } from "lucide-react";
-import { useState } from "react";
+import { useLang } from "@/contexts/LangContext";
+import { ArrowLeft, Loader2, Send, AlertTriangle, ListPlus } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function NewReservation() {
   const { user, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
+  const { t, lang } = useLang();
+
+  // Form state
   const [craneId, setCraneId] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [projectLocation, setProjectLocation] = useState("");
-  const [projectDescription, setProjectDescription] = useState("");
-  const [notes, setNotes] = useState("");
+  const [vesselType, setVesselType] = useState("");
+  const [vesselName, setVesselName] = useState("");
+  const [vesselLength, setVesselLength] = useState("");
+  const [vesselWidth, setVesselWidth] = useState("");
+  const [vesselDraft, setVesselDraft] = useState("");
+  const [vesselWeight, setVesselWeight] = useState("");
+  const [selectedDate, setSelectedDate] = useState("");
+  const [slotCount, setSlotCount] = useState("1");
+  const [startTime, setStartTime] = useState("");
+  const [liftPurpose, setLiftPurpose] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+
+  // Validation warning
+  const [validationWarning, setValidationWarning] = useState<string | null>(null);
 
   const { data: cranesList = [], isLoading: cranesLoading } = trpc.crane.list.useQuery();
+  const { data: sysSettings } = trpc.settings.get.useQuery();
+  const slotDuration = Number(sysSettings?.slotDurationMinutes ?? 60);
+
+  // Fetch available slots when date, crane, slotCount change
+  const canFetchSlots = !!craneId && !!selectedDate && !!slotCount;
+  const { data: slotsData, isFetching: slotsFetching } = trpc.calendar.availableSlots.useQuery(
+    { craneId: Number(craneId), date: selectedDate, slotCount: Number(slotCount) },
+    { enabled: canFetchSlots }
+  );
+
+  const selectedCrane = useMemo(
+    () => cranesList.find((c) => String(c.id) === craneId),
+    [craneId, cranesList]
+  );
+
+  // Validate vessel dimensions against selected crane live
+  useEffect(() => {
+    if (!selectedCrane || !vesselWeight) { setValidationWarning(null); return; }
+    const weight = Number(vesselWeight);
+    const capacity = Number(selectedCrane.capacity);
+    if (weight > capacity) {
+      setValidationWarning(t.form.errors.weightExceeded + ` (max ${capacity}t)`);
+      return;
+    }
+    if (selectedCrane.maxPoolWidth && vesselWidth) {
+      const width = Number(vesselWidth);
+      if (width > Number(selectedCrane.maxPoolWidth)) {
+        setValidationWarning(t.form.errors.widthExceeded + ` (max ${selectedCrane.maxPoolWidth}m)`);
+        return;
+      }
+    }
+    setValidationWarning(null);
+  }, [vesselWeight, vesselWidth, selectedCrane, t]);
+
+  // Reset start time when slots change
+  useEffect(() => { setStartTime(""); }, [craneId, selectedDate, slotCount]);
 
   const createMutation = trpc.reservation.create.useMutation({
     onSuccess: () => {
-      toast.success("Reservation request submitted successfully! An administrator will review it shortly.");
+      toast.success(t.form.successMessage);
       setLocation("/my-reservations");
     },
     onError: (error) => {
@@ -40,9 +90,17 @@ export default function NewReservation() {
     },
   });
 
+  const joinWaitingMutation = trpc.waitingList.join.useMutation({
+    onSuccess: () => {
+      toast.success(lang === "hr" ? "Uspješno ste upisani na listu čekanja." : "You joined the waiting list.");
+      setLocation("/my-reservations");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -50,20 +108,14 @@ export default function NewReservation() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="max-w-md w-full mx-4">
           <CardHeader className="text-center">
-            <CardTitle>Sign In Required</CardTitle>
-            <CardDescription>
-              You need to be signed in to request a crane reservation.
-            </CardDescription>
+            <CardTitle>{t.auth.signInRequired}</CardTitle>
           </CardHeader>
           <CardContent>
-            <Button
-              className="w-full"
-              onClick={() => { window.location.href = getLoginUrl(); }}
-            >
-              Sign In
+            <Button className="w-full" onClick={() => { window.location.href = getLoginUrl(); }}>
+              {t.auth.signInButton}
             </Button>
           </CardContent>
         </Card>
@@ -73,143 +125,205 @@ export default function NewReservation() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!craneId || !startDate || !endDate) {
-      toast.error("Please fill in all required fields.");
+    if (!craneId || !vesselType || !vesselLength || !vesselWidth || !vesselDraft || !vesselWeight || !selectedDate || !startTime || !liftPurpose || !contactPhone) {
+      toast.error(t.form.errors.required);
       return;
     }
+    if (validationWarning) { toast.error(validationWarning); return; }
+
+    const startMs = new Date(startTime).getTime();
+    const endMs = startMs + Number(slotCount) * slotDuration * 60000;
+
     createMutation.mutate({
       craneId: Number(craneId),
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      projectLocation: projectLocation || undefined,
-      projectDescription: projectDescription || undefined,
-      notes: notes || undefined,
+      startDate: new Date(startMs),
+      endDate: new Date(endMs),
+      vesselType: vesselType as any,
+      vesselName: vesselName || undefined,
+      vesselLength: Number(vesselLength),
+      vesselWidth: Number(vesselWidth),
+      vesselDraft: Number(vesselDraft),
+      vesselWeight: Number(vesselWeight),
+      liftPurpose,
+      contactPhone,
     });
   };
+
+  const handleJoinWaiting = () => {
+    if (!craneId || !selectedDate) { toast.error(t.form.errors.required); return; }
+    joinWaitingMutation.mutate({
+      craneId: Number(craneId),
+      requestedDate: selectedDate,
+      slotCount: Number(slotCount),
+      vesselData: { vesselType, vesselWeight, vesselWidth, vesselLength },
+    });
+  };
+
+  const noSlots = canFetchSlots && !slotsFetching && (slotsData?.availableStarts.length === 0);
+
+  const durationOptions = Array.from({ length: 6 }, (_, i) => ({
+    value: String(i + 1),
+    label: `${(i + 1) * slotDuration} min`,
+  }));
 
   return (
     <div className="min-h-screen bg-background">
       <div className="border-b bg-card">
         <div className="container py-6">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setLocation("/")}
-            className="mb-2 -ml-2"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="mb-2 -ml-2">
             <ArrowLeft className="h-4 w-4 mr-1" />
-            Back to Calendar
+            {t.nav.calendar}
           </Button>
-          <h1 className="text-xl font-semibold">New Reservation Request</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Fill out the form below to request a crane reservation. An administrator will review your request.
-          </p>
+          <h1 className="text-xl font-semibold">{t.form.title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{t.form.subtitle}</p>
         </div>
       </div>
 
       <div className="container py-6">
         <Card className="max-w-2xl">
           <CardHeader>
-            <CardTitle>Reservation Details</CardTitle>
-            <CardDescription>
-              Fields marked with * are required.
-            </CardDescription>
+            <CardTitle>{t.form.selectCrane}</CardTitle>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-8">
               {/* Crane Selection */}
               <div className="space-y-2">
-                <Label htmlFor="crane">Crane *</Label>
+                <Label>{t.form.selectCrane} *</Label>
                 <Select value={craneId} onValueChange={setCraneId}>
                   <SelectTrigger>
-                    <SelectValue placeholder={cranesLoading ? "Loading cranes..." : "Select a crane"} />
+                    <SelectValue placeholder={cranesLoading ? "..." : t.form.selectCranePlaceholder} />
                   </SelectTrigger>
                   <SelectContent>
                     {cranesList.map((crane) => (
                       <SelectItem key={crane.id} value={String(crane.id)}>
-                        {crane.name} — {crane.type} ({crane.capacity} {crane.capacityUnit})
+                        {crane.name} — {crane.capacity}t
+                        {crane.maxPoolWidth ? ` / ${crane.maxPoolWidth}m` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Date Range */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Vessel Details */}
+              <div className="space-y-4">
+                <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">{t.form.vesselSection}</h3>
                 <div className="space-y-2">
-                  <Label htmlFor="startDate">Start Date *</Label>
-                  <Input
-                    id="startDate"
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    min={new Date().toISOString().split("T")[0]}
-                    required
-                  />
+                  <Label>{t.form.vesselType} *</Label>
+                  <Select value={vesselType} onValueChange={setVesselType}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="—" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="sailboat">{t.form.vesselTypeSailboat}</SelectItem>
+                      <SelectItem value="motorboat">{t.form.vesselTypeMotorboat}</SelectItem>
+                      <SelectItem value="catamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="endDate">End Date *</Label>
-                  <Input
-                    id="endDate"
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    min={startDate || new Date().toISOString().split("T")[0]}
-                    required
-                  />
+                  <Label>{t.form.vesselName}</Label>
+                  <Input value={vesselName} onChange={(e) => setVesselName(e.target.value)} placeholder="npr. Adriatic Dream" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>{t.form.vesselLength} *</Label>
+                    <Input type="number" step="0.1" min="0" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t.form.vesselWidth} *</Label>
+                    <Input type="number" step="0.1" min="0" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t.form.vesselDraft} *</Label>
+                    <Input type="number" step="0.1" min="0" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t.form.vesselWeight} *</Label>
+                    <Input type="number" step="0.1" min="0" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} required />
+                  </div>
+                </div>
+                {validationWarning && (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>{validationWarning}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+
+              {/* Slot Picker */}
+              <div className="space-y-4">
+                <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">{t.form.slotSection}</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>{t.form.date} *</Label>
+                    <Input type="date" value={selectedDate} min={new Date().toISOString().split("T")[0]} onChange={(e) => setSelectedDate(e.target.value)} required />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>{t.form.duration} *</Label>
+                    <Select value={slotCount} onValueChange={setSlotCount}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {durationOptions.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>{t.form.startTime} *</Label>
+                  {!canFetchSlots ? (
+                    <p className="text-sm text-muted-foreground">{t.form.startTimePlaceholder}</p>
+                  ) : slotsFetching ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Učitavanje...</div>
+                  ) : noSlots ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-amber-600">{t.form.noSlotsAvailable}</p>
+                      <Button type="button" variant="outline" onClick={handleJoinWaiting} disabled={joinWaitingMutation.isPending}>
+                        <ListPlus className="h-4 w-4 mr-2" />
+                        {t.form.joinWaitingList}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select value={startTime} onValueChange={setStartTime}>
+                      <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
+                      <SelectContent>
+                        {slotsData?.availableStarts.map((s) => {
+                          const d = new Date(s);
+                          return (
+                            <SelectItem key={d.toISOString()} value={d.toISOString()}>
+                              {d.toLocaleTimeString(lang === "hr" ? "hr-HR" : "en-GB", { hour: "2-digit", minute: "2-digit" })}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </div>
 
-              {/* Project Location */}
-              <div className="space-y-2">
-                <Label htmlFor="projectLocation">Project Location</Label>
-                <Input
-                  id="projectLocation"
-                  placeholder="e.g., Zagreb, Slavonska avenija 42"
-                  value={projectLocation}
-                  onChange={(e) => setProjectLocation(e.target.value)}
-                />
-              </div>
-
-              {/* Project Description */}
-              <div className="space-y-2">
-                <Label htmlFor="projectDescription">Project Description</Label>
-                <Textarea
-                  id="projectDescription"
-                  placeholder="Describe the project and how the crane will be used..."
-                  value={projectDescription}
-                  onChange={(e) => setProjectDescription(e.target.value)}
-                  rows={4}
-                />
-              </div>
-
-              {/* Additional Notes */}
-              <div className="space-y-2">
-                <Label htmlFor="notes">Additional Notes</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Any special requirements or notes..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                />
+              {/* Operational */}
+              <div className="space-y-4">
+                <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">{t.form.operationalSection}</h3>
+                <div className="space-y-2">
+                  <Label>{t.form.liftPurpose} *</Label>
+                  <Textarea value={liftPurpose} onChange={(e) => setLiftPurpose(e.target.value)} placeholder={t.form.liftPurposePlaceholder} rows={3} required />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t.form.contactPhone} *</Label>
+                  <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder={t.form.contactPhonePlaceholder} required />
+                </div>
               </div>
 
               <Button
                 type="submit"
                 className="w-full sm:w-auto"
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || !!validationWarning || !startTime}
               >
                 {createMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Submitting...
-                  </>
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.form.submitting}</>
                 ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Submit Reservation Request
-                  </>
+                  <><Send className="h-4 w-4 mr-2" />{t.form.submitButton}</>
                 )}
               </Button>
             </form>

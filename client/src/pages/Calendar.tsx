@@ -1,8 +1,8 @@
 import { trpc } from "@/lib/trpc";
 import { useState, useMemo } from "react";
 import FullCalendar from "@fullcalendar/react";
+import timeGridPlugin from "@fullcalendar/timegrid";
 import dayGridPlugin from "@fullcalendar/daygrid";
-import listPlugin from "@fullcalendar/list";
 import interactionPlugin from "@fullcalendar/interaction";
 import {
   Select,
@@ -13,56 +13,49 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
 import { CalendarDays, Filter } from "lucide-react";
+import { useLang } from "@/contexts/LangContext";
 
-const CRANE_TYPES = [
-  { value: "all", label: "All Crane Types" },
-  { value: "tower", label: "Tower Crane" },
-  { value: "mobile", label: "Mobile Crane" },
-  { value: "crawler", label: "Crawler Crane" },
-  { value: "overhead", label: "Overhead Crane" },
-  { value: "telescopic", label: "Telescopic Crane" },
-  { value: "loader", label: "Loader Crane" },
-  { value: "other", label: "Other" },
-];
-
-const EVENT_COLORS: Record<string, string> = {
-  tower: "#3b82f6",
-  mobile: "#10b981",
-  crawler: "#f59e0b",
-  overhead: "#8b5cf6",
-  telescopic: "#ec4899",
-  loader: "#06b6d4",
-  other: "#6b7280",
-};
+const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
 export default function Calendar() {
-  const [craneTypeFilter, setCraneTypeFilter] = useState("all");
+  const { t, lang } = useLang();
+  const [craneIdFilter, setCraneIdFilter] = useState("all");
 
+  const { data: cranesList = [] } = trpc.crane.list.useQuery();
   const { data: events = [], isLoading } = trpc.calendar.events.useQuery(
-    { craneType: craneTypeFilter !== "all" ? craneTypeFilter : undefined },
+    { craneId: craneIdFilter !== "all" ? Number(craneIdFilter) : undefined },
     { refetchInterval: 30000 }
   );
+  const { data: sysSettings } = trpc.settings.get.useQuery();
+  const workStart = sysSettings?.workdayStart ?? "08:00";
+  const workEnd = sysSettings?.workdayEnd ?? "16:00";
+
+  const craneColorMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    cranesList.forEach((c, i) => { map[c.id] = CRANE_COLORS[i % CRANE_COLORS.length]; });
+    return map;
+  }, [cranesList]);
 
   const calendarEvents = useMemo(
     () =>
       events.map((event) => ({
         id: String(event.id),
-        title: `${event.craneName}`,
+        title: `${event.craneName}${event.vesselType ? ` (${event.vesselType})` : ""}`,
         start: new Date(event.startDate),
         end: new Date(event.endDate),
-        backgroundColor: EVENT_COLORS[event.craneType] ?? EVENT_COLORS.other,
+        backgroundColor: craneColorMap[event.craneId] ?? CRANE_COLORS[0],
         borderColor: "transparent",
         extendedProps: {
-          craneType: event.craneType,
-          projectLocation: event.projectLocation,
+          craneId: event.craneId,
+          craneName: event.craneName,
+          liftPurpose: event.liftPurpose,
         },
       })),
-    [events]
+    [events, craneColorMap]
   );
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <div className="border-b bg-card">
         <div className="container py-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -71,24 +64,27 @@ export default function Calendar() {
                 <CalendarDays className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <h1 className="text-xl font-semibold text-foreground">
-                  Crane Availability Calendar
-                </h1>
-                <p className="text-sm text-muted-foreground">
-                  View scheduled crane reservations
-                </p>
+                <h1 className="text-xl font-semibold text-foreground">{t.calendar.title}</h1>
+                <p className="text-sm text-muted-foreground">{t.calendar.subtitle}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
-              <Select value={craneTypeFilter} onValueChange={setCraneTypeFilter}>
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="Filter by type" />
+              <Select value={craneIdFilter} onValueChange={setCraneIdFilter}>
+                <SelectTrigger className="w-[220px]">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {CRANE_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
+                  <SelectItem value="all">{t.calendar.allCranes}</SelectItem>
+                  {cranesList.map((crane) => (
+                    <SelectItem key={crane.id} value={String(crane.id)}>
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: craneColorMap[crane.id] }}
+                        />
+                        {crane.name}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -98,32 +94,45 @@ export default function Calendar() {
         </div>
       </div>
 
-      {/* Calendar */}
       <div className="container py-6">
         <Card>
-          <CardContent className="p-4 sm:p-6">
+          <CardContent className="p-2 sm:p-4">
             {isLoading ? (
               <div className="h-[600px] flex items-center justify-center">
-                <div className="text-muted-foreground">Loading calendar...</div>
+                <div className="text-muted-foreground">{t.calendar.loading}</div>
               </div>
             ) : (
               <FullCalendar
-                plugins={[dayGridPlugin, listPlugin, interactionPlugin]}
-                initialView="dayGridMonth"
+                plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
+                initialView="timeGridDay"
                 headerToolbar={{
                   left: "prev,next today",
                   center: "title",
-                  right: "dayGridMonth,listWeek",
+                  right: "timeGridDay,timeGridWeek,dayGridMonth",
+                }}
+                locale={lang === "hr" ? "hr" : "en"}
+                slotMinTime={workStart + ":00"}
+                slotMaxTime={workEnd + ":00"}
+                businessHours={{
+                  daysOfWeek: [1, 2, 3, 4, 5, 6],
+                  startTime: workStart,
+                  endTime: workEnd,
                 }}
                 events={calendarEvents}
                 height="auto"
-                eventDisplay="block"
-                dayMaxEvents={3}
+                slotDuration="00:30:00"
                 eventContent={(arg) => (
                   <div className="px-1.5 py-0.5 text-white text-xs font-medium truncate">
                     {arg.event.title}
                   </div>
                 )}
+                eventClick={(info) => {
+                  const props = info.event.extendedProps;
+                  // Simple tooltip via toast — a future PR could open a popover
+                  import("sonner").then(({ toast }) =>
+                    toast.info(`${props.craneName}: ${props.liftPurpose || ""}`)
+                  );
+                }}
               />
             )}
           </CardContent>
@@ -131,13 +140,10 @@ export default function Calendar() {
 
         {/* Legend */}
         <div className="mt-4 flex flex-wrap gap-3">
-          {Object.entries(EVENT_COLORS).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <div
-                className="h-3 w-3 rounded-sm"
-                style={{ backgroundColor: color }}
-              />
-              <span className="capitalize">{type}</span>
+          {cranesList.map((crane) => (
+            <div key={crane.id} className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: craneColorMap[crane.id] }} />
+              <span>{crane.name}</span>
             </div>
           ))}
         </div>

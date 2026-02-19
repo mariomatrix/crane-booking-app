@@ -35,36 +35,20 @@ import { Construction, Loader2, MapPin, Pencil, Plus, Trash2, Weight } from "luc
 import { useState } from "react";
 import { toast } from "sonner";
 
-const CRANE_TYPES = [
-  { value: "tower", label: "Tower" },
-  { value: "mobile", label: "Mobile" },
-  { value: "crawler", label: "Crawler" },
-  { value: "overhead", label: "Overhead" },
-  { value: "telescopic", label: "Telescopic" },
-  { value: "loader", label: "Loader" },
-  { value: "other", label: "Other" },
-];
-
 type CraneForm = {
   name: string;
-  type: string;
   capacity: string;
-  capacityUnit: string;
+  maxPoolWidth: string;
   description: string;
   location: string;
-  dailyRate: string;
-  imageUrl: string;
 };
 
 const emptyForm: CraneForm = {
   name: "",
-  type: "tower",
   capacity: "",
-  capacityUnit: "tons",
+  maxPoolWidth: "",
   description: "",
   location: "",
-  dailyRate: "",
-  imageUrl: "",
 };
 
 export default function AdminCranes() {
@@ -111,13 +95,10 @@ export default function AdminCranes() {
     setEditingId(crane.id);
     setForm({
       name: crane.name,
-      type: crane.type,
       capacity: crane.capacity,
-      capacityUnit: crane.capacityUnit,
+      maxPoolWidth: crane.maxPoolWidth ?? "",
       description: crane.description ?? "",
       location: crane.location ?? "",
-      dailyRate: crane.dailyRate ?? "",
-      imageUrl: crane.imageUrl ?? "",
     });
     setDialogOpen(true);
   };
@@ -125,31 +106,25 @@ export default function AdminCranes() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.capacity) {
-      toast.error("Name and capacity are required.");
+      toast.error("Naziv i kapacitet su obavezni.");
       return;
     }
     if (editingId) {
       updateMutation.mutate({
         id: editingId,
         name: form.name,
-        type: form.type as any,
         capacity: form.capacity,
-        capacityUnit: form.capacityUnit,
+        maxPoolWidth: form.maxPoolWidth || undefined,
         description: form.description || undefined,
         location: form.location || undefined,
-        dailyRate: form.dailyRate || undefined,
-        imageUrl: form.imageUrl || undefined,
       });
     } else {
       createMutation.mutate({
         name: form.name,
-        type: form.type as any,
         capacity: form.capacity,
-        capacityUnit: form.capacityUnit,
+        maxPoolWidth: form.maxPoolWidth || undefined,
         description: form.description || undefined,
         location: form.location || undefined,
-        dailyRate: form.dailyRate || undefined,
-        imageUrl: form.imageUrl || undefined,
       });
     }
   };
@@ -198,7 +173,6 @@ export default function AdminCranes() {
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">{crane.name}</span>
-                      <CraneTypeBadge type={crane.type} />
                       {!crane.isActive && (
                         <Badge variant="outline" className="text-xs text-muted-foreground">
                           Inactive
@@ -207,9 +181,9 @@ export default function AdminCranes() {
                     </div>
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <Weight className="h-3.5 w-3.5" />
-                      {crane.capacity} {crane.capacityUnit}
-                      {crane.dailyRate && (
-                        <span className="ml-3">€{crane.dailyRate}/day</span>
+                      Max {crane.capacity} t
+                      {crane.maxPoolWidth && (
+                        <span className="ml-3">Bazen: {crane.maxPoolWidth} m</span>
                       )}
                     </div>
                     {crane.location && (
@@ -272,80 +246,51 @@ export default function AdminCranes() {
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Name *</Label>
+              <Label>Naziv dizalice *</Label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="e.g., Liebherr LTM 1300"
+                placeholder="npr. Dizalica A - Travel Lift 50t"
                 required
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Type *</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CRANE_TYPES.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Capacity *</Label>
-                <div className="flex gap-2">
-                  <Input
-                    value={form.capacity}
-                    onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-                    placeholder="e.g., 300"
-                    required
-                  />
-                  <Input
-                    value={form.capacityUnit}
-                    onChange={(e) => setForm({ ...form, capacityUnit: e.target.value })}
-                    placeholder="tons"
-                    className="w-20"
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Location</Label>
+                <Label>Kapacitet (t) *</Label>
                 <Input
-                  value={form.location}
-                  onChange={(e) => setForm({ ...form, location: e.target.value })}
-                  placeholder="e.g., Zagreb"
+                  type="number"
+                  step="0.5"
+                  value={form.capacity}
+                  onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                  placeholder="npr. 50"
+                  required
                 />
               </div>
               <div className="space-y-2">
-                <Label>Daily Rate (€)</Label>
+                <Label>Širina bazena (m)</Label>
                 <Input
-                  value={form.dailyRate}
-                  onChange={(e) => setForm({ ...form, dailyRate: e.target.value })}
-                  placeholder="e.g., 1500"
+                  type="number"
+                  step="0.1"
+                  value={form.maxPoolWidth}
+                  onChange={(e) => setForm({ ...form, maxPoolWidth: e.target.value })}
+                  placeholder="npr. 8.5"
                 />
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Image URL</Label>
+              <Label>Lokacija/Bazen</Label>
               <Input
-                value={form.imageUrl}
-                onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-                placeholder="https://..."
+                value={form.location}
+                onChange={(e) => setForm({ ...form, location: e.target.value })}
+                placeholder="npr. Bazen 1 - Operativna obala sjever"
               />
             </div>
             <div className="space-y-2">
-              <Label>Description</Label>
+              <Label>Opis</Label>
               <Textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
-                placeholder="Describe the crane specifications..."
+                placeholder="Opis tehničkih specifikacija dizalice..."
                 rows={3}
               />
             </div>

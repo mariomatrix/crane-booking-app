@@ -4,37 +4,42 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { LangProvider } from "./contexts/LangContext";
 import Home from "./pages/Home";
 import NewReservation from "./pages/NewReservation";
 import MyReservations from "./pages/MyReservations";
+import AuthPage from "./pages/AuthPage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminReservations from "./pages/admin/AdminReservations";
 import AdminCranes from "./pages/admin/AdminCranes";
+import AdminCalendar from "./pages/admin/AdminCalendar";
+import AdminSettings from "./pages/admin/AdminSettings";
 
 function Router() {
   return (
     <Switch>
       {/* Public routes */}
       <Route path="/" component={Home} />
+      <Route path="/auth" component={AuthPage} />
       <Route path="/new-reservation" component={NewReservation} />
       <Route path="/my-reservations" component={MyReservations} />
 
       {/* Admin routes */}
       <Route path="/admin">
-        <AdminLayout>
-          <AdminDashboard />
-        </AdminLayout>
+        <AdminLayout><AdminDashboard /></AdminLayout>
       </Route>
       <Route path="/admin/reservations">
-        <AdminLayout>
-          <AdminReservations />
-        </AdminLayout>
+        <AdminLayout><AdminReservations /></AdminLayout>
       </Route>
       <Route path="/admin/cranes">
-        <AdminLayout>
-          <AdminCranes />
-        </AdminLayout>
+        <AdminLayout><AdminCranes /></AdminLayout>
+      </Route>
+      <Route path="/admin/calendar">
+        <AdminLayout><AdminCalendar /></AdminLayout>
+      </Route>
+      <Route path="/admin/settings">
+        <AdminLayout><AdminSettings /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />
@@ -46,11 +51,13 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="light">
-        <TooltipProvider>
-          <Toaster />
-          <Router />
-        </TooltipProvider>
+      <ThemeProvider defaultTheme="dark">
+        <LangProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Router />
+          </TooltipProvider>
+        </LangProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

@@ -2,7 +2,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
-import { CraneTypeBadge } from "@/components/CraneTypeBadge";
 import { trpc } from "@/lib/trpc";
 import { ArrowLeft, CalendarDays, Loader2, MapPin, Plus, X } from "lucide-react";
 import { useLocation } from "wouter";
@@ -127,8 +126,8 @@ export default function MyReservations() {
                         <span className="font-medium">
                           {reservation.crane?.name ?? `Crane #${reservation.craneId}`}
                         </span>
-                        {reservation.crane?.type && (
-                          <CraneTypeBadge type={reservation.crane.type} />
+                        {reservation.crane?.location && (
+                          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded ml-1">{reservation.crane.location}</span>
                         )}
                         <StatusBadge status={reservation.status} />
                       </div>
@@ -136,10 +135,10 @@ export default function MyReservations() {
                         <CalendarDays className="h-3.5 w-3.5" />
                         {formatDate(reservation.startDate)} — {formatDate(reservation.endDate)}
                       </div>
-                      {reservation.projectLocation && (
+                      {reservation.liftPurpose && (
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <MapPin className="h-3.5 w-3.5" />
-                          {reservation.projectLocation}
+                          {reservation.liftPurpose}
                         </div>
                       )}
                       {reservation.adminNotes && (

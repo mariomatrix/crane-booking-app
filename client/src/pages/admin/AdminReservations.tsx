@@ -131,15 +131,15 @@ export default function AdminReservations() {
                       <span className="font-medium">
                         {reservation.crane?.name ?? `Crane #${reservation.craneId}`}
                       </span>
-                      {reservation.crane?.type && (
-                        <CraneTypeBadge type={reservation.crane.type} />
+                      {reservation.crane?.location && (
+                        <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">{reservation.crane.location}</span>
                       )}
                       <StatusBadge status={reservation.status} />
                     </div>
 
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <User className="h-3.5 w-3.5" />
-                      {reservation.user?.name ?? "Unknown"} {reservation.user?.organization ? `(${reservation.user.organization})` : ""}
+                      {reservation.user?.name ?? "Unknown"} {reservation.user?.phone ? `(${reservation.user.phone})` : ""}
                       {reservation.user?.email && (
                         <span className="text-xs">— {reservation.user.email}</span>
                       )}
@@ -150,16 +150,15 @@ export default function AdminReservations() {
                       {formatDate(reservation.startDate)} — {formatDate(reservation.endDate)}
                     </div>
 
-                    {reservation.projectLocation && (
+                    {reservation.vesselName && (
                       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <MapPin className="h-3.5 w-3.5" />
-                        {reservation.projectLocation}
+                        <span className="font-medium">Brod:</span> {reservation.vesselName} ({reservation.vesselType})
                       </div>
                     )}
 
-                    {reservation.projectDescription && (
+                    {reservation.liftPurpose && (
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                        {reservation.projectDescription}
+                        <span className="font-medium">Svrha:</span> {reservation.liftPurpose}
                       </p>
                     )}
 
