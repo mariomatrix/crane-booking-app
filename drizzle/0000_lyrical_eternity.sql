@@ -1,7 +1,22 @@
-CREATE TYPE "public"."role" AS ENUM('user', 'admin');--> statement-breakpoint
-CREATE TYPE "public"."status" AS ENUM('pending', 'approved', 'rejected', 'cancelled');--> statement-breakpoint
-CREATE TYPE "public"."vessel_type" AS ENUM('sailboat', 'motorboat', 'catamaran');--> statement-breakpoint
-CREATE TABLE "audit_log" (
+DO $$ BEGIN
+ CREATE TYPE "public"."role" AS ENUM('user', 'admin');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."status" AS ENUM('pending', 'approved', 'rejected', 'cancelled');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ CREATE TYPE "public"."vessel_type" AS ENUM('sailboat', 'motorboat', 'catamaran');
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "audit_log" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"userId" integer,
 	"action" varchar(100) NOT NULL,
@@ -11,7 +26,7 @@ CREATE TABLE "audit_log" (
 	"createdAt" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "cranes" (
+CREATE TABLE IF NOT EXISTS "cranes" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" varchar(255) NOT NULL,
 	"capacity" numeric(10, 2) NOT NULL,
@@ -23,7 +38,7 @@ CREATE TABLE "cranes" (
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "reservations" (
+CREATE TABLE IF NOT EXISTS "reservations" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"userId" integer NOT NULL,
 	"craneId" integer NOT NULL,
@@ -45,13 +60,13 @@ CREATE TABLE "reservations" (
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "settings" (
+CREATE TABLE IF NOT EXISTS "settings" (
 	"key" varchar(100) PRIMARY KEY NOT NULL,
 	"value" text NOT NULL,
 	"updatedAt" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "users" (
+CREATE TABLE IF NOT EXISTS "users" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"openId" varchar(64),
 	"passwordHash" varchar(255),
@@ -69,7 +84,7 @@ CREATE TABLE "users" (
 	CONSTRAINT "users_email_unique" UNIQUE("email")
 );
 --> statement-breakpoint
-CREATE TABLE "waiting_list" (
+CREATE TABLE IF NOT EXISTS "waiting_list" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"userId" integer NOT NULL,
 	"craneId" integer NOT NULL,
