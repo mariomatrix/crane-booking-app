@@ -28,6 +28,8 @@ import {
   Home,
   LogOut,
   PanelLeft,
+  Settings,
+  Users,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -38,6 +40,8 @@ const menuItems = [
   { icon: Home, label: "Dashboard", path: "/admin" },
   { icon: ClipboardList, label: "Reservations", path: "/admin/reservations" },
   { icon: Construction, label: "Crane Fleet", path: "/admin/cranes" },
+  { icon: Users, label: "Users", path: "/admin/users" },
+  { icon: Settings, label: "Settings", path: "/admin/settings" },
   { icon: CalendarDays, label: "Public Calendar", path: "/" },
 ];
 

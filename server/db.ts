@@ -75,6 +75,18 @@ export async function getUserById(id: number) {
   return res[0];
 }
 
+export async function listAllUsers() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(users).orderBy(users.name, users.email);
+}
+
+export async function updateUserRole(id: number, role: "user" | "admin") {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
 // ─── Cranes ───────────────────────────────────────────────────────────
 export async function listCranes(activeOnly = true) {
   const db = await getDb();

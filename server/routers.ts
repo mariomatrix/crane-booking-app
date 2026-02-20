@@ -27,6 +27,8 @@ import {
   removeFromWaitingList,
   getAllSettings,
   updateSetting,
+  listAllUsers,
+  updateUserRole,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import { notifyOwner } from "./_core/notification";
@@ -156,6 +158,34 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+  }),
+
+  // ─── User Management (Admin) ──────────────────────────────────────────
+  user: router({
+    list: adminProcedure.query(async () => {
+      return listAllUsers();
+    }),
+
+    setRole: adminProcedure
+      .input(z.object({ id: z.number(), role: z.enum(["user", "admin"]) }))
+      .mutation(async ({ input, ctx }) => {
+        // Prevent self-demotion to avoid locking oneself out
+        if (input.id === ctx.user.id) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Ne možete sami sebi promijeniti rolu.",
+          });
+        }
+        await updateUserRole(input.id, input.role);
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "user_role_updated",
+          entityType: "user",
+          entityId: input.id,
+          details: JSON.stringify({ role: input.role }),
+        });
+        return { success: true };
+      }),
   }),
 
   // ─── Cranes ──────────────────────────────────────────────────────────

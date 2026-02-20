@@ -15,6 +15,7 @@ import AdminReservations from "./pages/admin/AdminReservations";
 import AdminCranes from "./pages/admin/AdminCranes";
 import AdminCalendar from "./pages/admin/AdminCalendar";
 import AdminSettings from "./pages/admin/AdminSettings";
+import AdminUsers from "./pages/admin/AdminUsers";
 
 function Router() {
   return (
@@ -40,6 +41,9 @@ function Router() {
       </Route>
       <Route path="/admin/settings">
         <AdminLayout><AdminSettings /></AdminLayout>
+      </Route>
+      <Route path="/admin/users">
+        <AdminLayout><AdminUsers /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />
