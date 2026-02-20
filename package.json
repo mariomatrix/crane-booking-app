@@ -10,7 +10,7 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "npm exec drizzle-kit push"
+    "db:push": "node -e \"require('drizzle-kit/bin')\" push"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
