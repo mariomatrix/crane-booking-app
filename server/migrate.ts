@@ -17,6 +17,20 @@ async function runMigration() {
 
     console.log("Migrations check completed.");
 
+    // Seed data
+    const { cranes } = await import("../drizzle/schema");
+    const existingCranes = await db.select().from(cranes);
+
+    if (existingCranes.length === 0) {
+        console.log("Seeding cranes...");
+        await db.insert(cranes).values([
+            { name: "Mala dizalica", capacity: "5", description: "Za manja plovila do 5 tona" },
+            { name: "Srednja dizalica", capacity: "20", description: "Standardna dizalica do 20 tona" },
+            { name: "Velika dizalica", capacity: "50", description: "Travel lift do 50 tona" },
+        ]);
+        console.log("Cranes seeded successfully.");
+    }
+
     await migrationClient.end();
 }
 
