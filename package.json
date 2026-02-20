@@ -10,7 +10,7 @@
     "check": "tsc --noEmit",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:push": "node node_modules/drizzle-kit/bin.cjs push"
+    "db:push": "./node_modules/.bin/drizzle-kit push"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.693.0",
