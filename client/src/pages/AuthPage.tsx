@@ -167,8 +167,8 @@ export default function AuthPage() {
                                     <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="npr. mario123" />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label>{t.auth.phone}</Label>
-                                    <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" />
+                                    <Label>{t.auth.phone} *</Label>
+                                    <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
                                 </div>
                             </>
                         )}

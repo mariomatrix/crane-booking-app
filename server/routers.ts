@@ -126,7 +126,7 @@ export const appRouter = router({
         firstName: z.string().min(1).max(100),
         lastName: z.string().min(1).max(100),
         username: z.string().optional(),
-        phone: z.string().optional(),
+        phone: z.string().min(1),
       }))
       .mutation(async ({ input, ctx }) => {
         const existing = await getUserByEmail(input.email);
