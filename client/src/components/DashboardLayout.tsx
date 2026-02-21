@@ -119,12 +119,12 @@ function DashboardLayoutContent({
   const [location, setLocation] = useLocation();
 
   const menuItems = [
+    { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
     { icon: Users, label: t.admin.users, path: "/admin/users" },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings" },
-    { icon: CalendarDays, label: t.nav.calendar, path: "/" },
   ];
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
