@@ -26,7 +26,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { addDays, startOfDay, format, parseISO } from "date-fns";
+import { addDays, startOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
+import { hr, enUS } from "date-fns/locale";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { CalendarIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
     pending: "#f59e0b",
@@ -67,6 +72,14 @@ export default function AdminCalendar() {
     const [maintStart, setMaintStart] = useState("08:00");
     const [maintEnd, setMaintEnd] = useState("09:00");
     const [maintDesc, setMaintDesc] = useState("");
+
+    // Edit Reservation Form State
+    const [isEditOpen, setIsEditOpen] = useState(false);
+    const [editingRes, setEditingRes] = useState<any>(null);
+    const [editDate, setEditDate] = useState<Date | undefined>(undefined);
+    const [editStart, setEditStart] = useState("");
+    const [editEnd, setEditEnd] = useState("");
+    const [editCraneId, setEditCraneId] = useState("");
 
     // Mutations
     const rescheduleMutation = trpc.reservation.reschedule.useMutation({
@@ -125,6 +138,41 @@ export default function AdminCalendar() {
             startDate: start,
             endDate: end,
             description: maintDesc,
+        });
+    };
+
+    const handleEventClick = (info: any) => {
+        const p = info.event.extendedProps;
+        if (p.isMaintenance) return;
+
+        const res = allReservations.find((r: any) => r.id === p.reservationId);
+        if (res) {
+            setEditingRes(res);
+            setEditDate(new Date(res.startDate));
+            setEditStart(format(new Date(res.startDate), "HH:mm"));
+            setEditEnd(format(new Date(res.endDate), "HH:mm"));
+            setEditCraneId(String(res.craneId));
+            setIsEditOpen(true);
+        }
+    };
+
+    const handleUpdateRes = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingRes || !editDate) return;
+
+        const [hS, mS] = editStart.split(":").map(Number);
+        const [hE, mE] = editEnd.split(":").map(Number);
+
+        const startDate = setMinutes(setHours(startOfDay(editDate), hS), mS);
+        const endDate = setMinutes(setHours(startOfDay(editDate), hE), mE);
+
+        rescheduleMutation.mutate({
+            id: editingRes.id,
+            startDate,
+            endDate,
+            craneId: Number(editCraneId)
+        }, {
+            onSuccess: () => setIsEditOpen(false)
         });
     };
 
@@ -266,6 +314,73 @@ export default function AdminCalendar() {
                             </form>
                         </DialogContent>
                     </Dialog>
+                    <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
+                        <DialogContent className="max-w-md">
+                            <form onSubmit={handleUpdateRes}>
+                                <DialogHeader>
+                                    <DialogTitle>Uredi rezervaciju</DialogTitle>
+                                    <DialogDescription>
+                                        ID #{editingRes?.id} - {editingRes?.vesselName} ({editingRes?.user?.name})
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="grid gap-5 py-6">
+                                    <div className="grid gap-2">
+                                        <Label>Datum</Label>
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant={"outline"}
+                                                    className={cn(
+                                                        "w-full justify-start text-left font-normal",
+                                                        !editDate && "text-muted-foreground"
+                                                    )}
+                                                >
+                                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                                    {editDate ? format(editDate, "PPP", { locale: lang === 'hr' ? hr : enUS }) : <span>Odaberi datum</span>}
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0" align="start">
+                                                <Calendar
+                                                    mode="single"
+                                                    selected={editDate}
+                                                    onSelect={setEditDate}
+                                                    initialFocus
+                                                />
+                                            </PopoverContent>
+                                        </Popover>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid gap-2">
+                                            <Label>Vrijeme početka</Label>
+                                            <Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} required />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label>Vrijeme završetka</Label>
+                                            <Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} required />
+                                        </div>
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Dizalica</Label>
+                                        <Select value={editCraneId} onValueChange={setEditCraneId} required>
+                                            <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
+                                            <SelectContent>
+                                                {cranesList.map((c: any) => (
+                                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
+                                    <Button type="submit" disabled={rescheduleMutation.isPending}>
+                                        {rescheduleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Spremi promjene
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
                     <Button variant="secondary" onClick={() => window.print()} className="gap-2">
                         <Printer className="h-4 w-4" />
                         <span className="hidden sm:inline">Ispiši dnevni plan</span>
@@ -371,6 +486,7 @@ export default function AdminCalendar() {
                         height="100%"
                         editable={true}
                         eventDrop={handleEventDrop}
+                        eventClick={handleEventClick}
                         events={calendarEvents}
                         dayHeaderContent={(arg) => {
                             const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
