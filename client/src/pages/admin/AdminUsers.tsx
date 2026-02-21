@@ -28,7 +28,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { LOADER_STYLE } from "@/const";
 import { useLang } from "@/contexts/LangContext";
 import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2 } from "lucide-react";
 import { useState } from "react";
@@ -146,7 +145,7 @@ export default function AdminUsers() {
                                     <TableCell>
                                         <Select
                                             defaultValue={user.role}
-                                            onValueChange={(val) =>
+                                            onValueChange={(val: string) =>
                                                 setRole.mutate({ id: user.id, role: val as "user" | "admin" })
                                             }
                                             disabled={setRole.isPending}
@@ -214,7 +213,7 @@ export default function AdminUsers() {
             </Card>
 
             {/* Reset Password Dialog */}
-            <Dialog open={!!resetUser} onOpenChange={(open) => !open && setResetUser(null)}>
+            <Dialog open={!!resetUser} onOpenChange={(open: boolean) => !open && setResetUser(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Reset lozinke za: {resetUser?.name}</DialogTitle>
@@ -247,7 +246,7 @@ export default function AdminUsers() {
             </Dialog>
 
             {/* Edit User Dialog */}
-            <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
+            <Dialog open={!!editUser} onOpenChange={(open: boolean) => !open && setEditUser(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>{t.admin.editUser}: {editUser?.email}</DialogTitle>
@@ -311,7 +310,7 @@ export default function AdminUsers() {
             </Dialog>
 
             {/* Delete User Confirmation */}
-            <Dialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
+            <Dialog open={!!deleteUser} onOpenChange={(open: boolean) => !open && setDeleteUser(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Obriši korisnika: {deleteUser?.name}</DialogTitle>
