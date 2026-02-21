@@ -21,8 +21,9 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { CalendarDays, Check, Loader2, MapPin, User, X } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useLocation } from "wouter";
 
 function formatDate(date: Date | string) {
   return new Date(date).toLocaleDateString("en-US", {
@@ -38,7 +39,17 @@ export default function AdminReservations() {
   const [dialogAction, setDialogAction] = useState<"approve" | "reject">("approve");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [adminNotes, setAdminNotes] = useState("");
+  const [[,], setLocation] = useLocation();
   const utils = trpc.useUtils();
+
+  // Handle status filter from URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("status");
+    if (status && ["pending", "approved", "rejected", "cancelled", "all"].includes(status)) {
+      setStatusFilter(status);
+    }
+  }, []);
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.listAll.useQuery(
     { status: statusFilter !== "all" ? statusFilter : undefined }
