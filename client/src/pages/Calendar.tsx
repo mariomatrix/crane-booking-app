@@ -121,16 +121,6 @@ export default function Calendar() {
     refetch();
   };
 
-  const BookingComponent = () => (
-    <div className="p-1 sm:p-0">
-      <ReservationForm
-        initialData={initialFormData}
-        onSuccess={closeBooking}
-        onCancel={() => setBookingOpen(false)}
-      />
-    </div>
-  );
-
   return (
     <div className="min-h-screen bg-background pb-12">
       <style>
@@ -249,7 +239,13 @@ export default function Calendar() {
             <DialogHeader>
               <DialogTitle>{t.form.title}</DialogTitle>
             </DialogHeader>
-            <BookingComponent />
+            <div className="p-1 sm:p-0">
+              <ReservationForm
+                initialData={initialFormData}
+                onSuccess={closeBooking}
+                onCancel={() => setBookingOpen(false)}
+              />
+            </div>
           </DialogContent>
         </Dialog>
       ) : (
@@ -259,7 +255,11 @@ export default function Calendar() {
               <DrawerTitle>{t.form.title}</DrawerTitle>
             </DrawerHeader>
             <div className="px-4 pb-8 overflow-y-auto">
-              <BookingComponent />
+              <ReservationForm
+                initialData={initialFormData}
+                onSuccess={closeBooking}
+                onCancel={() => setBookingOpen(false)}
+              />
             </div>
           </DrawerContent>
         </Drawer>

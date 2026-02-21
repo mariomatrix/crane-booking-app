@@ -86,13 +86,12 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
 
     // Handle case where initial startTime is provided but might not be in slotsData 
     // (e.g. if it's already busy, we want it to be selected so we can show the "waiting list" UI)
+    // Initialize startTime from initialData only once per set of initialData
     useEffect(() => {
         if (initialData?.startTime) {
             setStartTime(initialData.startTime);
-        } else {
-            setStartTime("");
         }
-    }, [craneId, selectedDate, slotCount, initialData?.startTime]);
+    }, [initialData]);
 
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
@@ -166,8 +165,9 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
     };
 
     const isStartTimeAvailable = useMemo(() => {
-        if (!startTime || !slotsData) return true;
-        return slotsData.availableStarts.includes(startTime);
+        if (!startTime || !slotsData?.availableStarts) return true;
+        const startTs = new Date(startTime).getTime();
+        return slotsData.availableStarts.some((s: string | Date) => new Date(s).getTime() === startTs);
     }, [startTime, slotsData]);
 
     const noSlots = canFetchSlots && !slotsFetching && (slotsData?.availableStarts.length === 0);
