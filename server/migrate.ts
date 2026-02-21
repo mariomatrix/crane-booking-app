@@ -18,9 +18,12 @@ async function runMigration() {
     console.log("Migrations check completed.");
 
     // Seed data
-    const { cranes } = await import("../drizzle/schema");
-    const existingCranes = await db.select().from(cranes);
+    const { cranes, users } = await import("../drizzle/schema");
+    const { eq } = await import("drizzle-orm");
+    const bcrypt = await import("bcryptjs");
 
+    // Crane seeding
+    const existingCranes = await db.select().from(cranes);
     if (existingCranes.length === 0) {
         console.log("Seeding cranes...");
         await db.insert(cranes).values([
@@ -29,6 +32,23 @@ async function runMigration() {
             { name: "Velika dizalica", capacity: "50", description: "Travel lift do 50 tona" },
         ]);
         console.log("Cranes seeded successfully.");
+    }
+
+    // Admin seeding
+    const existingAdmins = await db.select().from(users).where(eq(users.role, "admin"));
+    if (existingAdmins.length === 0) {
+        console.log("Seeding initial admin...");
+        const passwordHash = await bcrypt.default.hash("Spinut", 12);
+        await db.insert(users).values({
+            email: "admin@spinut.hr",
+            passwordHash,
+            firstName: "Admin",
+            lastName: "Spinut",
+            name: "Admin Spinut",
+            role: "admin",
+            loginMethod: "email",
+        });
+        console.log("Initial admin created (admin@spinut.hr / Spinut).");
     }
 
     await migrationClient.end();
