@@ -92,7 +92,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
 
     // Sync phone from user profile
     useEffect(() => {
-        if (user?.phone && (contactPhone === "" || contactPhone === undefined)) {
+        if (user?.phone && !contactPhone) {
             setContactPhone(user.phone);
         }
     }, [user?.phone, contactPhone]);
@@ -274,10 +274,15 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                 </div>
                             )}
 
+                            <div className="space-y-2">
+                                <Label>{t.form.vesselName} *</Label>
+                                <Input value={vesselName} onChange={(e) => setVesselName(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
+                            </div>
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>{t.form.vesselType} *</Label>
-                                    <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId}>
+                                    <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId && vesselId !== "new"}>
                                         <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="sailboat">{t.form.vesselTypeSailboat}</SelectItem>
@@ -288,21 +293,21 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                 </div>
                                 <div className="space-y-2">
                                     <Label>{t.form.vesselWeight} (t) *</Label>
-                                    <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} required disabled={!!vesselId} />
+                                    <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
                                 </div>
                             </div>
                             <div className="grid grid-cols-3 gap-2">
                                 <div className="space-y-1">
                                     <Label className="text-xs">{t.form.vesselLength} (m)</Label>
-                                    <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} required disabled={!!vesselId} />
+                                    <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
                                 </div>
                                 <div className="space-y-1">
                                     <Label className="text-xs">{t.form.vesselWidth} (m)</Label>
-                                    <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} required disabled={!!vesselId} />
+                                    <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
                                 </div>
                                 <div className="space-y-1">
                                     <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
-                                    <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} required disabled={!!vesselId} />
+                                    <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
                                 </div>
                             </div>
                             {validationWarning && (
