@@ -10,6 +10,7 @@ import {
   Plus,
   Settings,
   Construction,
+  Ship,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -62,7 +63,16 @@ export default function Home() {
                   className="text-sm"
                 >
                   <ClipboardList className="h-4 w-4 mr-1.5" />
-                  <span className="hidden sm:inline">My Reservations</span>
+                  <span className="hidden sm:inline">{t.nav.myReservations}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setLocation("/my-vessels")}
+                  className="text-sm"
+                >
+                  <Ship className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">{t.nav.vessels}</span>
                 </Button>
                 <Button
                   size="sm"
@@ -70,7 +80,7 @@ export default function Home() {
                   className="text-sm"
                 >
                   <Plus className="h-4 w-4 mr-1.5" />
-                  <span className="hidden sm:inline">New Reservation</span>
+                  <span className="hidden sm:inline">{t.nav.newReservation}</span>
                 </Button>
               </>
             )}
@@ -96,7 +106,11 @@ export default function Home() {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setLocation("/my-reservations")}>
                     <ClipboardList className="h-4 w-4 mr-2" />
-                    My Reservations
+                    {t.nav.myReservations}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation("/my-vessels")}>
+                    <Ship className="h-4 w-4 mr-2" />
+                    {t.nav.vessels}
                   </DropdownMenuItem>
                   {user.role === "admin" && (
                     <>

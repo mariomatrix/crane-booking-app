@@ -8,6 +8,20 @@ import { trpc } from "@/lib/trpc";
 import { useMemo } from "react";
 import { useLang } from "@/contexts/LangContext";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+    DialogFooter,
+    DialogDescription
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Printer, Hammer, Loader2 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
     pending: "#f59e0b",
@@ -28,9 +42,17 @@ export default function AdminCalendar() {
     const workStart = sysSettings?.workdayStart ?? "08:00";
     const workEnd = sysSettings?.workdayEnd ?? "16:00";
 
+    // Maintenance Form State
+    const [isMaintOpen, setIsMaintOpen] = useState(false);
+    const [maintCraneId, setMaintCraneId] = useState("");
+    const [maintDate, setMaintDate] = useState(new Date().toISOString().split("T")[0]);
+    const [maintStart, setMaintStart] = useState("08:00");
+    const [maintEnd, setMaintEnd] = useState("09:00");
+    const [maintDesc, setMaintDesc] = useState("");
+
     const craneColorMap = useMemo(() => {
         const map: Record<number, string> = {};
-        cranesList.forEach((c, i) => { map[c.id] = CRANE_COLORS[i % CRANE_COLORS.length]; });
+        cranesList.forEach((c: any, i: number) => { map[c.id] = CRANE_COLORS[i % CRANE_COLORS.length]; });
         return map;
     }, [cranesList]);
 
@@ -39,28 +61,52 @@ export default function AdminCalendar() {
             toast.success("Termin je premješten.");
             utils.reservation.listAll.invalidate();
         },
-        onError: (err) => {
+        onError: (err: any) => {
             toast.error(err.message);
             utils.reservation.listAll.invalidate(); // revert
         },
     });
 
+    const maintenanceMutation = trpc.maintenance.create.useMutation({
+        onSuccess: () => {
+            toast.success("Održavanje je zabilježeno.");
+            utils.reservation.listAll.invalidate();
+            setIsMaintOpen(false);
+            setMaintDesc("");
+        },
+        onError: (err: any) => toast.error(err.message),
+    });
+
+    const handleCreateMaintenance = (e: React.FormEvent) => {
+        e.preventDefault();
+        const start = new Date(`${maintDate}T${maintStart}:00`);
+        const end = new Date(`${maintDate}T${maintEnd}:00`);
+        maintenanceMutation.mutate({
+            craneId: Number(maintCraneId),
+            startDate: start,
+            endDate: end,
+            description: maintDesc,
+        });
+    };
+
     const calendarEvents = useMemo(
         () =>
             allReservations
-                .filter((r) => r.status === "approved" || r.status === "pending")
-                .map((r) => ({
+                .map((r: any) => ({
                     id: String(r.id),
-                    title: `${r.crane?.name ?? "?"} — ${r.user?.name ?? ""}`,
+                    title: r.isMaintenance
+                        ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
+                        : `${r.crane?.name ?? "?"} — ${r.user?.name ?? ""}`,
                     start: new Date(r.startDate),
                     end: new Date(r.endDate),
-                    backgroundColor: STATUS_COLORS[r.status] ?? "#6b7280",
+                    backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
                     borderColor: craneColorMap[r.craneId] ?? "transparent",
                     borderWidth: 2,
-                    editable: r.status === "approved",
+                    editable: r.status === "approved" && !r.isMaintenance,
                     extendedProps: {
                         reservationId: r.id,
                         status: r.status,
+                        isMaintenance: r.isMaintenance,
                         vesselWeight: r.vesselWeight,
                         liftPurpose: r.liftPurpose,
                     },
@@ -77,11 +123,75 @@ export default function AdminCalendar() {
 
     return (
         <div className="space-y-4">
-            <div>
-                <h2 className="text-xl font-semibold">Kalendar</h2>
-                <p className="text-sm text-muted-foreground">
-                    Drag-and-drop odobrenih rezervacija za preslaganje.
-                </p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 className="text-xl font-semibold">Kalendar</h2>
+                    <p className="text-sm text-muted-foreground">
+                        Drag-and-drop odobrenih rezervacija za preslaganje.
+                    </p>
+                </div>
+                <div className="flex items-center gap-2 print:hidden">
+                    <Button variant="outline" onClick={() => window.print()}>
+                        <Printer className="h-4 w-4 mr-2" />
+                        Dnevni izvještaj
+                    </Button>
+
+                    <Dialog open={isMaintOpen} onOpenChange={setIsMaintOpen}>
+                        <DialogTrigger asChild>
+                            <Button variant="secondary">
+                                <Hammer className="h-4 w-4 mr-2" />
+                                Zabilježi održavanje
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent>
+                            <form onSubmit={handleCreateMaintenance}>
+                                <DialogHeader>
+                                    <DialogTitle>Zabilježi održavanje</DialogTitle>
+                                    <DialogDescription>
+                                        Odredite vrijeme kada dizalica neće biti dostupna korisnicima.
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="grid gap-4 py-4">
+                                    <div className="grid gap-2">
+                                        <Label>Dizalica</Label>
+                                        <Select value={maintCraneId} onValueChange={setMaintCraneId} required>
+                                            <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
+                                            <SelectContent>
+                                                {cranesList.map((c: any) => (
+                                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Datum</Label>
+                                        <Input type="date" value={maintDate} onChange={(e: any) => setMaintDate(e.target.value)} required />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid gap-2">
+                                            <Label>Početak</Label>
+                                            <Input type="time" step="3600" value={maintStart} onChange={(e: any) => setMaintStart(e.target.value)} required />
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label>Kraj</Label>
+                                            <Input type="time" step="3600" value={maintEnd} onChange={(e: any) => setMaintEnd(e.target.value)} required />
+                                        </div>
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Opis (opcionalno)</Label>
+                                        <Input value={maintDesc} onChange={(e: any) => setMaintDesc(e.target.value)} placeholder="Zabilješka o radovima..." />
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button type="submit" disabled={maintenanceMutation.isPending}>
+                                        {maintenanceMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Spremi blokadu
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
+                </div>
             </div>
             <FullCalendar
                 plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
@@ -103,9 +213,11 @@ export default function AdminCalendar() {
                 height="auto"
                 editable
                 eventDrop={handleEventDrop}
-                eventContent={(arg) => (
+                eventContent={(arg: any) => (
                     <div className="px-1.5 py-0.5 text-white text-xs font-medium truncate">
-                        <span className={`inline-block h-2 w-2 rounded-full mr-1 ${arg.event.extendedProps.status === "pending" ? "bg-amber-300" : "bg-green-300"}`} />
+                        {!arg.event.extendedProps.isMaintenance && (
+                            <span className={`inline-block h-2 w-2 rounded-full mr-1 ${arg.event.extendedProps.status === "pending" ? "bg-amber-300" : "bg-green-300"}`} />
+                        )}
                         {arg.event.title}
                     </div>
                 )}

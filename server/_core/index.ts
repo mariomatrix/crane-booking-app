@@ -59,6 +59,8 @@ async function startServer() {
 
   server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
+    // Phase 2: Start background services
+    import("../services/notifications").then(m => m.startNotificationCron()).catch(console.error);
   });
 }
 

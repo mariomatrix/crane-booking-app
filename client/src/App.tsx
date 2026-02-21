@@ -8,6 +8,7 @@ import { LangProvider } from "./contexts/LangContext";
 import Home from "./pages/Home";
 import NewReservation from "./pages/NewReservation";
 import MyReservations from "./pages/MyReservations";
+import MyVessels from "./pages/MyVessels";
 import AuthPage from "./pages/AuthPage";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/auth" component={AuthPage} />
       <Route path="/new-reservation" component={NewReservation} />
       <Route path="/my-reservations" component={MyReservations} />
+      <Route path="/my-vessels" component={MyVessels} />
 
       {/* Admin routes */}
       <Route path="/admin">

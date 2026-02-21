@@ -9,6 +9,21 @@ export const hr = {
         signOut: "Odjava",
         adminPanel: "Admin panel",
         language: "Jezik",
+        vessels: "Moja plovila",
+    },
+    // Vessels
+    vessels: {
+        title: "Moja plovila",
+        subtitle: "Upravljajte svojim plovilima za bržu rezervaciju",
+        addVessel: "Dodaj plovilo",
+        editVessel: "Uredi plovilo",
+        noVessels: "Nemate spremljenih plovila.",
+        vesselName: "Naziv plovila",
+        vesselType: "Tip plovila",
+        dimensions: "Dimenzije",
+        save: "Spremi plovilo",
+        delete: "Obriši",
+        deleteConfirm: "Jeste li sigurni da želite obrisati ovo plovilo?",
     },
     // Calendar
     calendar: {
@@ -118,6 +133,8 @@ export const hr = {
         settingsWorkEnd: "Kraj radnog vremena",
         utilization: "Iskorištenost",
         todaySchedule: "Raspored za danas",
+        maintenance: "ODRŽAVANJE",
+        createMaintenance: "Zabilježi održavanje",
     },
 };
 

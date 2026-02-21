@@ -29,8 +29,14 @@ import {
   updateSetting,
   listAllUsers,
   updateUserRole,
+  listVesselsByUser,
+  getVesselById,
+  createVessel,
+  updateVessel,
+  deleteVessel,
 } from "./db";
 import { TRPCError } from "@trpc/server";
+import { notifyWaitingList } from "./services/notifications";
 import { notifyOwner } from "./_core/notification";
 import {
   sendReservationConfirmation,
@@ -79,16 +85,24 @@ async function validateSlotAgainstSettings(
     });
   }
 
-  // Duration must be a positive multiple of slot duration
-  const durationMin = (endDate.getTime() - startDate.getTime()) / 60000;
-  if (durationMin <= 0 || durationMin % slotMin !== 0) {
+  // Phase 2: Strictly hourly slots (XX:00)
+  if (startDate.getMinutes() !== 0 || startDate.getSeconds() !== 0) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Trajanje mora biti višekratnik od ${slotMin} minuta.`,
+      message: "Termini moraju početi točno na puni sat (npr. 08:00).",
     });
   }
 
-  return { bufferMin };
+  // Duration must be a multiple of 60
+  const durationMin = (endDate.getTime() - startDate.getTime()) / 60000;
+  if (durationMin <= 0 || durationMin % 60 !== 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Trajanje mora biti višekratnik od 60 minuta (1, 2 ili 3 sata).",
+    });
+  }
+
+  return { bufferMin: 0 }; // No separate buffer in Phase 2
 }
 
 // ─── Main Router ──────────────────────────────────────────────────────
@@ -137,7 +151,7 @@ export const appRouter = router({
         email: z.string().email(),
         password: z.string(),
       }))
-      .mutation(async ({ input, ctx }) => {
+      .mutation(async ({ input, ctx }: any) => {
         const user = await getUserByEmail(input.email);
         if (!user || !user.passwordHash) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Pogrešan email ili lozinka." });
@@ -160,6 +174,66 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+  }),
+
+  // ─── Vessels ──────────────────────────────────────────────────────────
+  vessel: router({
+    listMine: protectedProcedure.query(async ({ ctx }) => {
+      return listVesselsByUser(ctx.user.id);
+    }),
+
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input, ctx }) => {
+        const vessel = await getVesselById(input.id);
+        if (!vessel || vessel.ownerId !== ctx.user.id) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Plovilo nije pronađeno." });
+        }
+        return vessel;
+      }),
+
+    create: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1).max(255),
+        type: z.enum(["sailboat", "motorboat", "catamaran"]),
+        length: z.string().optional(),
+        width: z.string().optional(),
+        draft: z.string().optional(),
+        weight: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }: any) => {
+        const id = await createVessel({
+          ...input,
+          ownerId: ctx.user.id,
+        } as any);
+        await createAuditEntry({ userId: ctx.user.id, action: "vessel_created", entityType: "vessel", entityId: id, details: JSON.stringify({ name: input.name }) });
+        return { id };
+      }),
+
+    update: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1).max(255).optional(),
+        type: z.enum(["sailboat", "motorboat", "catamaran"]).optional(),
+        length: z.string().optional(),
+        width: z.string().optional(),
+        draft: z.string().optional(),
+        weight: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }: any) => {
+        const { id, ...data } = input;
+        await updateVessel(id, ctx.user.id, data as any);
+        await createAuditEntry({ userId: ctx.user.id, action: "vessel_updated", entityType: "vessel", entityId: id, details: JSON.stringify(data) });
+        return { success: true };
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteVessel(input.id, ctx.user.id);
+        await createAuditEntry({ userId: ctx.user.id, action: "vessel_deleted", entityType: "vessel", entityId: input.id });
+        return { success: true };
+      }),
   }),
 
   // ─── User Management (Admin) ──────────────────────────────────────────
@@ -252,6 +326,7 @@ export const appRouter = router({
         startDate: z.date(),
         endDate: z.date(),
         // Vessel data
+        vesselId: z.number().optional(),
         vesselType: z.enum(["sailboat", "motorboat", "catamaran"]),
         vesselName: z.string().optional(),
         vesselLength: z.number().positive(),   // metres
@@ -263,6 +338,16 @@ export const appRouter = router({
         contactPhone: z.string().min(6),
       }))
       .mutation(async ({ input, ctx }) => {
+        // 1. Limit check: Max 3 active reservations
+        const myActive = await listReservationsByUser(ctx.user.id);
+        const activeCount = myActive.filter(r => r.status === "pending" || r.status === "approved").length;
+        if (activeCount >= 3) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Imate maksimalni broj aktivnih rezervacija (3). Molimo pričekajte završetak ili otkažite postojeće.",
+          });
+        }
+
         if (input.startDate >= input.endDate) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Kraj termina mora biti nakon početka." });
         }
@@ -301,12 +386,19 @@ export const appRouter = router({
           throw new TRPCError({ code: "CONFLICT", message: "Ovaj termin se preklapa s postojećom rezervacijom (uključujući tampon zonu)." });
         }
 
+        // Generate Reservation Number: REV-YY-XXXX
+        const year = new Date().getFullYear().toString().slice(-2);
+        const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const reservationNumber = `REV-${year}-${randomStr}`;
+
         const id = await createReservation({
           userId: ctx.user.id,
           craneId: input.craneId,
           startDate: input.startDate,
           endDate: input.endDate,
           status: "pending",
+          reservationNumber,
+          vesselId: input.vesselId,
           vesselType: input.vesselType,
           vesselName: input.vesselName,
           vesselLength: String(input.vesselLength),
@@ -360,6 +452,11 @@ export const appRouter = router({
         }
         await updateReservationStatus(input.id, "cancelled", ctx.user.id);
         await createAuditEntry({ userId: ctx.user.id, action: "reservation_cancelled", entityType: "reservation", entityId: input.id });
+
+        // Phase 2: Notify waiting list
+        const dateStr = reservation.startDate.toISOString().split("T")[0];
+        notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+
         return { success: true };
       }),
 
@@ -447,6 +544,10 @@ export const appRouter = router({
           }).catch(console.warn);
         }
 
+        // Phase 2: Notify waiting list
+        const dateStr = reservation.startDate.toISOString().split("T")[0];
+        notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+
         return { success: true };
       }),
 
@@ -511,8 +612,8 @@ export const appRouter = router({
       }))
       .query(async ({ input }) => {
         const sysSettings = await getAllSettings();
-        const slotMin = Number(sysSettings.slotDurationMinutes ?? "60");
-        const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
+        const slotMin = 60; // Phase 2: strictly 60 min blocks
+        const bufferMin = 0; // Phase 2: no separate buffer
         const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
         const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
 
@@ -594,6 +695,42 @@ export const appRouter = router({
         await updateSetting(input.key, input.value);
         await createAuditEntry({ userId: ctx.user.id, action: "setting_updated", entityType: "setting", entityId: null, details: JSON.stringify(input) });
         return { success: true };
+      }),
+  }),
+
+  // ─── Maintenance (Admin Only) ──────────────────────────────────────────
+  maintenance: router({
+    create: adminProcedure
+      .input(z.object({
+        craneId: z.number(),
+        startDate: z.date(),
+        endDate: z.date(),
+        description: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const hasOverlap = await checkOverlap(input.craneId, input.startDate, input.endDate);
+        if (hasOverlap) {
+          throw new TRPCError({ code: "CONFLICT", message: "Termin se preklapa s postojećim rezervacijama." });
+        }
+
+        const id = await createReservation({
+          userId: ctx.user.id,
+          craneId: input.craneId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          status: "approved",
+          isMaintenance: true,
+          liftPurpose: input.description || "Održavanje",
+          contactPhone: "ADMIN",
+          vesselType: "motorboat",
+          vesselLength: "0",
+          vesselWidth: "0",
+          vesselDraft: "0",
+          vesselWeight: "0",
+        });
+
+        await createAuditEntry({ userId: ctx.user.id, action: "maintenance_blocked", entityType: "reservation", entityId: id });
+        return { id };
       }),
   }),
 

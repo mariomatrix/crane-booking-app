@@ -44,6 +44,19 @@ export const cranes = pgTable("cranes", {
     description: text("description"),
     location: varchar("location", { length: 255 }),             // basin / berth identifier
     isActive: boolean("isActive").default(true).notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+// ─── Vessels (User-owned profiles) ───────────────────────────────────
+export const vessels = pgTable("vessels", {
+    id: serial("id").primaryKey(),
+    ownerId: integer("ownerId").notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    type: vesselTypeEnum("type").notNull(),
+    length: decimal("length", { precision: 7, scale: 2 }),
+    width: decimal("width", { precision: 6, scale: 2 }),
+    draft: decimal("draft", { precision: 5, scale: 2 }),
+    weight: decimal("weight", { precision: 8, scale: 2 }),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
@@ -56,6 +69,10 @@ export const reservations = pgTable("reservations", {
     startDate: timestamp("startDate").notNull(),
     endDate: timestamp("endDate").notNull(),
     status: statusEnum("status").default("pending").notNull(),
+    reservationNumber: varchar("reservationNumber", { length: 20 }).unique(), // e.g. REV-26-0001
+    vesselId: integer("vesselId"),                                           // Link to saved vessel
+    isMaintenance: boolean("isMaintenance").default(false).notNull(),        // "Održavanje" block
+    reminderSent: boolean("reminderSent").default(false).notNull(),          // Phase 2: 24h reminders status
 
     // Vessel info (required for safety validation)
     vesselType: vesselTypeEnum("vesselType"),
@@ -117,6 +134,10 @@ export type Crane = SelectCrane;
 export type InsertReservation = typeof reservations.$inferInsert;
 export type SelectReservation = typeof reservations.$inferSelect;
 export type Reservation = SelectReservation;
+export type InsertVessel = typeof vessels.$inferInsert;
+export type SelectVessel = typeof vessels.$inferSelect;
+export type Vessel = SelectVessel;
 export type InsertWaitingList = typeof waitingList.$inferInsert;
 export type SelectWaitingList = typeof waitingList.$inferSelect;
 export type InsertAuditLog = typeof auditLog.$inferInsert;
+export type SelectAuditLog = typeof auditLog.$inferSelect;

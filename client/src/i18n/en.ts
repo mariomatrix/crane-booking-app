@@ -10,6 +10,20 @@ export const en: Translations = {
         signOut: "Sign Out",
         adminPanel: "Admin Panel",
         language: "Language",
+        vessels: "My Vessels",
+    },
+    vessels: {
+        title: "My Vessels",
+        subtitle: "Manage your vessels for faster booking",
+        addVessel: "Add Vessel",
+        editVessel: "Edit Vessel",
+        noVessels: "You have no saved vessels.",
+        vesselName: "Vessel Name",
+        vesselType: "Vessel Type",
+        dimensions: "Dimensions",
+        save: "Save Vessel",
+        delete: "Delete",
+        deleteConfirm: "Are you sure you want to delete this vessel?",
     },
     calendar: {
         title: "Crane Availability Calendar",
@@ -114,5 +128,7 @@ export const en: Translations = {
         settingsWorkEnd: "Workday End",
         utilization: "Utilization",
         todaySchedule: "Today's Schedule",
+        maintenance: "MAINTENANCE",
+        createMaintenance: "Log Maintenance",
     },
 };

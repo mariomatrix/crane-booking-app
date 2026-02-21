@@ -27,6 +27,7 @@ export default function NewReservation() {
 
   // Form state
   const [craneId, setCraneId] = useState("");
+  const [vesselId, setVesselId] = useState("");
   const [vesselType, setVesselType] = useState("");
   const [vesselName, setVesselName] = useState("");
   const [vesselLength, setVesselLength] = useState("");
@@ -37,14 +38,15 @@ export default function NewReservation() {
   const [slotCount, setSlotCount] = useState("1");
   const [startTime, setStartTime] = useState("");
   const [liftPurpose, setLiftPurpose] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
+  const [contactPhone, setContactPhone] = useState(user?.phone || "");
 
   // Validation warning
   const [validationWarning, setValidationWarning] = useState<string | null>(null);
 
   const { data: cranesList = [], isLoading: cranesLoading } = trpc.crane.list.useQuery();
   const { data: sysSettings } = trpc.settings.get.useQuery();
-  const slotDuration = Number(sysSettings?.slotDurationMinutes ?? 60);
+  const { data: myVessels = [] } = trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
+  const slotDuration = 60; // Strictly 60 min now
 
   // Fetch available slots when date, crane, slotCount change
   const canFetchSlots = !!craneId && !!selectedDate && !!slotCount;
@@ -54,7 +56,7 @@ export default function NewReservation() {
   );
 
   const selectedCrane = useMemo(
-    () => cranesList.find((c) => String(c.id) === craneId),
+    () => cranesList.find((c: any) => String(c.id) === craneId),
     [craneId, cranesList]
   );
 
@@ -85,7 +87,7 @@ export default function NewReservation() {
       toast.success(t.form.successMessage);
       setLocation("/my-reservations");
     },
-    onError: (error) => {
+    onError: (error: any) => {
       toast.error(error.message);
     },
   });
@@ -95,7 +97,7 @@ export default function NewReservation() {
       toast.success(lang === "hr" ? "Uspješno ste upisani na listu čekanja." : "You joined the waiting list.");
       setLocation("/my-reservations");
     },
-    onError: (err) => toast.error(err.message),
+    onError: (err: any) => toast.error(err.message),
   });
 
   if (authLoading) {
@@ -138,6 +140,7 @@ export default function NewReservation() {
       craneId: Number(craneId),
       startDate: new Date(startMs),
       endDate: new Date(endMs),
+      vesselId: vesselId ? Number(vesselId) : undefined,
       vesselType: vesselType as any,
       vesselName: vesselName || undefined,
       vesselLength: Number(vesselLength),
@@ -147,6 +150,21 @@ export default function NewReservation() {
       liftPurpose,
       contactPhone,
     });
+  };
+
+  const handleVesselSelect = (id: string) => {
+    setVesselId(id);
+    const vessel = myVessels.find((v: any) => String(v.id) === id);
+    if (vessel) {
+      setVesselType(vessel.type);
+      setVesselName(vessel.name);
+      setVesselLength(vessel.length || "");
+      setVesselWidth(vessel.width || "");
+      setVesselDraft(vessel.draft || "");
+      setVesselWeight(vessel.weight || "");
+    } else {
+      setVesselId("");
+    }
   };
 
   const handleJoinWaiting = () => {
@@ -161,10 +179,11 @@ export default function NewReservation() {
 
   const noSlots = canFetchSlots && !slotsFetching && (slotsData?.availableStarts.length === 0);
 
-  const durationOptions = Array.from({ length: 6 }, (_, i) => ({
-    value: String(i + 1),
-    label: `${(i + 1) * slotDuration} min`,
-  }));
+  const durationOptions = [
+    { value: "1", label: `1 ${lang === 'hr' ? 'sat' : 'hour'}` },
+    { value: "2", label: `2 ${lang === 'hr' ? 'sata' : 'hours'}` },
+    { value: "3", label: `3 ${lang === 'hr' ? 'sata' : 'hours'}` },
+  ];
 
   return (
     <div className="min-h-screen bg-background">
@@ -194,7 +213,7 @@ export default function NewReservation() {
                     <SelectValue placeholder={cranesLoading ? "..." : t.form.selectCranePlaceholder} />
                   </SelectTrigger>
                   <SelectContent>
-                    {cranesList.map((crane) => (
+                    {cranesList.map((crane: any) => (
                       <SelectItem key={crane.id} value={String(crane.id)}>
                         {crane.name} — {crane.capacity}t
                         {crane.maxPoolWidth ? ` / ${crane.maxPoolWidth}m` : ""}
@@ -208,8 +227,22 @@ export default function NewReservation() {
               <div className="space-y-4">
                 <h3 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">{t.form.vesselSection}</h3>
                 <div className="space-y-2">
+                  <Label>{t.nav.vessels}</Label>
+                  <Select value={vesselId} onValueChange={handleVesselSelect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t.vessels.noVessels} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="new">— {t.vessels.addVessel} / {t.admin.cancel} —</SelectItem>
+                      {myVessels.map((v: any) => (
+                        <SelectItem key={v.id} value={String(v.id)}>{v.name} ({v.weight}t)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label>{t.form.vesselType} *</Label>
-                  <Select value={vesselType} onValueChange={setVesselType}>
+                  <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId}>
                     <SelectTrigger>
                       <SelectValue placeholder="—" />
                     </SelectTrigger>
@@ -227,19 +260,19 @@ export default function NewReservation() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>{t.form.vesselLength} *</Label>
-                    <Input type="number" step="0.1" min="0" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} required />
+                    <Input type="number" step="0.1" min="0" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} required disabled={!!vesselId} />
                   </div>
                   <div className="space-y-2">
                     <Label>{t.form.vesselWidth} *</Label>
-                    <Input type="number" step="0.1" min="0" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} required />
+                    <Input type="number" step="0.1" min="0" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} required disabled={!!vesselId} />
                   </div>
                   <div className="space-y-2">
                     <Label>{t.form.vesselDraft} *</Label>
-                    <Input type="number" step="0.1" min="0" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} required />
+                    <Input type="number" step="0.1" min="0" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} required disabled={!!vesselId} />
                   </div>
                   <div className="space-y-2">
                     <Label>{t.form.vesselWeight} *</Label>
-                    <Input type="number" step="0.1" min="0" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} required />
+                    <Input type="number" step="0.1" min="0" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} required disabled={!!vesselId} />
                   </div>
                 </div>
                 {validationWarning && (
@@ -288,7 +321,7 @@ export default function NewReservation() {
                     <Select value={startTime} onValueChange={setStartTime}>
                       <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                       <SelectContent>
-                        {slotsData?.availableStarts.map((s) => {
+                        {(slotsData?.availableStarts || []).map((s: string) => {
                           const d = new Date(s);
                           return (
                             <SelectItem key={d.toISOString()} value={d.toISOString()}>

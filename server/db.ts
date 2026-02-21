@@ -5,12 +5,14 @@ import {
   users,
   cranes,
   reservations,
+  vessels,
   waitingList,
   settings,
   auditLog,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
+  type InsertVessel,
   type InsertWaitingList,
   type InsertAuditLog,
 } from "../drizzle/schema";
@@ -125,6 +127,41 @@ export async function deleteCrane(id: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(cranes).set({ isActive: false, updatedAt: new Date() }).where(eq(cranes.id, id));
+}
+
+// ─── Vessels ──────────────────────────────────────────────────────────
+export async function listVesselsByUser(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(vessels).where(eq(vessels.ownerId, userId)).orderBy(desc(vessels.createdAt));
+}
+
+export async function getVesselById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(vessels).where(eq(vessels.id, id)).limit(1);
+  return res[0];
+}
+
+export async function createVessel(data: InsertVessel) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(vessels).values(data).returning({ id: vessels.id });
+  return res[0].id;
+}
+
+export async function updateVessel(id: number, ownerId: number, data: Partial<InsertVessel>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(vessels)
+    .set({ ...data, updatedAt: new Date() })
+    .where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
+}
+
+export async function deleteVessel(id: number, ownerId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(vessels).where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
 }
 
 // ─── Reservations ─────────────────────────────────────────────────────
