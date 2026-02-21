@@ -52,7 +52,7 @@ export default function AdminReservations() {
   }, []);
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.listAll.useQuery(
-    { status: statusFilter !== "all" ? statusFilter : undefined }
+    { status: statusFilter !== "all" ? [statusFilter] : undefined }
   );
 
   const approveMutation = trpc.reservation.approve.useMutation({
