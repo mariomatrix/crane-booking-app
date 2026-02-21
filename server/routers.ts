@@ -14,7 +14,7 @@ import {
   listReservationsByUser,
   listAllReservations,
   updateReservationStatus,
-  getApprovedReservationsForCalendar,
+  getReservationsForCalendar,
   checkOverlap,
   createAuditEntry,
   listAuditLog,
@@ -680,8 +680,8 @@ export const appRouter = router({
         craneId: z.number().optional(),
       }).optional())
       .query(async ({ input }) => {
-        const approved = await getApprovedReservationsForCalendar(input?.startDate, input?.endDate);
-        const enriched = await Promise.all(approved.map(async (r) => {
+        const items = await getReservationsForCalendar(input?.startDate, input?.endDate, true);
+        const enriched = await Promise.all(items.map(async (r) => {
           const crane = await getCraneById(r.craneId);
           return {
             id: r.id,
@@ -692,6 +692,7 @@ export const appRouter = router({
             endDate: r.endDate,
             vesselType: r.vesselType,
             liftPurpose: r.liftPurpose,
+            status: r.status,
           };
         }));
         if (input?.craneId) {
@@ -708,24 +709,32 @@ export const appRouter = router({
       }))
       .query(async ({ input }) => {
         const sysSettings = await getAllSettings();
-        const slotMin = 60; // Phase 2: strictly 60 min blocks
-        const bufferMin = 0; // Phase 2: no separate buffer
+        const slotMin = 60;
+        const bufferMin = 0;
+
+        // We use the date string and construct times. 
+        // To be robust against server timezone, we treat the input as a "local" date 
+        // and find the slots. 
+        // Note: New Date("YYYY-MM-DD") is UTC 00:00.
+        const dateObj = new Date(input.date);
         const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
         const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
 
-        const dateObj = new Date(input.date);
-        const dayStart = new Date(dateObj);
-        dayStart.setHours(wsH, wsM, 0, 0);
-        const dayEnd = new Date(dateObj);
-        dayEnd.setHours(weH, weM, 0, 0);
+        // We'll calculate slots relative to the UTC 00:00 of that day.
+        // This works if the client also treats the date as a UTC day boundary.
+        const dayStartUTC = new Date(dateObj.getTime());
+        dayStartUTC.setUTCHours(wsH, wsM, 0, 0);
 
-        const totalMinutes = (dayEnd.getTime() - dayStart.getTime()) / 60000;
+        const dayEndUTC = new Date(dateObj.getTime());
+        dayEndUTC.setUTCHours(weH, weM, 0, 0);
+
+        const totalMinutes = (dayEndUTC.getTime() - dayStartUTC.getTime()) / 60000;
         const totalSlots = Math.floor(totalMinutes / slotMin);
 
         const availableStarts: Date[] = [];
 
         for (let i = 0; i <= totalSlots - input.slotCount; i++) {
-          const slotStart = new Date(dayStart.getTime() + i * slotMin * 60000);
+          const slotStart = new Date(dayStartUTC.getTime() + i * slotMin * 60000);
           const slotEnd = new Date(slotStart.getTime() + input.slotCount * slotMin * 60000);
           const effectiveEnd = new Date(slotEnd.getTime() + bufferMin * 60000);
 

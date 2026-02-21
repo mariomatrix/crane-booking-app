@@ -38,6 +38,7 @@ interface CalendarEvent {
   craneName: string;
   liftPurpose?: string;
   vesselType?: string;
+  status: string;
 }
 
 export default function Calendar() {
@@ -71,15 +72,17 @@ export default function Calendar() {
     () =>
       events.map((event: CalendarEvent) => ({
         id: String(event.id),
-        title: `${event.craneName}${event.vesselType ? ` (${event.vesselType})` : ""}`,
+        title: `${event.craneName}${event.vesselType ? ` (${event.vesselType})` : ""}${event.status === "pending" ? " (ČEKANJE)" : ""}`,
         start: new Date(event.startDate),
         end: new Date(event.endDate),
         backgroundColor: craneColorMap[event.craneId] ?? CRANE_COLORS[0],
-        borderColor: "transparent",
+        borderColor: event.status === "pending" ? "#94a3b8" : "transparent",
+        className: event.status === "pending" ? "event-pending" : "",
         extendedProps: {
           craneId: event.craneId,
           craneName: event.craneName,
           liftPurpose: event.liftPurpose,
+          status: event.status,
         },
       })),
     [events, craneColorMap]
@@ -135,6 +138,16 @@ export default function Calendar() {
           }
           .fc-event {
             cursor: help !important;
+          }
+          .event-pending {
+            background-image: repeating-linear-gradient(
+              45deg,
+              transparent,
+              transparent 10px,
+              rgba(255, 255, 255, 0.15) 10px,
+              rgba(255, 255, 255, 0.15) 20px
+            ) !important;
+            opacity: 0.85;
           }
         `}
       </style>
@@ -230,6 +243,10 @@ export default function Calendar() {
               <span>{crane.name}</span>
             </div>
           ))}
+          <div className="flex items-center gap-1.5 text-sm text-muted-foreground ml-2 px-2 border-l">
+            <div className="h-3 w-3 rounded-sm bg-gray-400 event-pending border border-gray-500" />
+            <span>{lang === 'hr' ? 'Zahtjev na čekanju (termin zauzet)' : 'Pending request (slot occupied)'}</span>
+          </div>
         </div>
       </div>
 

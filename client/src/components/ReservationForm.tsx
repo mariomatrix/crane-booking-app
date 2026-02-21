@@ -57,7 +57,12 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
 
     const canFetchSlots = !!craneId && !!selectedDate && !!slotCount;
     const { data: slotsData, isFetching: slotsFetching } = trpc.calendar.availableSlots.useQuery(
-        { craneId: Number(craneId), date: selectedDate, slotCount: Number(slotCount) },
+        {
+            craneId: Number(craneId),
+            date: selectedDate,
+            slotCount: Number(slotCount),
+            tzOffset: new Date().getTimezoneOffset()
+        },
         { enabled: canFetchSlots }
     );
 

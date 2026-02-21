@@ -246,10 +246,14 @@ export async function checkOverlap(
   return res.length > 0;
 }
 
-export async function getApprovedReservationsForCalendar(start?: Date, end?: Date) {
+export async function getReservationsForCalendar(start?: Date, end?: Date, includePending = true) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq(reservations.status, "approved")];
+  const statusConditions = includePending
+    ? [or(eq(reservations.status, "approved"), eq(reservations.status, "pending"))]
+    : [eq(reservations.status, "approved")];
+
+  const conditions = [...statusConditions];
   if (start) conditions.push(gte(reservations.startDate, start));
   if (end) conditions.push(lte(reservations.endDate, end));
   return db.select().from(reservations).where(and(...conditions));
