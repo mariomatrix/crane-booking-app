@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, sql, ne } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, sql, ne, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -64,34 +64,40 @@ export async function createLocalUser(data: {
 export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const res = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  const res = await db.select().from(users).where(and(eq(users.email, email), isNull(users.deletedAt))).limit(1);
   return res[0];
 }
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const res = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const res = await db.select().from(users).where(and(eq(users.openId, openId), isNull(users.deletedAt))).limit(1);
   return res[0];
 }
 
 export async function getUserById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const res = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  const res = await db.select().from(users).where(and(eq(users.id, id), isNull(users.deletedAt))).limit(1);
   return res[0];
 }
 
 export async function listAllUsers() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(users).orderBy(users.name, users.email);
+  return db.select().from(users).where(isNull(users.deletedAt)).orderBy(users.name, users.email);
 }
 
 export async function updateUserRole(id: number, role: "user" | "admin") {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
+export async function softDeleteUser(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(users).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, id));
 }
 
 // ─── Cranes ───────────────────────────────────────────────────────────

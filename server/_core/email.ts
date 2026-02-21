@@ -122,3 +122,36 @@ export async function sendWaitingListNotification(opts: {
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
+
+export async function sendPasswordResetEmail(opts: {
+    to: string;
+    userName: string;
+    resetUrl: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? "Resetiranje lozinke — Marina Crane Booking"
+        : "Reset your password — Marina Crane Booking";
+
+    const html = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr
+            ? "Primili smo zahtjev za resetiranje vaše lozinke. Ako niste zatražili ovu promjenu, možete slobodno ignorirati ovaj email."
+            : "We received a request to reset your password. If you didn't make this request, you can safely ignore this email."
+        }</p>
+    <p>${isHr
+            ? `Za postavljanje nove lozinke, kliknite na gumb ispod:`
+            : `To set a new password, click the button below:`
+        }</p>
+    <div style="margin:24px 0">
+      <a href="${opts.resetUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+        ${isHr ? "Resetiraj lozinku" : "Reset Password"}
+      </a>
+    </div>
+    <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 60 minuta." : "This link is valid for 60 minutes."}</p>
+    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+  `;
+    return sendEmail({ to: opts.to, subject, html });
+}

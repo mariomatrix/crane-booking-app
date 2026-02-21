@@ -33,6 +33,16 @@ export const users = pgTable("users", {
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull(),
     lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+    deletedAt: timestamp("deletedAt"), // Phase 3: Soft delete
+});
+
+// ─── Password Resets (Phase 3) ───────────────────────────────────────
+export const passwordResets = pgTable("password_resets", {
+    id: serial("id").primaryKey(),
+    userId: integer("userId").notNull(),
+    token: varchar("token", { length: 255 }).notNull().unique(),
+    expiresAt: timestamp("expiresAt").notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 // ─── Cranes (Marina lift equipment) ──────────────────────────────────
@@ -141,3 +151,5 @@ export type InsertWaitingList = typeof waitingList.$inferInsert;
 export type SelectWaitingList = typeof waitingList.$inferSelect;
 export type InsertAuditLog = typeof auditLog.$inferInsert;
 export type SelectAuditLog = typeof auditLog.$inferSelect;
+export type InsertPasswordReset = typeof passwordResets.$inferInsert;
+export type SelectPasswordReset = typeof passwordResets.$inferSelect;

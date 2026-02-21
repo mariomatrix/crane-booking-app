@@ -29,20 +29,26 @@ import {
   updateSetting,
   listAllUsers,
   updateUserRole,
+  softDeleteUser,
   listVesselsByUser,
   getVesselById,
   createVessel,
   updateVessel,
   deleteVessel,
+  getDb,
 } from "./db";
 import { TRPCError } from "@trpc/server";
-import { notifyWaitingList } from "./services/notifications";
-import { notifyOwner } from "./_core/notification";
 import {
   sendReservationConfirmation,
   sendReservationRejection,
   sendWaitingListNotification,
+  sendPasswordResetEmail,
 } from "./_core/email";
+import { notifyStatusChange, notifyWaitingList } from "./services/notifications";
+import { notifyOwner } from "./_core/notification";
+import { users, passwordResets, reservations, waitingList, settings, cranes, auditLog } from "../drizzle/schema";
+import { and, eq, gte, isNull } from "drizzle-orm";
+import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
   sendReservationRejectionSms,
@@ -174,6 +180,60 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+
+    forgotPassword: publicProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const user = await getUserByEmail(input.email);
+        if (!user) return { success: true }; // Silent return for security
+
+        const token = crypto.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        await db.insert(passwordResets).values({
+          userId: user.id,
+          token,
+          expiresAt,
+        });
+
+        const resetUrl = `${process.env.PUBLIC_URL || "http://localhost:5173"}/auth/reset-password?token=${token}`;
+        await sendPasswordResetEmail({
+          to: user.email!,
+          userName: user.name || user.firstName || "Korisnik",
+          resetUrl,
+        });
+
+        return { success: true };
+      }),
+
+    resetPassword: publicProcedure
+      .input(z.object({ token: z.string(), password: z.string().min(8) }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [reset] = await db.select()
+          .from(passwordResets)
+          .where(and(eq(passwordResets.token, input.token), gte(passwordResets.expiresAt, new Date())))
+          .limit(1);
+
+        if (!reset) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Token je nevažeći ili je istekao." });
+        }
+
+        const passwordHash = await bcrypt.hash(input.password, 12);
+        await db.update(users)
+          .set({ passwordHash, updatedAt: new Date() })
+          .where(eq(users.id, reset.userId));
+
+        // Cleanup tokens for this user
+        await db.delete(passwordResets).where(eq(passwordResets.userId, reset.userId));
+
+        return { success: true };
+      }),
   }),
 
   // ─── Vessels ──────────────────────────────────────────────────────────
@@ -259,6 +319,42 @@ export const appRouter = router({
           entityType: "user",
           entityId: input.id,
           details: JSON.stringify({ role: input.role }),
+        });
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        if (input.id === ctx.user.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ne možete obrisati sami sebe." });
+        }
+        await softDeleteUser(input.id);
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "user_deleted",
+          entityType: "user",
+          entityId: input.id
+        });
+        return { success: true };
+      }),
+
+    resetPassword: adminProcedure
+      .input(z.object({ id: z.number(), password: z.string().min(8) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const passwordHash = await bcrypt.hash(input.password, 12);
+        await db.update(users)
+          .set({ passwordHash, updatedAt: new Date() })
+          .where(eq(users.id, input.id));
+
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "user_password_reset_admin",
+          entityType: "user",
+          entityId: input.id
         });
         return { success: true };
       }),
