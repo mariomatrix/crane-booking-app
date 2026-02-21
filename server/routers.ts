@@ -956,6 +956,9 @@ export const appRouter = router({
         // Remove from waiting list
         await adminRemoveFromWaitingList(input.id);
 
+        // Notify user
+        notifyStatusChange(resId).catch(console.error);
+
         await createAuditEntry({
           userId: ctx.user.id,
           action: "waiting_list_converted",
