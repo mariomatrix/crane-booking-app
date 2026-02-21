@@ -47,7 +47,7 @@ import {
 import { notifyStatusChange, notifyWaitingList } from "./services/notifications";
 import { notifyOwner } from "./_core/notification";
 import { users, passwordResets, reservations, waitingList, settings, cranes, auditLog } from "../drizzle/schema";
-import { and, eq, gte, isNull } from "drizzle-orm";
+import { and, eq, gte, isNull, or, lte, desc } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
@@ -612,9 +612,33 @@ export const appRouter = router({
 
     // ── Admin ────────────────────────────────────────────────────────
     listAll: adminProcedure
-      .input(z.object({ status: z.string().optional() }).optional())
+      .input(z.object({
+        status: z.array(z.string()).optional(),
+        userId: z.number().optional(),
+        vesselId: z.number().optional(),
+        startDate: z.date().optional(),
+        endDate: z.date().optional(),
+      }).optional())
       .query(async ({ input }) => {
-        const items = await listAllReservations(input?.status);
+        const db = await getDb();
+        if (!db) return [];
+
+        const conditions = [];
+        if (input?.status && input.status.length > 0) {
+          const statusOrs = input.status.map(s => eq(reservations.status, s as any));
+          conditions.push(or(...statusOrs));
+        }
+        if (input?.userId) conditions.push(eq(reservations.userId, input.userId));
+        if (input?.vesselId) conditions.push(eq(reservations.vesselId, input.vesselId));
+        if (input?.startDate) conditions.push(gte(reservations.startDate, input.startDate));
+        if (input?.endDate) conditions.push(lte(reservations.endDate, input.endDate));
+
+        const query = db.select().from(reservations);
+        if (conditions.length > 0) {
+          query.where(and(...conditions));
+        }
+        const items = await query.orderBy(desc(reservations.createdAt));
+
         return Promise.all(items.map(async (r) => {
           const crane = await getCraneById(r.craneId);
           const user = await getUserById(r.userId);
@@ -703,14 +727,24 @@ export const appRouter = router({
 
     // Admin: move/reschedule a reservation (drag-and-drop)
     reschedule: adminProcedure
-      .input(z.object({ id: z.number(), startDate: z.date(), endDate: z.date() }))
+      .input(z.object({
+        id: z.number(),
+        startDate: z.date(),
+        endDate: z.date(),
+        craneId: z.number().optional()
+      }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        const targetCraneId = input.craneId ?? reservation.craneId;
+
         const sysSettings = await getAllSettings();
         const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
         const effectiveEnd = new Date(input.endDate.getTime() + bufferMin * 60000);
-        const hasOverlap = await checkOverlap(reservation.craneId, input.startDate, effectiveEnd, input.id);
+
+        // Check overlap on the target crane
+        const hasOverlap = await checkOverlap(targetCraneId, input.startDate, effectiveEnd, input.id);
         if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Preslagani termin se preklapa." });
 
         // We update directly via db
@@ -718,9 +752,22 @@ export const appRouter = router({
         const { reservations: res } = await import("../drizzle/schema");
         const { eq } = await import("drizzle-orm");
         const db = await getDb();
-        if (db) await db.update(res).set({ startDate: input.startDate, endDate: input.endDate, updatedAt: new Date() }).where(eq(res.id, input.id));
+        if (db) {
+          await db.update(res).set({
+            startDate: input.startDate,
+            endDate: input.endDate,
+            craneId: targetCraneId,
+            updatedAt: new Date()
+          }).where(eq(res.id, input.id));
+        }
 
-        await createAuditEntry({ userId: ctx.user.id, action: "reservation_rescheduled", entityType: "reservation", entityId: input.id });
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "reservation_rescheduled",
+          entityType: "reservation",
+          entityId: input.id,
+          details: JSON.stringify({ oldCraneId: reservation.craneId, newCraneId: targetCraneId, startDate: input.startDate })
+        });
         return { success: true };
       }),
   }),
