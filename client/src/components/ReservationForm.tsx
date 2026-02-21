@@ -50,9 +50,10 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
     const [contactPhone, setContactPhone] = useState(user?.phone || "");
 
     const [validationWarning, setValidationWarning] = useState<string | null>(null);
+    const [hasAttemptedVesselAutoFill, setHasAttemptedVesselAutoFill] = useState(false);
 
     const { data: cranesList = [], isLoading: cranesLoading } = trpc.crane.list.useQuery();
-    const { data: myVessels = [] } = trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
+    const { data: myVessels = [], isLoading: vesselsLoading } = trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
     const slotDuration = 60;
 
     const canFetchSlots = !!craneId && !!selectedDate && !!slotCount;
@@ -89,6 +90,21 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
         setValidationWarning(null);
     }, [vesselWeight, vesselWidth, selectedCrane, t]);
 
+    // Sync phone from user profile
+    useEffect(() => {
+        if (user?.phone && !contactPhone) {
+            setContactPhone(user.phone);
+        }
+    }, [user?.phone]);
+
+    // Set first vessel as default if available
+    useEffect(() => {
+        if (!vesselsLoading && myVessels.length > 0 && !vesselId && !hasAttemptedVesselAutoFill) {
+            handleVesselSelect(String(myVessels[0].id));
+            setHasAttemptedVesselAutoFill(true);
+        }
+    }, [myVessels, vesselsLoading, vesselId, hasAttemptedVesselAutoFill]);
+
     // Handle case where initial startTime is provided but might not be in slotsData 
     // (e.g. if it's already busy, we want it to be selected so we can show the "waiting list" UI)
     // Initialize startTime from initialData only once per set of initialData
@@ -97,6 +113,15 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
             setStartTime(initialData.startTime);
         }
     }, [initialData]);
+
+    // Default to Small Crane if nothing selected
+    useEffect(() => {
+        if (!cranesLoading && cranesList.length > 0 && !craneId) {
+            // Find the one with smallest capacity (Mala dizalica)
+            const smallest = [...cranesList].sort((a, b) => Number(a.capacity) - Number(b.capacity))[0];
+            if (smallest) setCraneId(String(smallest.id));
+        }
+    }, [cranesList, cranesLoading, craneId]);
 
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
@@ -211,20 +236,24 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                     {!initialData?.isMaintenance && (
                         <div className="space-y-4">
                             <h3 className="font-medium text-sm border-b pb-2">{t.form.vesselSection}</h3>
-                            <div className="space-y-2">
-                                <Label>{t.nav.vessels}</Label>
-                                <Select value={vesselId} onValueChange={handleVesselSelect}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder={t.vessels.noVessels} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="new">— {t.vessels.addVessel} —</SelectItem>
-                                        {myVessels.map((v: any) => (
-                                            <SelectItem key={v.id} value={String(v.id)}>{v.name} ({v.weight}t)</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
+
+                            {myVessels.length > 0 && (
+                                <div className="space-y-2">
+                                    <Label>{t.nav.vessels}</Label>
+                                    <Select value={vesselId} onValueChange={handleVesselSelect}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder={t.vessels.noVessels} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="new">— {t.vessels.addVessel} —</SelectItem>
+                                            {myVessels.map((v: any) => (
+                                                <SelectItem key={v.id} value={String(v.id)}>{v.name} ({v.weight}t)</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>{t.form.vesselType} *</Label>

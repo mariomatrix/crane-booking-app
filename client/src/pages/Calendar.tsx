@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CalendarDays, Filter, Info } from "lucide-react";
 import { useLang } from "@/contexts/LangContext";
 import { ReservationForm } from "@/components/ReservationForm";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -89,6 +90,12 @@ export default function Calendar() {
   );
 
   const handleDateClick = (arg: { view: { type: string }, dateStr: string, date: Date }) => {
+    // Bullet-proof: prevent booking in the past
+    if (arg.date < new Date()) {
+      toast.error(lang === 'hr' ? 'Ne možete rezervirati termin koji je već prošao.' : 'You cannot book a slot in the past.');
+      return;
+    }
+
     const view = arg.view.type;
     const dateStr = arg.dateStr.split("T")[0];
 
@@ -223,6 +230,9 @@ export default function Calendar() {
                 events={calendarEvents}
                 height="auto"
                 slotDuration="00:30:00"
+                selectAllow={(selectInfo: { start: Date }) => {
+                  return selectInfo.start >= new Date();
+                }}
                 dateClick={handleDateClick}
                 eventContent={(arg: { event: { title: string } }) => (
                   <div className="px-1.5 py-0.5 text-white text-xs font-medium truncate">
