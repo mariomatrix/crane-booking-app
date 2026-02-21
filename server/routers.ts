@@ -35,6 +35,9 @@ import {
   createVessel,
   updateVessel,
   deleteVessel,
+  getWaitingListById,
+  updateWaitingList,
+  adminRemoveFromWaitingList,
   getDb,
 } from "./db";
 import { TRPCError } from "@trpc/server";
@@ -886,6 +889,83 @@ export const appRouter = router({
         return { ...w, user: user ? { name: user.name, email: user.email, phone: user.phone } : null, crane: crane ? { name: crane.name } : null };
       }));
     }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        craneId: z.number().optional(),
+        requestedDate: z.string().optional(),
+        slotCount: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const item = await getWaitingListById(input.id);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+
+        await updateWaitingList(input.id, {
+          craneId: input.craneId,
+          requestedDate: input.requestedDate,
+          slotCount: input.slotCount,
+        });
+
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "waiting_list_updated",
+          entityType: "waiting_list",
+          entityId: input.id,
+          details: JSON.stringify(input)
+        });
+        return { success: true };
+      }),
+
+    toReservation: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        startDate: z.date(),
+        endDate: z.date(),
+        craneId: z.number().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const item = await getWaitingListById(input.id);
+        if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+
+        const targetCraneId = input.craneId ?? item.craneId;
+
+        // Check overlap
+        const hasOverlap = await checkOverlap(targetCraneId, input.startDate, input.endDate);
+        if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Termin je zauzet." });
+
+        const vesselData = (item.vesselData as any) || {};
+
+        // Create reservation
+        const resId = await createReservation({
+          userId: item.userId,
+          craneId: targetCraneId,
+          startDate: input.startDate,
+          endDate: input.endDate,
+          status: "approved",
+          vesselName: vesselData.name || "Brod s liste čekanja",
+          vesselType: vesselData.type || "motorboat",
+          vesselWeight: String(vesselData.weight || 0),
+          vesselLength: String(vesselData.length || 0),
+          vesselWidth: String(vesselData.width || 0),
+          vesselDraft: String(vesselData.draft || 0),
+          liftPurpose: "Lista čekanja",
+          contactPhone: "N/A",
+        });
+
+        // Remove from waiting list
+        await adminRemoveFromWaitingList(input.id);
+
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "waiting_list_converted",
+          entityType: "reservation",
+          entityId: resId,
+          details: JSON.stringify({ waitingListId: input.id })
+        });
+
+        return { id: resId };
+      }),
   }),
 
   // ─── Settings (Admin) ─────────────────────────────────────────────────

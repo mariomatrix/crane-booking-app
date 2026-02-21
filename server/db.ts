@@ -288,6 +288,25 @@ export async function listAllWaiting() {
   return db.select().from(waitingList).orderBy(desc(waitingList.createdAt));
 }
 
+export async function getWaitingListById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const res = await db.select().from(waitingList).where(eq(waitingList.id, id));
+  return res[0] ?? null;
+}
+
+export async function updateWaitingList(id: number, data: Partial<InsertWaitingList>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(waitingList).set(data).where(eq(waitingList.id, id));
+}
+
+export async function adminRemoveFromWaitingList(id: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(waitingList).where(eq(waitingList.id, id));
+}
+
 export async function removeFromWaitingList(id: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");

@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import timeGridPlugin from "@fullcalendar/timegrid";
-import interactionPlugin from "@fullcalendar/interaction";
+import interactionPlugin, { Draggable } from "@fullcalendar/interaction";
 import type { EventDropArg, DatesSetArg } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import { trpc } from "@/lib/trpc";
@@ -44,11 +44,15 @@ const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
 export default function AdminCalendar() {
     const { lang } = useLang();
+    // State
     const [viewDate, setViewDate] = useState<Date>(startOfDay(new Date()));
     const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved"]);
     const [selectedUser, setSelectedUser] = useState<string>("all");
     const [selectedCrane, setSelectedCrane] = useState<string>("all");
     const [isMaintOpen, setIsMaintOpen] = useState(false);
+
+    // Refs
+    const draggableRef = useRef<HTMLDivElement>(null);
 
     // Filters and Data
     const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
@@ -81,6 +85,13 @@ export default function AdminCalendar() {
     const [editEnd, setEditEnd] = useState("");
     const [editCraneId, setEditCraneId] = useState("");
 
+    // Edit Waiting List Form State
+    const [isWaitingEditOpen, setIsWaitingEditOpen] = useState(false);
+    const [editingWaiting, setEditingWaiting] = useState<any>(null);
+    const [waitEditDate, setWaitEditDate] = useState<string>("");
+    const [waitEditCraneId, setWaitEditCraneId] = useState("");
+    const [waitEditSlots, setWaitEditSlots] = useState(1);
+
     // Mutations
     const rescheduleMutation = trpc.reservation.reschedule.useMutation({
         onSuccess: () => {
@@ -112,14 +123,69 @@ export default function AdminCalendar() {
         onError: (err: any) => toast.error(err.message),
     });
 
-    const handleApproveWaiting = (w: any) => {
-        // Find best slot or just open a dialog? 
-        // For simplicity, we just approve it and the admin can move it on the calendar.
-        // Wait, approval needs an ID of a reservation. Waiting list entries are NOT reservations yet.
-        // In this app, a reservation is created when it's moved to the calendar.
-        // For now, let's just toast that they should Drag-and-drop (if implemented) or we create a mutation.
-        toast.info("Povucite zahtjev na kalendar ili koristite formu za ručni unos.");
+    const updateWaitingMutation = trpc.waitingList.update.useMutation({
+        onSuccess: () => {
+            toast.success("Zahtjev je ažuriran.");
+            utils.waitingList.listAll.invalidate();
+            setIsWaitingEditOpen(false);
+        },
+        onError: (err: any) => toast.error(err.message),
+    });
+
+    const toReservationMutation = trpc.waitingList.toReservation.useMutation({
+        onSuccess: () => {
+            toast.success("Zahtjev je pretvoren u rezervaciju.");
+            utils.reservation.listAll.invalidate();
+            utils.waitingList.listAll.invalidate();
+        },
+        onError: (err: any) => {
+            toast.error(err.message);
+            utils.reservation.listAll.invalidate();
+        },
+    });
+
+    const handleEditWaiting = (w: any) => {
+        setEditingWaiting(w);
+        setWaitEditDate(w.requestedDate);
+        setWaitEditCraneId(String(w.craneId));
+        setWaitEditSlots(w.slotCount);
+        setIsWaitingEditOpen(true);
     };
+
+    const handleUpdateWaiting = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingWaiting) return;
+        updateWaitingMutation.mutate({
+            id: editingWaiting.id,
+            requestedDate: waitEditDate,
+            craneId: Number(waitEditCraneId),
+            slotCount: waitEditSlots
+        });
+    };
+
+    const handleApproveWaiting = (w: any) => {
+        toast.info("Povucite zahtjev na kalendar za brzu rezervaciju.");
+    };
+
+    // Initialize Draggable
+    useEffect(() => {
+        if (!draggableRef.current) return;
+        let draggable = new Draggable(draggableRef.current, {
+            itemSelector: ".waiting-list-item",
+            eventData: function (eventEl) {
+                const data = JSON.parse(eventEl.getAttribute("data-event") || "{}");
+                return {
+                    title: data.title,
+                    duration: { hours: data.slotCount },
+                    extendedProps: {
+                        isFromWaitingList: true,
+                        waitingId: data.id,
+                    }
+                };
+            }
+        });
+        return () => draggable.destroy();
+    }, [waitingList]);
 
     const rejectMutation = trpc.reservation.reject.useMutation({
         onSuccess: () => {
@@ -381,6 +447,46 @@ export default function AdminCalendar() {
                             </form>
                         </DialogContent>
                     </Dialog>
+                    <Dialog open={isWaitingEditOpen} onOpenChange={setIsWaitingEditOpen}>
+                        <DialogContent className="max-w-md">
+                            <form onSubmit={handleUpdateWaiting}>
+                                <DialogHeader>
+                                    <DialogTitle>Uredi listu čekanja</DialogTitle>
+                                    <DialogDescription>
+                                        ID #{editingWaiting?.id} - {editingWaiting?.user?.name}
+                                    </DialogDescription>
+                                </DialogHeader>
+                                <div className="grid gap-5 py-6">
+                                    <div className="grid gap-2">
+                                        <Label>Željeni datum</Label>
+                                        <Input type="date" value={waitEditDate} onChange={(e) => setWaitEditDate(e.target.value)} required />
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Dizalica</Label>
+                                        <Select value={waitEditCraneId} onValueChange={setWaitEditCraneId} required>
+                                            <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
+                                            <SelectContent>
+                                                {cranesList.map((c: any) => (
+                                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Broj slotova (60 min)</Label>
+                                        <Input type="number" min={1} max={8} value={waitEditSlots} onChange={(e) => setWaitEditSlots(Number(e.target.value))} required />
+                                    </div>
+                                </div>
+                                <DialogFooter>
+                                    <Button variant="outline" type="button" onClick={() => setIsWaitingEditOpen(false)}>Odustani</Button>
+                                    <Button type="submit" disabled={updateWaitingMutation.isPending}>
+                                        {updateWaitingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                        Spremi promjene
+                                    </Button>
+                                </DialogFooter>
+                            </form>
+                        </DialogContent>
+                    </Dialog>
                     <Button variant="secondary" onClick={() => window.print()} className="gap-2">
                         <Printer className="h-4 w-4" />
                         <span className="hidden sm:inline">Ispiši dnevni plan</span>
@@ -485,13 +591,50 @@ export default function AdminCalendar() {
                         slotMaxTime={workEnd + ":00"}
                         height="100%"
                         editable={true}
+                        droppable={true}
+                        eventReceive={async (info) => {
+                            const p = info.event.extendedProps;
+                            if (p.isFromWaitingList) {
+                                // Calculate crane and time
+                                const dropDate = info.event.start!;
+                                const diffDays = Math.round((dropDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+
+                                if (diffDays < 0 || diffDays >= activeCranes.length) {
+                                    info.revert();
+                                    return;
+                                }
+
+                                const targetCrane = activeCranes[diffDays];
+                                const startDate = new Date(viewDate);
+                                startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0);
+
+                                const durationHours = info.event.end ? (info.event.end.getTime() - dropDate.getTime()) / 3600000 : 1;
+                                const endDate = new Date(startDate.getTime() + durationHours * 3600000);
+
+                                info.revert(); // Remove the temp event
+
+                                toReservationMutation.mutate({
+                                    id: Number(p.waitingId),
+                                    startDate,
+                                    endDate,
+                                    craneId: targetCrane.id
+                                });
+                            }
+                        }}
                         eventDrop={handleEventDrop}
                         eventClick={handleEventClick}
                         events={calendarEvents}
                         dayHeaderContent={(arg) => {
                             const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
                             const crane = activeCranes[diff];
-                            return crane ? crane.name : "";
+                            return crane ? (
+                                <div className="flex flex-col items-center">
+                                    <span className="text-xs font-bold">{crane.name}</span>
+                                    <span className="text-[10px] opacity-60 font-normal normal-case">
+                                        {format(arg.date, "eee dd.MM.")}
+                                    </span>
+                                </div>
+                            ) : "";
                         }}
                         eventContent={(arg) => {
                             const p = arg.event.extendedProps;
@@ -540,14 +683,22 @@ export default function AdminCalendar() {
                         </CardHeader>
                         <CardContent className="p-0 flex-1 overflow-hidden">
                             <ScrollArea className="h-full">
-                                <div className="p-4 space-y-3">
+                                <div className="p-4 space-y-3" ref={draggableRef}>
                                     {waitingList.length === 0 ? (
                                         <div className="text-center py-8 text-sm text-muted-foreground italic">
                                             Nema aktivnih zahtjeva u listi čekanja.
                                         </div>
                                     ) : (
                                         waitingList.map((w: any) => (
-                                            <div key={w.id} className="p-3 border rounded-lg bg-background hover:border-primary/50 transition-colors shadow-sm group">
+                                            <div
+                                                key={w.id}
+                                                className="waiting-list-item p-3 border rounded-lg bg-background hover:border-primary/50 transition-colors shadow-sm group cursor-grab active:cursor-grabbing"
+                                                data-event={JSON.stringify({
+                                                    id: w.id,
+                                                    title: `${w.user?.name || "Korisnik"} (${w.crane?.name})`,
+                                                    slotCount: w.slotCount
+                                                })}
+                                            >
                                                 <div className="flex items-center justify-between mb-2">
                                                     <span className="text-[10px] font-bold text-muted-foreground uppercase">{w.crane?.name}</span>
                                                     <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{format(parseISO(w.requestedDate), "dd.MM.")}</span>
@@ -557,14 +708,14 @@ export default function AdminCalendar() {
                                                     <Clock className="h-3 w-3" />
                                                     {w.slotCount}x 60 min slots
                                                 </div>
-                                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex gap-2">
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        className="h-7 text-[10px] w-full border-green-200 text-green-700 hover:bg-green-50"
-                                                        onClick={() => handleApproveWaiting(w)}
+                                                        className="h-7 text-[10px] w-full border-blue-200 text-blue-700 hover:bg-blue-50"
+                                                        onClick={(e) => { e.stopPropagation(); handleEditWaiting(w); }}
                                                     >
-                                                        Detalji zahtjeva
+                                                        Uredi zahtjev
                                                     </Button>
                                                 </div>
                                             </div>
