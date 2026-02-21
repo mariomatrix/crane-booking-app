@@ -1,4 +1,5 @@
 import { useAuth } from "@/_core/hooks/useAuth";
+import { useLang } from "@/contexts/LangContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -36,14 +37,7 @@ import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
 
-const menuItems = [
-  { icon: Home, label: "Dashboard", path: "/admin" },
-  { icon: ClipboardList, label: "Reservations", path: "/admin/reservations" },
-  { icon: Construction, label: "Crane Fleet", path: "/admin/cranes" },
-  { icon: Users, label: "Users", path: "/admin/users" },
-  { icon: Settings, label: "Settings", path: "/admin/settings" },
-  { icon: CalendarDays, label: "Public Calendar", path: "/" },
-];
+// menuItems moved inside component to support translations
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const DEFAULT_WIDTH = 260;
@@ -119,8 +113,18 @@ function DashboardLayoutContent({
   children,
   setSidebarWidth,
 }: DashboardLayoutContentProps) {
+  const { t } = useLang();
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
+
+  const menuItems = [
+    { icon: Home, label: t.admin.dashboard, path: "/admin" },
+    { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
+    { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
+    { icon: Users, label: t.admin.users, path: "/admin/users" },
+    { icon: Settings, label: t.admin.settings, path: "/admin/settings" },
+    { icon: CalendarDays, label: t.nav.calendar, path: "/" },
+  ];
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
@@ -181,7 +185,7 @@ function DashboardLayoutContent({
               {!isCollapsed ? (
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="font-semibold tracking-tight truncate">
-                    Admin Panel
+                    {t.nav.adminPanel}
                   </span>
                 </div>
               ) : null}
@@ -236,7 +240,7 @@ function DashboardLayoutContent({
                   className="cursor-pointer text-destructive focus:text-destructive"
                 >
                   <LogOut className="mr-2 h-4 w-4" />
-                  <span>Sign out</span>
+                  <span>{t.nav.signOut}</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

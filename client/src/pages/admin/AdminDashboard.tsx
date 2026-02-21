@@ -1,11 +1,16 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
-import { CalendarDays, CheckCircle, Clock, Construction, XCircle } from "lucide-react";
+import { CalendarDays, CheckCircle, Clock, Construction, Users, XCircle } from "lucide-react";
+import { useLang } from "@/contexts/LangContext";
 import { useMemo } from "react";
+import { useLocation } from "wouter";
 
 export default function AdminDashboard() {
+  const { t } = useLang();
+  const [, setLocation] = useLocation();
   const { data: allReservations = [] } = trpc.reservation.listAll.useQuery({});
   const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
+  const { data: usersList = [] } = trpc.user.list.useQuery();
 
   const stats = useMemo(() => {
     const pending = allReservations.filter((r) => r.status === "pending").length;
@@ -62,17 +67,17 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setLocation("/admin/users")}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Active Cranes
+              {t.admin.users}
             </CardTitle>
-            <Construction className="h-4 w-4 text-primary" />
+            <Users className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.activeCranes}</div>
+            <div className="text-2xl font-bold">{usersList.length}</div>
             <p className="text-xs text-muted-foreground mt-1">
-              of {cranesList.length} total
+              Registered accounts
             </p>
           </CardContent>
         </Card>

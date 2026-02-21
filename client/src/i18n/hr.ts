@@ -94,6 +94,7 @@ export const hr = {
         cranes: "Dizalice",
         calendar: "Kalendar",
         settings: "Postavke",
+        users: "Korisnici",
         waitingList: "Lista čekanja",
         pending: "Na čekanju",
         approved: "Odobreno",

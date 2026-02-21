@@ -19,8 +19,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useLang } from "@/contexts/LangContext";
+import { Users } from "lucide-react";
 
 export default function Home() {
+  const { t } = useLang();
   const { user, loading, logout } = useAuth();
   const [, setLocation] = useLocation();
 
@@ -96,15 +99,21 @@ export default function Home() {
                     My Reservations
                   </DropdownMenuItem>
                   {user.role === "admin" && (
-                    <DropdownMenuItem onClick={() => setLocation("/admin")}>
-                      <Settings className="h-4 w-4 mr-2" />
-                      Admin Panel
-                    </DropdownMenuItem>
+                    <>
+                      <DropdownMenuItem onClick={() => setLocation("/admin")}>
+                        <Settings className="h-4 w-4 mr-2" />
+                        {t.nav.adminPanel}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setLocation("/admin/users")}>
+                        <Users className="h-4 w-4 mr-2" />
+                        {t.admin.users}
+                      </DropdownMenuItem>
+                    </>
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
                     <LogOut className="h-4 w-4 mr-2" />
-                    Sign Out
+                    {t.nav.signOut}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

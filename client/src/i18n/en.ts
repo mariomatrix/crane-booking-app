@@ -90,6 +90,7 @@ export const en: Translations = {
         cranes: "Cranes",
         calendar: "Calendar",
         settings: "Settings",
+        users: "Users",
         waitingList: "Waiting List",
         pending: "Pending",
         approved: "Approved",
