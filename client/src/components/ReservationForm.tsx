@@ -92,15 +92,26 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
 
     // Sync phone from user profile
     useEffect(() => {
-        if (user?.phone && !contactPhone) {
+        if (user?.phone && (contactPhone === "" || contactPhone === undefined)) {
             setContactPhone(user.phone);
         }
-    }, [user?.phone]);
+    }, [user?.phone, contactPhone]);
 
     // Set first vessel as default if available
     useEffect(() => {
         if (!vesselsLoading && myVessels.length > 0 && !vesselId && !hasAttemptedVesselAutoFill) {
-            handleVesselSelect(String(myVessels[0].id));
+            const firstVessel = myVessels[0];
+            const firstId = String(firstVessel.id);
+            setVesselId(firstId);
+
+            // Populate fields
+            setVesselType(firstVessel.type);
+            setVesselName(firstVessel.name);
+            setVesselLength(firstVessel.length || "");
+            setVesselWidth(firstVessel.width || "");
+            setVesselDraft(firstVessel.draft || "");
+            setVesselWeight(firstVessel.weight || "");
+
             setHasAttemptedVesselAutoFill(true);
         }
     }, [myVessels, vesselsLoading, vesselId, hasAttemptedVesselAutoFill]);
@@ -170,6 +181,17 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
     };
 
     const handleVesselSelect = (id: string) => {
+        if (id === "new") {
+            setVesselId("new");
+            setVesselType("");
+            setVesselName("");
+            setVesselLength("");
+            setVesselWidth("");
+            setVesselDraft("");
+            setVesselWeight("");
+            return;
+        }
+
         setVesselId(id);
         const vessel = myVessels.find((v: any) => String(v.id) === id);
         if (vessel) {
@@ -179,8 +201,6 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
             setVesselWidth(vessel.width || "");
             setVesselDraft(vessel.draft || "");
             setVesselWeight(vessel.weight || "");
-        } else {
-            setVesselId("");
         }
     };
 
@@ -242,7 +262,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                     <Label>{t.nav.vessels}</Label>
                                     <Select value={vesselId} onValueChange={handleVesselSelect}>
                                         <SelectTrigger>
-                                            <SelectValue placeholder={t.vessels.noVessels} />
+                                            <SelectValue placeholder={lang === 'hr' ? 'Odaberite plovilo' : 'Select a vessel'} />
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="new">— {t.vessels.addVessel} —</SelectItem>
