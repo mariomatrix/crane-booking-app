@@ -76,6 +76,7 @@ export const en: Translations = {
         firstName: "First Name",
         lastName: "Last Name",
         phone: "Phone",
+        username: "Username",
         registerButton: "Register",
         loginButton: "Log In",
         switchToLogin: "Already have an account? Log in.",

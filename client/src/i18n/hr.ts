@@ -79,6 +79,7 @@ export const hr = {
         firstName: "Ime",
         lastName: "Prezime",
         phone: "Telefon",
+        username: "Korisničko ime",
         registerButton: "Registriraj se",
         loginButton: "Prijavi se",
         switchToLogin: "Već imate račun? Prijavite se.",

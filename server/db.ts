@@ -40,14 +40,19 @@ export async function createLocalUser(data: {
   passwordHash: string;
   firstName: string;
   lastName: string;
+  username?: string;
   phone?: string;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const name = `${data.firstName} ${data.lastName}`.trim();
+  const name = data.username || `${data.firstName} ${data.lastName}`.trim();
   const res = await db.insert(users).values({
-    ...data,
+    email: data.email,
+    passwordHash: data.passwordHash,
+    firstName: data.firstName,
+    lastName: data.lastName,
     name,
+    phone: data.phone,
     loginMethod: "email",
     lastSignedIn: new Date(),
   }).returning({ id: users.id });

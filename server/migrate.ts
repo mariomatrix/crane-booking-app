@@ -39,16 +39,27 @@ async function runMigration() {
     if (existingAdmins.length === 0) {
         console.log("Seeding initial admin...");
         const passwordHash = await bcrypt.default.hash("Spinut", 12);
-        await db.insert(users).values({
-            email: "admin@spinut.hr",
-            passwordHash,
-            firstName: "Admin",
-            lastName: "Spinut",
-            name: "Admin Spinut",
-            role: "admin",
-            loginMethod: "email",
-        });
-        console.log("Initial admin created (admin@spinut.hr / Spinut).");
+        await db.insert(users).values([
+            {
+                email: "admin@spinut.hr",
+                passwordHash,
+                firstName: "Admin",
+                lastName: "Spinut",
+                name: "Admin Spinut",
+                role: "admin",
+                loginMethod: "email",
+            },
+            {
+                email: "mario@imagomatrix.hr",
+                passwordHash,
+                firstName: "Mario",
+                lastName: "Matrix",
+                name: "Mario Matrix",
+                role: "admin",
+                loginMethod: "email",
+            },
+        ]);
+        console.log("Admins seeded (admin@spinut.hr, mario@imagomatrix.hr). Password: Spinut");
     }
 
     await migrationClient.end();

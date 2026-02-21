@@ -18,6 +18,7 @@ export default function AuthPage() {
     const [password, setPassword] = useState("");
     const [firstName, setFirstName] = useState("");
     const [lastName, setLastName] = useState("");
+    const [username, setUsername] = useState("");
     const [phone, setPhone] = useState("");
 
     const loginMutation = trpc.auth.login.useMutation({
@@ -37,7 +38,14 @@ export default function AuthPage() {
         if (mode === "login") {
             loginMutation.mutate({ email, password });
         } else {
-            registerMutation.mutate({ email, password, firstName, lastName, phone: phone || undefined });
+            registerMutation.mutate({
+                email,
+                password,
+                firstName,
+                lastName,
+                username: username || undefined,
+                phone: phone || undefined
+            });
         }
     };
 
@@ -75,6 +83,12 @@ export default function AuthPage() {
                             <Label>{t.auth.password} *</Label>
                             <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={mode === "register" ? 8 : 1} autoComplete={mode === "login" ? "current-password" : "new-password"} />
                         </div>
+                        {mode === "register" && (
+                            <div className="space-y-2">
+                                <Label>{t.auth.username}</Label>
+                                <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="npr. mario123" />
+                            </div>
+                        )}
                         {mode === "register" && (
                             <div className="space-y-2">
                                 <Label>{t.auth.phone}</Label>

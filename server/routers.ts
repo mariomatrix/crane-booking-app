@@ -105,6 +105,7 @@ export const appRouter = router({
         password: z.string().min(8),
         firstName: z.string().min(1).max(100),
         lastName: z.string().min(1).max(100),
+        username: z.string().optional(),
         phone: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -118,6 +119,7 @@ export const appRouter = router({
           passwordHash,
           firstName: input.firstName,
           lastName: input.lastName,
+          username: input.username,
           phone: input.phone,
         });
         if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
