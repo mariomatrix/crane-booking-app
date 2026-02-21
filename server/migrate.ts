@@ -35,32 +35,29 @@ async function runMigration() {
     }
 
     // Admin seeding
-    const existingAdmins = await db.select().from(users).where(eq(users.role, "admin"));
-    if (existingAdmins.length === 0) {
-        console.log("Seeding initial admin...");
-        const passwordHash = await bcrypt.default.hash("Spinut", 12);
-        await db.insert(users).values([
-            {
-                email: "admin@spinut.hr",
+    console.log("Checking administrator accounts...");
+    const passwordHash = await bcrypt.default.hash("Spinut", 12);
+    const adminEmails = ["admin@spinut.hr", "mario@imagomatrix.hr"];
+
+    for (const email of adminEmails) {
+        const existing = await db.select().from(users).where(eq(users.email, email));
+        if (existing.length === 0) {
+            console.log(`Creating admin: ${email}`);
+            await db.insert(users).values({
+                email,
                 passwordHash,
-                firstName: "Admin",
-                lastName: "Spinut",
-                name: "Admin Spinut",
+                firstName: email.split("@")[0],
+                lastName: "Admin",
+                name: email.split("@")[0],
                 role: "admin",
                 loginMethod: "email",
-            },
-            {
-                email: "mario@imagomatrix.hr",
-                passwordHash,
-                firstName: "Mario",
-                lastName: "Matrix",
-                name: "Mario Matrix",
-                role: "admin",
-                loginMethod: "email",
-            },
-        ]);
-        console.log("Admins seeded (admin@spinut.hr, mario@imagomatrix.hr). Password: Spinut");
+            });
+        } else if (existing[0].role !== "admin") {
+            console.log(`Promoting to admin: ${email}`);
+            await db.update(users).set({ role: "admin" }).where(eq(users.email, email));
+        }
     }
+    console.log("Admin check completed.");
 
     await migrationClient.end();
 }
