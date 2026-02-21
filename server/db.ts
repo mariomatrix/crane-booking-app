@@ -100,6 +100,13 @@ export async function softDeleteUser(id: number) {
   await db.update(users).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, id));
 }
 
+export async function updateUser(id: number, data: Partial<InsertUser>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const { id: _, role: __, ...updateData } = data as any; // Don't allow updating id/role through this general helper
+  await db.update(users).set({ ...updateData, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
 // ─── Cranes ───────────────────────────────────────────────────────────
 export async function listCranes(activeOnly = true) {
   const db = await getDb();

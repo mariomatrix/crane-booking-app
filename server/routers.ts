@@ -323,6 +323,60 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    updateMe: protectedProcedure
+      .input(z.object({
+        firstName: z.string().min(1).optional(),
+        lastName: z.string().min(1).optional(),
+        name: z.string().optional(),
+        phone: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { updateUser: updateUserDb } = await import("./db");
+        await updateUserDb(ctx.user.id, input);
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "profile_updated",
+          entityType: "user",
+          entityId: ctx.user.id,
+          details: JSON.stringify(input)
+        });
+        return { success: true };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        name: z.string().optional(),
+        phone: z.string().optional(),
+        role: z.enum(["user", "admin"]).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { updateUser: updateUserDb, updateUserRole } = await import("./db");
+        const { id, role, ...data } = input;
+
+        if (Object.keys(data).length > 0) {
+          await updateUserDb(id, data);
+        }
+
+        if (role) {
+          if (id === ctx.user.id && role !== "admin") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Ne možete sami sebi promijeniti rolu." });
+          }
+          await updateUserRole(id, role);
+        }
+
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "user_updated_admin",
+          entityType: "user",
+          entityId: id,
+          details: JSON.stringify(input)
+        });
+        return { success: true };
+      }),
+
     delete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {

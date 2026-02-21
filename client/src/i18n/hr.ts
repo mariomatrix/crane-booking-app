@@ -10,6 +10,7 @@ export const hr = {
         adminPanel: "Admin panel",
         language: "Jezik",
         vessels: "Moja plovila",
+        profile: "Profil",
     },
     // Vessels
     vessels: {
@@ -142,6 +143,18 @@ export const hr = {
         todaySchedule: "Raspored za danas",
         maintenance: "ODRŽAVANJE",
         createMaintenance: "Zabilježi održavanje",
+        editUser: "Uredi korisnika",
+        userName: "Ime i prezime",
+        userRole: "Uloga",
+        userPhone: "Telefon",
+        userEmail: "Email",
+    },
+    // Profile
+    profile: {
+        title: "Moj profil",
+        subtitle: "Ažurirajte svoje osobne podatke",
+        save: "Spremi promjene",
+        success: "Profil je uspješno ažuriran.",
     },
 };
 

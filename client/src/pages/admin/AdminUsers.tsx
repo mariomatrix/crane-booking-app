@@ -28,16 +28,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Loader2, Shield, ShieldAlert, Key, Trash2 } from "lucide-react";
+import { LOADER_STYLE } from "@/const";
+import { useLang } from "@/contexts/LangContext";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2 } from "lucide-react";
 import { useState } from "react";
 
 export default function AdminUsers() {
+    const { t } = useLang();
     const users = trpc.user.list.useQuery();
-    const utils = trpc.useContext();
+    const utils = trpc.useUtils();
 
     const [resetUser, setResetUser] = useState<{ id: number; name: string } | null>(null);
     const [deleteUser, setDeleteUser] = useState<{ id: number; name: string } | null>(null);
+    const [editUser, setEditUser] = useState<any | null>(null);
     const [newPassword, setNewPassword] = useState("");
+
+    // Edit form state
+    const [editFirstName, setEditFirstName] = useState("");
+    const [editLastName, setEditLastName] = useState("");
+    const [editPhone, setEditPhone] = useState("");
+    const [editRole, setEditRole] = useState<"user" | "admin">("user");
 
     const setRole = trpc.user.setRole.useMutation({
         onSuccess: () => {
@@ -66,10 +76,40 @@ export default function AdminUsers() {
             setDeleteUser(null);
             utils.user.list.invalidate();
         },
-        onError: (err) => {
+        onError: (err: any) => {
             toast.error(err.message || "Greška pri brisanju korisnika.");
         },
     });
+
+    const adminUpdateUser = trpc.user.update.useMutation({
+        onSuccess: () => {
+            toast.success("Korisnički podaci uspješno ažurirani.");
+            setEditUser(null);
+            utils.user.list.invalidate();
+        },
+        onError: (err: any) => {
+            toast.error(err.message || "Greška pri ažuriranju korisnika.");
+        },
+    });
+
+    const openEdit = (user: any) => {
+        setEditUser(user);
+        setEditFirstName(user.firstName || "");
+        setEditLastName(user.lastName || "");
+        setEditPhone(user.phone || "");
+        setEditRole(user.role);
+    };
+
+    const handleUpdate = () => {
+        if (!editUser) return;
+        adminUpdateUser.mutate({
+            id: editUser.id,
+            firstName: editFirstName,
+            lastName: editLastName,
+            phone: editPhone,
+            role: editRole,
+        });
+    };
 
     if (users.isLoading) {
         return (
@@ -132,6 +172,14 @@ export default function AdminUsers() {
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => openEdit(user)}
+                                                title="Uredi korisnika"
+                                            >
+                                                <Edit2 className="h-4 w-4" />
+                                            </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
@@ -198,6 +246,70 @@ export default function AdminUsers() {
                 </DialogContent>
             </Dialog>
 
+            {/* Edit User Dialog */}
+            <Dialog open={!!editUser} onOpenChange={(open) => !open && setEditUser(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>{t.admin.editUser}: {editUser?.email}</DialogTitle>
+                        <DialogDescription>
+                            Ažurirajte podatke za ovog korisnika.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="editFirstName">{t.auth.firstName}</Label>
+                                <Input
+                                    id="editFirstName"
+                                    value={editFirstName}
+                                    onChange={(e) => setEditFirstName(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="editLastName">{t.auth.lastName}</Label>
+                                <Input
+                                    id="editLastName"
+                                    value={editLastName}
+                                    onChange={(e) => setEditLastName(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="editPhone">{t.auth.phone}</Label>
+                            <Input
+                                id="editPhone"
+                                value={editPhone}
+                                onChange={(e) => setEditPhone(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="editRole">{t.admin.userRole}</Label>
+                            <Select
+                                value={editRole}
+                                onValueChange={(val) => setEditRole(val as "user" | "admin")}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="user">Korisnik</SelectItem>
+                                    <SelectItem value="admin">Administrator</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditUser(null)}>Odustani</Button>
+                        <Button
+                            disabled={adminUpdateUser.isPending}
+                            onClick={handleUpdate}
+                        >
+                            {adminUpdateUser.isPending ? "Spremanje..." : "Spremi promjene"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Delete User Confirmation */}
             <Dialog open={!!deleteUser} onOpenChange={(open) => !open && setDeleteUser(null)}>
                 <DialogContent>
@@ -214,7 +326,7 @@ export default function AdminUsers() {
                             disabled={adminDeleteUser.isPending}
                             onClick={() => adminDeleteUser.mutate({ id: deleteUser!.id })}
                         >
-                            {adminDeleteUser.isPending ? "Brisanje..." : "Potvrdi Brisanje"}
+                            {adminDeleteUser.isPending ? t.vessels.delete : "Potvrdi Brisanje"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

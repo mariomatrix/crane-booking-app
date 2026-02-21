@@ -11,6 +11,7 @@ export const en: Translations = {
         adminPanel: "Admin Panel",
         language: "Language",
         vessels: "My Vessels",
+        profile: "Profile",
     },
     vessels: {
         title: "My Vessels",
@@ -137,5 +138,17 @@ export const en: Translations = {
         todaySchedule: "Today's Schedule",
         maintenance: "MAINTENANCE",
         createMaintenance: "Log Maintenance",
+        editUser: "Edit User",
+        userName: "Full Name",
+        userRole: "Role",
+        userPhone: "Phone",
+        userEmail: "Email",
+    },
+    // Profile
+    profile: {
+        title: "My Profile",
+        subtitle: "Update your personal information",
+        save: "Save Changes",
+        success: "Profile updated successfully.",
     },
 };

@@ -17,6 +17,7 @@ import AdminCranes from "./pages/admin/AdminCranes";
 import AdminCalendar from "./pages/admin/AdminCalendar";
 import AdminSettings from "./pages/admin/AdminSettings";
 import AdminUsers from "./pages/admin/AdminUsers";
+import Profile from "./pages/Profile";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/new-reservation" component={NewReservation} />
       <Route path="/my-reservations" component={MyReservations} />
       <Route path="/my-vessels" component={MyVessels} />
+      <Route path="/profile" component={Profile} />
 
       {/* Admin routes */}
       <Route path="/admin">
