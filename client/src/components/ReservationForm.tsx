@@ -51,6 +51,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
 
     const [validationWarning, setValidationWarning] = useState<string | null>(null);
     const [hasAttemptedVesselAutoFill, setHasAttemptedVesselAutoFill] = useState(false);
+    const [hasSyncedProfile, setHasSyncedProfile] = useState(false);
 
     const { data: cranesList = [], isLoading: cranesLoading } = trpc.crane.list.useQuery();
     const { data: myVessels = [], isLoading: vesselsLoading } = trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
@@ -90,12 +91,15 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
         setValidationWarning(null);
     }, [vesselWeight, vesselWidth, selectedCrane, t]);
 
-    // Sync phone from user profile
+    // Sync profile data (phone) once when user object is available
     useEffect(() => {
-        if (user?.phone && !contactPhone) {
-            setContactPhone(user.phone);
+        if (user && !hasSyncedProfile) {
+            if (user.phone && !contactPhone) {
+                setContactPhone(user.phone);
+            }
+            setHasSyncedProfile(true);
         }
-    }, [user?.phone, contactPhone]);
+    }, [user, hasSyncedProfile, contactPhone]);
 
     // Set first vessel as default if available
     useEffect(() => {
@@ -210,7 +214,13 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
             craneId: Number(craneId),
             requestedDate: selectedDate,
             slotCount: Number(slotCount),
-            vesselData: { vesselType, vesselWeight, vesselWidth, vesselLength },
+            vesselData: {
+                vesselType,
+                vesselName,
+                vesselWeight,
+                vesselWidth,
+                vesselLength
+            },
         });
     };
 
