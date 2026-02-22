@@ -13,6 +13,20 @@ async function runMigration() {
     const migrationClient = postgres(process.env.DATABASE_URL, { max: 1 });
     const db = drizzle(migrationClient);
 
+    // ─── Pre-migration check ───────────────────────────────────────────
+    // If __drizzle_migrations exists but key tables are missing, the DB was
+    // reset without clearing migration history. Drop the tracking table to
+    // force Drizzle to re-run all migrations from scratch.
+    try {
+        await migrationClient`SELECT 1 FROM "service_types" LIMIT 1`;
+    } catch (e: any) {
+        if (e?.code === "42P01") {
+            console.log("Key tables missing — resetting migration tracking table...");
+            await migrationClient`DROP TABLE IF EXISTS "__drizzle_migrations"`;
+            console.log("Migration tracking reset done.");
+        }
+    }
+
     await migrate(db, { migrationsFolder: "drizzle" });
     console.log("Migrations completed.");
 

@@ -80,6 +80,12 @@ DROP TABLE IF EXISTS "vessels" CASCADE;
 DROP TABLE IF EXISTS "cranes" CASCADE;
 DROP TABLE IF EXISTS "settings" CASCADE;
 DROP TABLE IF EXISTS "users" CASCADE;
+DROP TABLE IF EXISTS "service_types" CASCADE;
+DROP TABLE IF EXISTS "messages" CASCADE;
+DROP TABLE IF EXISTS "seasons" CASCADE;
+DROP TABLE IF EXISTS "holidays" CASCADE;
+DROP TABLE IF EXISTS "maintenance_blocks" CASCADE;
+DROP TABLE IF EXISTS "email_verification_tokens" CASCADE;
 --> statement-breakpoint
 
 -- ─── Users ────────────────────────────────────────────────────────────
