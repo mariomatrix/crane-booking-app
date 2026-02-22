@@ -38,6 +38,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
+import { LanguageSelector } from "./LanguageSelector";
 
 // menuItems moved inside component to support translations
 
@@ -192,6 +193,11 @@ function DashboardLayoutContent({
                   </span>
                 </div>
               ) : null}
+              {!isCollapsed && (
+                <div className="ml-auto">
+                  <LanguageSelector variant="ghost" showLabel={false} />
+                </div>
+              )}
             </div>
           </SidebarHeader>
 

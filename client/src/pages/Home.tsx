@@ -22,6 +22,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useLang } from "@/contexts/LangContext";
 import { Users } from "lucide-react";
+import { LanguageSelector } from "@/components/LanguageSelector";
 
 export default function Home() {
   const { t } = useLang();
@@ -141,6 +142,10 @@ export default function Home() {
                 Sign In
               </Button>
             )}
+
+            <div className="ml-2 border-l pl-2 flex items-center gap-2">
+              <LanguageSelector />
+            </div>
           </nav>
         </div>
       </header>
