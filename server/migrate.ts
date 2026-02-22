@@ -22,7 +22,7 @@ async function runMigration() {
     } catch (e: any) {
         if (e?.code === "42P01") {
             console.log("Key tables missing — resetting migration tracking table...");
-            await migrationClient`DROP TABLE IF EXISTS "__drizzle_migrations"`;
+            await migrationClient`DROP TABLE IF EXISTS "drizzle"."__drizzle_migrations"`;
             console.log("Migration tracking reset done.");
         }
     }
