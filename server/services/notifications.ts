@@ -5,39 +5,43 @@ import { sendReservationConfirmation, sendReservationRejection, sendWaitingListN
 import { sendReservationConfirmationSms, sendReservationRejectionSms, sendSms } from "../_core/sms";
 
 export async function processReminders() {
-    const db = await getDb();
-    if (!db) return;
+    try {
+        const db = await getDb();
+        if (!db) return;
 
-    const now = new Date();
-    const twentyFourHoursFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const windowEnd = new Date(twentyFourHoursFromNow.getTime() + 65 * 60 * 1000);
+        const now = new Date();
+        const twentyFourHoursFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+        const windowEnd = new Date(twentyFourHoursFromNow.getTime() + 65 * 60 * 1000);
 
-    const pending = await db.select({
-        res: reservations,
-        user: users,
-        crane: cranes
-    })
-        .from(reservations)
-        .innerJoin(users, eq(reservations.userId, users.id))
-        .innerJoin(cranes, eq(reservations.craneId, cranes.id))
-        .where(and(
-            eq(reservations.status, "approved"),
-            eq(reservations.reminderSent, false),
-            gte(reservations.startDate, twentyFourHoursFromNow),
-            lt(reservations.startDate, windowEnd)
-        ));
+        const pending = await db.select({
+            res: reservations,
+            user: users,
+            crane: cranes
+        })
+            .from(reservations)
+            .innerJoin(users, eq(reservations.userId, users.id))
+            .innerJoin(cranes, eq(reservations.craneId, cranes.id))
+            .where(and(
+                eq(reservations.status, "approved"),
+                eq(reservations.reminderSent, false),
+                gte(reservations.startDate, twentyFourHoursFromNow),
+                lt(reservations.startDate, windowEnd)
+            ));
 
-    for (const { res, user, crane } of pending) {
-        const dateStr = res.startDate.toLocaleString('hr-HR');
-        const msg = `PODSJETNIK: Vasa rezervacija ${res.reservationNumber} za ${crane.name} je sutra u ${dateStr}.`;
+        for (const { res, user, crane } of pending) {
+            const dateStr = res.startDate.toLocaleString('hr-HR');
+            const msg = `PODSJETNIK: Vasa rezervacija ${res.reservationNumber} za ${crane.name} je sutra u ${dateStr}.`;
 
-        // Use general SMS for reminders as there's no specific reminder core function
-        if (user.phone) await sendSms(user.phone, msg);
+            // Use general SMS for reminders as there's no specific reminder core function
+            if (user.phone) await sendSms(user.phone, msg);
 
-        // Track as sent
-        await db.update(reservations)
-            .set({ reminderSent: true })
-            .where(eq(reservations.id, res.id));
+            // Track as sent
+            await db.update(reservations)
+                .set({ reminderSent: true })
+                .where(eq(reservations.id, res.id));
+        }
+    } catch (error) {
+        console.error("Failed to process reminders:", error);
     }
 }
 
