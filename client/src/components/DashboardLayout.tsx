@@ -32,6 +32,7 @@ import {
   Settings,
   User,
   Users,
+  BarChart3,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -124,6 +125,7 @@ function DashboardLayoutContent({
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
     { icon: Users, label: t.admin.users, path: "/admin/users" },
+    { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings" },
   ];
   const { state, toggleSidebar } = useSidebar();

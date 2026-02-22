@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
-import { CalendarDays, CheckCircle, Clock, Construction, Users, XCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { BarChart3, CalendarDays, CheckCircle, Clock, Construction, Users, XCircle } from "lucide-react";
 import { useLang } from "@/contexts/LangContext";
 import { useMemo } from "react";
 import { useLocation } from "wouter";
@@ -13,18 +14,24 @@ export default function AdminDashboard() {
   const { data: usersList = [] } = trpc.user.list.useQuery();
 
   const stats = useMemo(() => {
-    const pending = allReservations.filter((r) => r.status === "pending").length;
-    const approved = allReservations.filter((r) => r.status === "approved").length;
-    const rejected = allReservations.filter((r) => r.status === "rejected").length;
-    const activeCranes = cranesList.filter((c) => c.isActive).length;
+    const pending = allReservations.filter((r: any) => r.status === "pending").length;
+    const approved = allReservations.filter((r: any) => r.status === "approved").length;
+    const rejected = allReservations.filter((r: any) => r.status === "rejected").length;
+    const activeCranes = cranesList.filter((c: any) => c.isActive).length;
     return { pending, approved, rejected, activeCranes, total: allReservations.length };
   }, [allReservations, cranesList]);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Dashboard</h2>
-        <p className="text-sm text-muted-foreground">Overview of your crane booking system.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">Dashboard</h2>
+          <p className="text-sm text-muted-foreground">Pregled sustava rezervacija dizalica.</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setLocation("/admin/analytics")} className="gap-2">
+          <BarChart3 className="h-4 w-4" />
+          Detaljna analitika
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

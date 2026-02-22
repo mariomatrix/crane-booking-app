@@ -595,20 +595,31 @@ export const appRouter = router({
       }),
 
     cancel: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.number(), reason: z.string().min(3) }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.userId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
-        if (reservation.status !== "pending") {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Mogu se otkazati samo rezervacije na čekanju." });
-        }
-        await updateReservationStatus(input.id, "cancelled", ctx.user.id);
-        await createAuditEntry({ userId: ctx.user.id, action: "reservation_cancelled", entityType: "reservation", entityId: input.id });
 
-        // Phase 2: Notify waiting list
-        const dateStr = reservation.startDate.toISOString().split("T")[0];
-        notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+        // Allow cancelling both pending and approved
+        if (reservation.status !== "pending" && reservation.status !== "approved") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Mogu se otkazati samo rezervacije na čekanju ili odobrene rezervacije." });
+        }
+
+        await updateReservationStatus(input.id, "cancelled", undefined, undefined, input.reason, "user");
+        await createAuditEntry({
+          userId: ctx.user.id,
+          action: "reservation_cancelled",
+          entityType: "reservation",
+          entityId: input.id,
+          details: JSON.stringify({ reason: input.reason })
+        });
+
+        // If it was approved, notify waiting list that a slot opened up
+        if (reservation.status === "approved") {
+          const dateStr = reservation.startDate.toISOString().split("T")[0];
+          notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+        }
 
         return { success: true };
       }),
@@ -1028,6 +1039,71 @@ export const appRouter = router({
     list: adminProcedure
       .input(z.object({ limit: z.number().optional().default(50) }).optional())
       .query(async ({ input }) => listAuditLog(input?.limit ?? 50)),
+  }),
+
+  // ─── Analytics (Admin Only) ──────────────────────────────────────────
+  analytics: router({
+    dashboard: adminProcedure
+      .query(async () => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        // 1. Crane Utilization (last 30 days)
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+        const allRes = await db.select().from(reservations).where(gte(reservations.startDate, thirtyDaysAgo));
+        const allCranes = await db.select().from(cranes);
+
+        const craneStats = allCranes.map(c => {
+          const craneRes = allRes.filter(r => r.craneId === c.id);
+          const approved = craneRes.filter(r => r.status === "approved" && !r.isMaintenance);
+          const maintenance = craneRes.filter(r => r.isMaintenance);
+          const rejected = craneRes.filter(r => r.status === "rejected");
+          const cancelled = craneRes.filter(r => r.status === "cancelled");
+
+          const totalHoursApproved = approved.reduce((acc, r) => acc + (r.endDate.getTime() - r.startDate.getTime()) / 3600000, 0);
+          const totalHoursMaint = maintenance.reduce((acc, r) => acc + (r.endDate.getTime() - r.startDate.getTime()) / 3600000, 0);
+
+          return {
+            craneId: c.id,
+            craneName: c.name,
+            utilization: totalHoursApproved,
+            maintenanceHours: totalHoursMaint,
+            rejectedCount: rejected.length,
+            cancelledCount: cancelled.length
+          };
+        });
+
+        // 2. User Statistics (Top 5)
+        const userResCounts: Record<number, { count: number; name: string }> = {};
+        for (const r of allRes) {
+          if (r.status === "approved" && !r.isMaintenance) {
+            if (!userResCounts[r.userId]) {
+              const u = await getUserById(r.userId);
+              userResCounts[r.userId] = { count: 0, name: u?.name || u?.email || "Unknown" };
+            }
+            userResCounts[r.userId].count++;
+          }
+        }
+        const topUsers = Object.entries(userResCounts)
+          .map(([id, data]) => ({ id: Number(id), ...data }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
+
+        // 3. Cancellation Reasons
+        const cancelReasons: Record<string, number> = {};
+        allRes.filter(r => r.status === "cancelled" && r.cancelReason).forEach(r => {
+          const reason = r.cancelReason || "Nije navedeno";
+          cancelReasons[reason] = (cancelReasons[reason] || 0) + 1;
+        });
+
+        return {
+          craneStats,
+          topUsers,
+          cancelReasons: Object.entries(cancelReasons).map(([name, value]) => ({ name, value }))
+        };
+      }),
   }),
 });
 

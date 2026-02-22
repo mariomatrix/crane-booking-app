@@ -215,12 +215,22 @@ export async function updateReservationStatus(
   id: number,
   status: "approved" | "rejected" | "cancelled",
   reviewedBy?: number,
-  adminNotes?: string
+  adminNotes?: string,
+  cancelReason?: string,
+  cancelledByType?: "user" | "admin"
 ) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(reservations)
-    .set({ status, reviewedBy, reviewedAt: new Date(), adminNotes, updatedAt: new Date() })
+    .set({
+      status,
+      reviewedBy,
+      reviewedAt: new Date(),
+      adminNotes,
+      cancelReason,
+      cancelledByType,
+      updatedAt: new Date()
+    })
     .where(eq(reservations.id, id));
 }
 

@@ -114,6 +114,7 @@ export const en: Translations = {
         settings: "Settings",
         users: "Users",
         waitingList: "Waiting List",
+        analytics: "Analytics",
         pending: "Pending",
         approved: "Approved",
         rejected: "Rejected",

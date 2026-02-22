@@ -119,6 +119,7 @@ export const hr = {
         settings: "Postavke",
         users: "Korisnici",
         waitingList: "Lista čekanja",
+        analytics: "Analitika",
         pending: "Na čekanju",
         approved: "Odobreno",
         rejected: "Odbijeno",

@@ -100,6 +100,8 @@ export const reservations = pgTable("reservations", {
     adminNotes: text("adminNotes"),
     reviewedBy: integer("reviewedBy"),
     reviewedAt: timestamp("reviewedAt"),
+    cancelReason: text("cancelReason"),
+    cancelledByType: varchar("cancelledByType", { length: 20 }), // 'user' or 'admin'
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });

@@ -279,6 +279,7 @@ export default function AdminCalendar() {
                     user: r.user?.name || r.user?.email || "Nepoznat",
                     craneId: r.craneId,
                     originalStart: r.startDate,
+                    cancelReason: r.cancelReason,
                 },
             };
         }).filter(Boolean);
@@ -592,7 +593,7 @@ export default function AdminCalendar() {
                         height="100%"
                         editable={true}
                         droppable={true}
-                        eventReceive={async (info) => {
+                        eventReceive={async (info: any) => {
                             const p = info.event.extendedProps;
                             if (p.isFromWaitingList) {
                                 // Calculate crane and time
@@ -624,7 +625,7 @@ export default function AdminCalendar() {
                         eventDrop={handleEventDrop}
                         eventClick={handleEventClick}
                         events={calendarEvents}
-                        dayHeaderContent={(arg) => {
+                        dayHeaderContent={(arg: any) => {
                             const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
                             const crane = activeCranes[diff];
                             return crane ? (
@@ -636,7 +637,7 @@ export default function AdminCalendar() {
                                 </div>
                             ) : "";
                         }}
-                        eventContent={(arg) => {
+                        eventContent={(arg: any) => {
                             const p = arg.event.extendedProps;
                             return (
                                 <div className="flex flex-col h-full overflow-hidden p-1">
@@ -645,6 +646,11 @@ export default function AdminCalendar() {
                                         {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse" />}
                                     </div>
                                     <div className="text-[10px] font-bold opacity-80 leading-tight truncate">{p.user}</div>
+                                    {p.status === 'cancelled' && p.cancelReason && (
+                                        <div className="text-[9px] italic opacity-90 leading-tight mt-1 border-t border-white/20 pt-1">
+                                            Razlog: {p.cancelReason}
+                                        </div>
+                                    )}
                                     {!p.isMaintenance && p.status === 'pending' && (
                                         <div className="mt-auto flex gap-1 pt-1 border-t border-white/20">
                                             <button
@@ -713,7 +719,7 @@ export default function AdminCalendar() {
                                                         size="sm"
                                                         variant="outline"
                                                         className="h-7 text-[10px] w-full border-blue-200 text-blue-700 hover:bg-blue-50"
-                                                        onClick={(e) => { e.stopPropagation(); handleEditWaiting(w); }}
+                                                        onClick={(e: React.MouseEvent) => { e.stopPropagation(); handleEditWaiting(w); }}
                                                     >
                                                         Uredi zahtjev
                                                     </Button>

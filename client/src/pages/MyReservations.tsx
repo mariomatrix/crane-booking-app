@@ -8,16 +8,16 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useState } from "react";
 
 function formatDate(date: Date | string) {
   return new Date(date).toLocaleDateString("en-US", {
@@ -31,6 +31,8 @@ export default function MyReservations() {
   const { user, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.myReservations.useQuery(
     undefined,
@@ -39,7 +41,9 @@ export default function MyReservations() {
 
   const cancelMutation = trpc.reservation.cancel.useMutation({
     onSuccess: () => {
-      toast.success("Reservation cancelled.");
+      toast.success("Rezervacija je otkazana.");
+      setCancellingId(null);
+      setCancelReason("");
       utils.reservation.myReservations.invalidate();
     },
     onError: (error) => {
@@ -148,32 +152,19 @@ export default function MyReservations() {
                         </div>
                       )}
                     </div>
-                    {reservation.status === "pending" && (
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="outline" size="sm" className="text-destructive shrink-0">
-                            <X className="h-3.5 w-3.5 mr-1" />
-                            Cancel
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Cancel Reservation?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              This will cancel your reservation request. This action cannot be undone.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Keep Reservation</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => cancelMutation.mutate({ id: reservation.id })}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            >
-                              Cancel Reservation
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                    {(reservation.status === "pending" || reservation.status === "approved") && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive shrink-0"
+                        onClick={() => {
+                          setCancellingId(reservation.id);
+                          setCancelReason("");
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5 mr-1" />
+                        Otkazivanje
+                      </Button>
                     )}
                   </div>
                 </CardContent>
@@ -181,6 +172,42 @@ export default function MyReservations() {
             ))}
           </div>
         )}
+
+        <Dialog open={!!cancellingId} onOpenChange={(open) => !open && setCancellingId(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Otkazivanje rezervacije</DialogTitle>
+              <DialogDescription>
+                Molimo navedite razlog otkazivanja. Ovo nam pomaže u boljem planiranju termina.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="reason">Razlog otkazivanja</Label>
+                <Textarea
+                  id="reason"
+                  placeholder="npr. Promjena plana, loše vrijeme, brod nije spreman..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="min-h-[100px]"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCancellingId(null)}>
+                Odustani
+              </Button>
+              <Button
+                destructive
+                disabled={cancelReason.length < 3 || cancelMutation.isPending}
+                onClick={() => cancellingId && cancelMutation.mutate({ id: cancellingId, reason: cancelReason })}
+              >
+                {cancelMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Potvrdi otkazivanje
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
