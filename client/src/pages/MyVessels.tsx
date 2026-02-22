@@ -138,6 +138,7 @@ export default function MyVessels() {
                                                     <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
                                                     <SelectItem value="motorni">{t.form.vesselTypeMotorboat}</SelectItem>
                                                     <SelectItem value="katamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                                                    <SelectItem value="ostalo">{t.form.vesselTypeOther}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -218,9 +219,10 @@ export default function MyVessels() {
                                         </Button>
                                     </div>
                                     <CardDescription>
-                                        {vessel.type === "sailboat" ? t.form.vesselTypeSailboat :
-                                            vessel.type === "motorboat" ? t.form.vesselTypeMotorboat :
-                                                t.form.vesselTypeCatamaran}
+                                        {vessel.type === "jedrilica" ? t.form.vesselTypeSailboat :
+                                            vessel.type === "motorni" ? t.form.vesselTypeMotorboat :
+                                                vessel.type === "katamaran" ? t.form.vesselTypeCatamaran :
+                                                    t.form.vesselTypeOther}
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent>

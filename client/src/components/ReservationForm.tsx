@@ -291,9 +291,10 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                     <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId && vesselId !== "new"}>
                                         <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="sailboat">{t.form.vesselTypeSailboat}</SelectItem>
-                                            <SelectItem value="motorboat">{t.form.vesselTypeMotorboat}</SelectItem>
-                                            <SelectItem value="catamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                                            <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
+                                            <SelectItem value="motorni">{t.form.vesselTypeMotorboat}</SelectItem>
+                                            <SelectItem value="katamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                                            <SelectItem value="ostalo">{t.form.vesselTypeOther}</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>

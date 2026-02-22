@@ -43,6 +43,7 @@ export const en: Translations = {
         vesselTypeSailboat: "Sailboat",
         vesselTypeMotorboat: "Motorboat",
         vesselTypeCatamaran: "Catamaran",
+        vesselTypeOther: "Other",
         vesselName: "Vessel Name",
         vesselLength: "Length (m)",
         vesselWidth: "Width (m)",

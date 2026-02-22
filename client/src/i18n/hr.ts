@@ -45,6 +45,7 @@ export const hr = {
         vesselTypeSailboat: "Jedrilica",
         vesselTypeMotorboat: "Motorni brod",
         vesselTypeCatamaran: "Katamaran",
+        vesselTypeOther: "Ostalo",
         vesselName: "Naziv plovila",
         vesselLength: "Dužina (m)",
         vesselWidth: "Širina (m)",
