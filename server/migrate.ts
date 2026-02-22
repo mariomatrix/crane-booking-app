@@ -107,26 +107,35 @@ async function runMigration() {
 
     // ─── Seed: Admin Users ───────────────────────────────────────────
     console.log("Checking administrator accounts...");
-    const passwordHash = await bcrypt.default.hash("Spinut", 12);
-    const adminEmails = ["admin@spinut.hr", "mario@imagomatrix.hr"];
+    const admins = [
+        { email: "admin@lucicaspinut.hr", password: "$pinut89823" },
+        { email: "admin@spinut.hr", password: "Spinut" },
+        { email: "mario@imagomatrix.hr", password: "Spinut" },
+    ];
 
-    for (const email of adminEmails) {
-        const existing = await db.select().from(users).where(eq(users.email, email));
+    for (const admin of admins) {
+        const passwordHash = await bcrypt.default.hash(admin.password, 12);
+        const existing = await db.select().from(users).where(eq(users.email, admin.email));
+
         if (existing.length === 0) {
-            console.log(`Creating admin: ${email}`);
+            console.log(`Creating admin: ${admin.email}`);
             await db.insert(users).values({
-                email,
+                email: admin.email,
                 passwordHash,
-                firstName: email.split("@")[0],
+                firstName: admin.email.split("@")[0],
                 lastName: "Admin",
-                name: email.split("@")[0],
+                name: admin.email.split("@")[0],
                 role: "admin",
                 loginMethod: "email",
                 userStatus: "active",
             });
-        } else if (existing[0].role !== "admin") {
-            console.log(`Promoting to admin: ${email}`);
-            await db.update(users).set({ role: "admin" }).where(eq(users.email, email));
+        } else {
+            console.log(`Ensuring admin role and updating password: ${admin.email}`);
+            await db.update(users).set({
+                role: "admin",
+                passwordHash,
+                updatedAt: new Date()
+            }).where(eq(users.email, admin.email));
         }
     }
     console.log("Admin check completed.");
