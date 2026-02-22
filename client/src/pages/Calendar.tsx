@@ -16,6 +16,7 @@ import { CalendarDays, Filter, Info } from "lucide-react";
 import { useLang } from "@/contexts/LangContext";
 import { ReservationForm } from "@/components/ReservationForm";
 import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,7 @@ interface CalendarEvent {
 
 export default function Calendar() {
   const { t, lang } = useLang();
+  const { isAuthenticated } = useAuth();
   const [craneIdFilter, setCraneIdFilter] = useState("all");
   const calendarRef = useRef<FullCalendar>(null);
   const isDesktop = useMediaQuery("(min-width: 768px)");
@@ -90,6 +92,11 @@ export default function Calendar() {
   );
 
   const handleDateClick = (arg: { view: { type: string }, dateStr: string, date: Date }) => {
+    if (!isAuthenticated) {
+      toast.error(t.auth.signInRequired);
+      return;
+    }
+
     // Bullet-proof: prevent booking in the past
     if (arg.date < new Date()) {
       toast.error(lang === 'hr' ? 'Ne možete rezervirati termin koji je već prošao.' : 'You cannot book a slot in the past.');
@@ -114,6 +121,12 @@ export default function Calendar() {
 
   const handleEventClick = (info: any) => {
     info.jsEvent.stopPropagation();
+
+    if (!isAuthenticated) {
+      toast.error(t.auth.signInRequired);
+      return;
+    }
+
     const props = info.event.extendedProps;
 
     // Open booking modal for waiting list
@@ -197,7 +210,12 @@ export default function Calendar() {
 
           <div className="mt-4 flex items-center gap-2 bg-blue-50 border border-blue-100 p-2.5 rounded-md text-blue-800 text-sm">
             <Info className="h-4 w-4 shrink-0" />
-            <span>{lang === 'hr' ? 'Kliknite na slobodan termin ili zauzeti termin za upis na listu čekanja.' : 'Click on a free slot or an occupied one to join the waiting list.'}</span>
+            <span>
+              {isAuthenticated
+                ? (lang === 'hr' ? 'Kliknite na slobodan termin ili zauzeti termin za upis na listu čekanja.' : 'Click on a free slot or an occupied one to join the waiting list.')
+                : (lang === 'hr' ? 'Prijavite se kako biste mogli rezervirati termin.' : 'Please sign in to book a slot.')
+              }
+            </span>
           </div>
         </div>
       </div>
