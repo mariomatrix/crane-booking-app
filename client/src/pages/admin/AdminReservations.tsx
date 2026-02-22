@@ -37,9 +37,9 @@ export default function AdminReservations() {
   const [statusFilter, setStatusFilter] = useState("pending");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogAction, setDialogAction] = useState<"approve" | "reject">("approve");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adminNotes, setAdminNotes] = useState("");
-  const [[,], setLocation] = useLocation();
+  const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
 
   // Handle status filter from URL
@@ -75,7 +75,7 @@ export default function AdminReservations() {
     onError: (error) => toast.error(error.message),
   });
 
-  const openDialog = (id: number, action: "approve" | "reject") => {
+  const openDialog = (id: string, action: "approve" | "reject") => {
     setSelectedId(id);
     setDialogAction(action);
     setAdminNotes("");
@@ -85,7 +85,7 @@ export default function AdminReservations() {
   const handleConfirm = () => {
     if (!selectedId) return;
     const mutation = dialogAction === "approve" ? approveMutation : rejectMutation;
-    mutation.mutate({ id: selectedId, adminNotes: adminNotes || undefined });
+    mutation.mutate({ id: selectedId, adminNote: adminNotes || undefined });
   };
 
   const pendingCount = reservationsList.filter((r) => r.status === "pending").length;
@@ -158,7 +158,7 @@ export default function AdminReservations() {
 
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <CalendarDays className="h-3.5 w-3.5" />
-                      {formatDate(reservation.startDate)} — {formatDate(reservation.endDate)}
+                      {reservation.scheduledStart ? formatDate(reservation.scheduledStart) : (reservation.requestedDate ?? "TBD")} — {reservation.scheduledEnd ? formatDate(reservation.scheduledEnd) : ""}
                     </div>
 
                     {reservation.vesselName && (
@@ -173,10 +173,10 @@ export default function AdminReservations() {
                       </p>
                     )}
 
-                    {reservation.adminNotes && (
+                    {reservation.adminNote && (
                       <div className="mt-2 p-3 bg-muted rounded-md text-sm">
                         <span className="font-medium">Admin note: </span>
-                        {reservation.adminNotes}
+                        {reservation.adminNote}
                       </div>
                     )}
                   </div>

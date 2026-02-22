@@ -108,8 +108,7 @@ export default function AdminDashboard() {
                         {r.crane?.name ?? `Crane #${r.craneId}`}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {r.user?.name ?? "Unknown"} — {new Date(r.startDate).toLocaleDateString()} to{" "}
-                        {new Date(r.endDate).toLocaleDateString()}
+                        {r.user?.name ?? "Unknown"} — {r.scheduledStart ? new Date(r.scheduledStart).toLocaleDateString() : r.requestedDate ?? "TBD"}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 text-xs text-amber-600">

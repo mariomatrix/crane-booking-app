@@ -37,8 +37,8 @@ export default function AdminUsers() {
     const users = trpc.user.list.useQuery();
     const utils = trpc.useUtils();
 
-    const [resetUser, setResetUser] = useState<{ id: number; name: string } | null>(null);
-    const [deleteUser, setDeleteUser] = useState<{ id: number; name: string } | null>(null);
+    const [resetUser, setResetUser] = useState<{ id: string; name: string } | null>(null);
+    const [deleteUser, setDeleteUser] = useState<{ id: string; name: string } | null>(null);
     const [editUser, setEditUser] = useState<any | null>(null);
     const [newPassword, setNewPassword] = useState("");
 

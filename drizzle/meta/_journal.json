@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1771550581593,
-      "tag": "0000_lyrical_eternity",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1771699801011,
-      "tag": "0001_large_bishop",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1771700363903,
-      "tag": "0002_marvelous_hulk",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1771720420498,
-      "tag": "0003_naive_blacklash",
+      "when": 1740239400000,
+      "tag": "0000_v2_initial",
       "breakpoints": true
     }
   ]

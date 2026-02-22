@@ -291,7 +291,7 @@ class SDKServer {
     }
 
     await db.upsertUser({
-      openId: user.openId,
+      openId: (user as any).googleId ?? (user as any).openId,
       lastSignedIn: signedInAt,
     });
 

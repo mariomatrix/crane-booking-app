@@ -32,10 +32,10 @@ import { useMediaQuery } from "@/_core/hooks/useMediaQuery";
 const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
 interface CalendarEvent {
-  id: number;
-  startDate: string | Date;
-  endDate: string | Date;
-  craneId: number;
+  id: string;
+  scheduledStart: string | Date;
+  scheduledEnd: string | Date;
+  craneId: string;
   craneName: string;
   liftPurpose?: string;
   vesselType?: string;
@@ -54,7 +54,7 @@ export default function Calendar() {
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
   const { data: events = [], isLoading, refetch } = trpc.calendar.events.useQuery(
-    { craneId: craneIdFilter !== "all" ? Number(craneIdFilter) : undefined },
+    { craneId: craneIdFilter !== "all" ? craneIdFilter : undefined },
     { refetchInterval: 30000 }
   );
   const { data: sysSettings } = trpc.settings.get.useQuery();
@@ -62,8 +62,8 @@ export default function Calendar() {
   const workEnd = sysSettings?.workdayEnd ?? "16:00";
 
   const craneColorMap = useMemo(() => {
-    const map: Record<number, string> = {};
-    cranesList.forEach((c: { id: number }, i: number) => {
+    const map: Record<string, string> = {};
+    cranesList.forEach((c: { id: string }, i: number) => {
       map[c.id] = CRANE_COLORS[i % CRANE_COLORS.length];
     });
     return map;
@@ -71,11 +71,11 @@ export default function Calendar() {
 
   const calendarEvents = useMemo(
     () =>
-      events.map((event: CalendarEvent) => ({
+      events.map((event: any) => ({
         id: String(event.id),
         title: `${event.craneName}${event.vesselType ? ` (${event.vesselType})` : ""}${event.status === "pending" ? " (ČEKANJE)" : ""}`,
-        start: new Date(event.startDate),
-        end: new Date(event.endDate),
+        start: new Date(String(event.scheduledStart)),
+        end: new Date(String(event.scheduledEnd)),
         backgroundColor: craneColorMap[event.craneId] ?? CRANE_COLORS[0],
         borderColor: event.status === "pending" ? "#94a3b8" : "transparent",
         className: event.status === "pending" ? "event-pending" : "",
@@ -103,7 +103,7 @@ export default function Calendar() {
 
     if (view === "timeGridDay") {
       if (craneIdFilter !== "all") {
-        formData.craneId = Number(craneIdFilter);
+        formData.craneId = craneIdFilter;
       }
       formData.startTime = arg.date.toISOString();
     }
@@ -179,7 +179,7 @@ export default function Calendar() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t.calendar.allCranes}</SelectItem>
-                  {cranesList.map((crane: { id: number, name: string }) => (
+                  {cranesList.map((crane: { id: string, name: string }) => (
                     <SelectItem key={crane.id} value={String(crane.id)}>
                       <span className="flex items-center gap-2">
                         <span
@@ -247,7 +247,7 @@ export default function Calendar() {
 
         {/* Legend */}
         <div className="mt-4 flex flex-wrap gap-3">
-          {cranesList.map((crane: { id: number, name: string }) => (
+          {cranesList.map((crane: { id: string, name: string }) => (
             <div key={crane.id} className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <div className="h-3 w-3 rounded-sm" style={{ backgroundColor: craneColorMap[crane.id] }} />
               <span>{crane.name}</span>

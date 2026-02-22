@@ -57,13 +57,12 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
     const { data: myVessels = [], isLoading: vesselsLoading } = trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
     const slotDuration = 60;
 
-    const canFetchSlots = !!craneId && !!selectedDate && !!slotCount;
+    const canFetchSlots = !!craneId && !!selectedDate;
     const { data: slotsData, isFetching: slotsFetching } = trpc.calendar.availableSlots.useQuery(
         {
-            craneId: Number(craneId),
+            craneId: craneId,
             date: selectedDate,
-            slotCount: Number(slotCount),
-            tzOffset: new Date().getTimezoneOffset()
+            durationMin: Number(slotCount) * 60,
         },
         { enabled: canFetchSlots }
     );
@@ -76,9 +75,9 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
     useEffect(() => {
         if (!selectedCrane || !vesselWeight) { setValidationWarning(null); return; }
         const weight = Number(vesselWeight);
-        const capacity = Number(selectedCrane.capacity);
+        const capacity = Number(selectedCrane.maxCapacityKg);
         if (weight > capacity) {
-            setValidationWarning(t.form.errors.weightExceeded + ` (max ${capacity}t)`);
+            setValidationWarning(t.form.errors.weightExceeded + ` (max ${capacity}kg)`);
             return;
         }
         if (selectedCrane.maxPoolWidth && vesselWidth) {
@@ -111,10 +110,10 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
             // Populate fields
             setVesselType(firstVessel.type);
             setVesselName(firstVessel.name);
-            setVesselLength(firstVessel.length || "");
-            setVesselWidth(firstVessel.width || "");
-            setVesselDraft(firstVessel.draft || "");
-            setVesselWeight(firstVessel.weight || "");
+            setVesselLength(firstVessel.lengthM ? String(firstVessel.lengthM) : "");
+            setVesselWidth(firstVessel.beamM ? String(firstVessel.beamM) : "");
+            setVesselDraft(firstVessel.draftM ? String(firstVessel.draftM) : "");
+            setVesselWeight(firstVessel.weightKg ? String(firstVessel.weightKg) : "");
 
             setHasAttemptedVesselAutoFill(true);
         }
@@ -129,11 +128,10 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
         }
     }, [initialData]);
 
-    // Default to Small Crane if nothing selected
+    // Default to smallest capacity crane if nothing selected
     useEffect(() => {
         if (!cranesLoading && cranesList.length > 0 && !craneId) {
-            // Find the one with smallest capacity (Mala dizalica)
-            const smallest = [...cranesList].sort((a, b) => Number(a.capacity) - Number(b.capacity))[0];
+            const smallest = [...cranesList].sort((a, b) => Number(a.maxCapacityKg) - Number(b.maxCapacityKg))[0];
             if (smallest) setCraneId(String(smallest.id));
         }
     }, [cranesList, cranesLoading, craneId]);
@@ -168,19 +166,18 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
         const endMs = startMs + Number(slotCount) * slotDuration * 60000;
 
         createMutation.mutate({
-            craneId: Number(craneId),
-            startDate: new Date(startMs),
-            endDate: new Date(endMs),
-            vesselId: vesselId ? Number(vesselId) : undefined,
+            craneId: craneId,
+            scheduledStart: new Date(startMs),
+            scheduledEnd: new Date(endMs),
+            vesselId: vesselId && vesselId !== "new" ? vesselId : undefined,
             vesselType: vesselType as any,
             vesselName: vesselName || undefined,
-            vesselLength: Number(vesselLength),
-            vesselWidth: Number(vesselWidth),
-            vesselDraft: Number(vesselDraft),
-            vesselWeight: Number(vesselWeight),
+            vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
+            vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
+            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
+            vesselWeightKg: Number(vesselWeight),
             liftPurpose,
             contactPhone,
-            isMaintenance: initialData?.isMaintenance || false,
         });
     };
 
@@ -201,25 +198,24 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
         if (vessel) {
             setVesselType(vessel.type);
             setVesselName(vessel.name);
-            setVesselLength(vessel.length || "");
-            setVesselWidth(vessel.width || "");
-            setVesselDraft(vessel.draft || "");
-            setVesselWeight(vessel.weight || "");
+            setVesselLength(vessel.lengthM ? String(vessel.lengthM) : "");
+            setVesselWidth(vessel.beamM ? String(vessel.beamM) : "");
+            setVesselDraft(vessel.draftM ? String(vessel.draftM) : "");
+            setVesselWeight(vessel.weightKg ? String(vessel.weightKg) : "");
         }
     };
 
     const handleJoinWaiting = () => {
         if (!craneId || !selectedDate) { toast.error(t.form.errors.required); return; }
         joinWaitingMutation.mutate({
-            craneId: Number(craneId),
+            craneId: craneId,
             requestedDate: selectedDate,
-            slotCount: Number(slotCount),
             vesselData: {
                 vesselType,
                 vesselName,
-                vesselWeight,
-                vesselWidth,
-                vesselLength
+                weightKg: vesselWeight,
+                beamM: vesselWidth,
+                lengthM: vesselLength
             },
         });
     };
@@ -255,7 +251,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                 <SelectContent>
                                     {cranesList.map((crane: any) => (
                                         <SelectItem key={crane.id} value={String(crane.id)}>
-                                            {crane.name} — {crane.capacity}t
+                                            {crane.name} — {crane.maxCapacityKg}kg
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -358,7 +354,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                     <Loader2 className="h-4 w-4 animate-spin" /> {lang === 'hr' ? 'Provjera termina...' : 'Checking slots...'}
                                 </div>
                             ) : showWaitingListOption ? (
-                                <Alert variant="warning" className="bg-amber-50 border-amber-200">
+                                <Alert variant="default" className="bg-amber-50 border-amber-200">
                                     <AlertTriangle className="h-4 w-4 text-amber-600" />
                                     <AlertDescription className="text-xs text-amber-800">
                                         {lang === 'hr'
@@ -373,7 +369,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                                 <Select value={startTime} onValueChange={setStartTime}>
                                     <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                                     <SelectContent>
-                                        {(slotsData?.availableStarts || []).map((s: string) => {
+                                        {((slotsData as any)?.availableStarts || []).map((s: string) => {
                                             const d = new Date(s);
                                             return (
                                                 <SelectItem key={d.toISOString()} value={d.toISOString()}>
@@ -411,7 +407,7 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !!validationWarning || !startTime || showWaitingListOption}
+                    disabled={createMutation.isPending || !!validationWarning || !startTime || !!showWaitingListOption}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (

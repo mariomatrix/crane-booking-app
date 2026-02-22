@@ -1,7 +1,7 @@
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
+import { publicProcedure, protectedProcedure, adminProcedure, operatorProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import {
   listCranes,
@@ -49,7 +49,20 @@ import {
 } from "./_core/email";
 import { notifyStatusChange, notifyWaitingList } from "./services/notifications";
 import { notifyOwner } from "./_core/notification";
-import { users, passwordResets, reservations, waitingList, settings, cranes, auditLog } from "../drizzle/schema";
+import {
+  users,
+  passwordResets,
+  reservations,
+  waitingList,
+  settings,
+  cranes,
+  auditLog,
+  serviceTypes,
+  messages,
+  maintenanceBlocks,
+  holidays,
+  seasons,
+} from "../drizzle/schema";
 import { and, eq, gte, isNull, or, lte, desc } from "drizzle-orm";
 import crypto from "crypto";
 import {
@@ -246,7 +259,7 @@ export const appRouter = router({
     }),
 
     getById: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .query(async ({ input, ctx }) => {
         const vessel = await getVesselById(input.id);
         if (!vessel || vessel.ownerId !== ctx.user.id) {
@@ -258,43 +271,45 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
-        type: z.enum(["sailboat", "motorboat", "catamaran"]),
-        length: z.string().optional(),
-        width: z.string().optional(),
-        draft: z.string().optional(),
-        weight: z.string().optional(),
+        type: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
+        lengthM: z.number().positive().optional(),
+        beamM: z.number().positive().optional(),
+        draftM: z.number().positive().optional(),
+        weightKg: z.number().positive().optional(),
+        registration: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }: any) => {
         const id = await createVessel({
           ...input,
           ownerId: ctx.user.id,
         } as any);
-        await createAuditEntry({ userId: ctx.user.id, action: "vessel_created", entityType: "vessel", entityId: id, details: JSON.stringify({ name: input.name }) });
+        await createAuditEntry({ actorId: ctx.user.id, action: "vessel_created", entityType: "vessel", entityId: id });
         return { id };
       }),
 
     update: protectedProcedure
       .input(z.object({
-        id: z.number(),
+        id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
-        type: z.enum(["sailboat", "motorboat", "catamaran"]).optional(),
-        length: z.string().optional(),
-        width: z.string().optional(),
-        draft: z.string().optional(),
-        weight: z.string().optional(),
+        type: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]).optional(),
+        lengthM: z.number().positive().optional(),
+        beamM: z.number().positive().optional(),
+        draftM: z.number().positive().optional(),
+        weightKg: z.number().positive().optional(),
+        registration: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }: any) => {
         const { id, ...data } = input;
         await updateVessel(id, ctx.user.id, data as any);
-        await createAuditEntry({ userId: ctx.user.id, action: "vessel_updated", entityType: "vessel", entityId: id, details: JSON.stringify(data) });
+        await createAuditEntry({ actorId: ctx.user.id, action: "vessel_updated", entityType: "vessel", entityId: id });
         return { success: true };
       }),
 
     delete: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteVessel(input.id, ctx.user.id);
-        await createAuditEntry({ userId: ctx.user.id, action: "vessel_deleted", entityType: "vessel", entityId: input.id });
+        await createAuditEntry({ actorId: ctx.user.id, action: "vessel_deleted", entityType: "vessel", entityId: input.id });
         return { success: true };
       }),
   }),
@@ -306,22 +321,18 @@ export const appRouter = router({
     }),
 
     setRole: adminProcedure
-      .input(z.object({ id: z.number(), role: z.enum(["user", "admin"]) }))
+      .input(z.object({ id: z.string().uuid(), role: z.enum(["user", "operator", "admin"]) }))
       .mutation(async ({ input, ctx }) => {
-        // Prevent self-demotion to avoid locking oneself out
         if (input.id === ctx.user.id) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Ne možete sami sebi promijeniti rolu.",
-          });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ne možete sami sebi promijeniti rolu." });
         }
         await updateUserRole(input.id, input.role);
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "user_role_updated",
           entityType: "user",
           entityId: input.id,
-          details: JSON.stringify({ role: input.role }),
+          payload: { role: input.role },
         });
         return { success: true };
       }),
@@ -337,23 +348,22 @@ export const appRouter = router({
         const { updateUser: updateUserDb } = await import("./db");
         await updateUserDb(ctx.user.id, input);
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "profile_updated",
           entityType: "user",
           entityId: ctx.user.id,
-          details: JSON.stringify(input)
         });
         return { success: true };
       }),
 
     update: adminProcedure
       .input(z.object({
-        id: z.number(),
+        id: z.string().uuid(),
         firstName: z.string().optional(),
         lastName: z.string().optional(),
         name: z.string().optional(),
         phone: z.string().optional(),
-        role: z.enum(["user", "admin"]).optional(),
+        role: z.enum(["user", "operator", "admin"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { updateUser: updateUserDb, updateUserRole } = await import("./db");
@@ -371,33 +381,32 @@ export const appRouter = router({
         }
 
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "user_updated_admin",
           entityType: "user",
           entityId: id,
-          details: JSON.stringify(input)
         });
         return { success: true };
       }),
 
     delete: adminProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         if (input.id === ctx.user.id) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Ne možete obrisati sami sebe." });
         }
         await softDeleteUser(input.id);
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "user_deleted",
           entityType: "user",
-          entityId: input.id
+          entityId: input.id,
         });
         return { success: true };
       }),
 
     resetPassword: adminProcedure
-      .input(z.object({ id: z.number(), password: z.string().min(8) }))
+      .input(z.object({ id: z.string().uuid(), password: z.string().min(8) }))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -408,10 +417,10 @@ export const appRouter = router({
           .where(eq(users.id, input.id));
 
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "user_password_reset_admin",
           entityType: "user",
-          entityId: input.id
+          entityId: input.id,
         });
         return { success: true };
       }),
@@ -424,7 +433,7 @@ export const appRouter = router({
       .query(async ({ input }) => listCranes(input?.activeOnly ?? true)),
 
     getById: publicProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .query(async ({ input }) => {
         const crane = await getCraneById(input.id);
         if (!crane) throw new TRPCError({ code: "NOT_FOUND", message: "Dizalica nije pronađena." });
@@ -434,39 +443,41 @@ export const appRouter = router({
     create: adminProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
-        capacity: z.string(),    // tonnes
-        maxPoolWidth: z.string().optional(), // metres
+        type: z.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
+        maxCapacityKg: z.number().positive(),
+        maxPoolWidth: z.string().optional(),
         description: z.string().optional(),
         location: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const id = await createCrane(input as any);
-        await createAuditEntry({ userId: ctx.user.id, action: "crane_created", entityType: "crane", entityId: id, details: JSON.stringify({ name: input.name }) });
+        await createAuditEntry({ actorId: ctx.user.id, action: "crane_created", entityType: "crane", entityId: id });
         return { id };
       }),
 
     update: adminProcedure
       .input(z.object({
-        id: z.number(),
+        id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
-        capacity: z.string().optional(),
+        type: z.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
+        maxCapacityKg: z.number().positive().optional(),
         maxPoolWidth: z.string().optional(),
         description: z.string().optional(),
         location: z.string().optional(),
-        isActive: z.boolean().optional(),
+        craneStatus: z.enum(["active", "inactive", "maintenance"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { id, ...data } = input;
         await updateCrane(id, data as any);
-        await createAuditEntry({ userId: ctx.user.id, action: "crane_updated", entityType: "crane", entityId: id, details: JSON.stringify(data) });
+        await createAuditEntry({ actorId: ctx.user.id, action: "crane_updated", entityType: "crane", entityId: id });
         return { success: true };
       }),
 
     delete: adminProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteCrane(input.id);
-        await createAuditEntry({ userId: ctx.user.id, action: "crane_deactivated", entityType: "crane", entityId: input.id });
+        await createAuditEntry({ actorId: ctx.user.id, action: "crane_deactivated", entityType: "crane", entityId: input.id });
         return { success: true };
       }),
   }),
@@ -475,20 +486,24 @@ export const appRouter = router({
   reservation: router({
     create: protectedProcedure
       .input(z.object({
-        craneId: z.number(),
-        startDate: z.date(),
-        endDate: z.date(),
+        craneId: z.string().uuid(),
+        scheduledStart: z.date(),
+        scheduledEnd: z.date(),
         // Vessel data
-        vesselId: z.number().optional(),
-        vesselType: z.enum(["sailboat", "motorboat", "catamaran"]),
+        vesselId: z.string().uuid().optional(),
+        vesselType: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
         vesselName: z.string().optional(),
-        vesselLength: z.number().positive(),   // metres
-        vesselWidth: z.number().positive(),    // metres
-        vesselDraft: z.number().positive(),    // metres
-        vesselWeight: z.number().positive(),   // tonnes
+        vesselLengthM: z.number().positive().optional(),
+        vesselBeamM: z.number().positive().optional(),
+        vesselDraftM: z.number().positive().optional(),
+        vesselWeightKg: z.number().positive().optional(),
         // Operational
         liftPurpose: z.string().min(1),
         contactPhone: z.string().min(6),
+        serviceTypeId: z.string().uuid().optional(),
+        userNote: z.string().optional(),
+        requestedDate: z.string().optional(),
+        requestedTimeSlot: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         // 1. Limit check: Max 3 active reservations
@@ -501,40 +516,39 @@ export const appRouter = router({
           });
         }
 
-        if (input.startDate >= input.endDate) {
+        if (input.scheduledStart >= input.scheduledEnd) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Kraj termina mora biti nakon početka." });
         }
-        if (input.startDate < new Date()) {
+        if (input.scheduledStart < new Date()) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Termin mora biti u budućnosti." });
         }
 
         const crane = await getCraneById(input.craneId);
-        if (!crane || !crane.isActive) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Dizalica nije pronađena." });
+        if (!crane || crane.craneStatus !== "active") {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Dizalica nije pronađena ili nije aktivna." });
         }
 
-        // Vessel dimension validation
-        const craneCapacity = Number(crane.capacity);
-        if (input.vesselWeight > craneCapacity) {
+        // Vessel weight validation
+        if (input.vesselWeightKg && input.vesselWeightKg > crane.maxCapacityKg) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Težina plovila (${input.vesselWeight}t) prelazi kapacitet dizalice (${craneCapacity}t).`,
+            message: `Težina plovila (${input.vesselWeightKg}kg) prelazi kapacitet dizalice (${crane.maxCapacityKg}kg).`,
           });
         }
-        if (crane.maxPoolWidth && input.vesselWidth > Number(crane.maxPoolWidth)) {
+        if (crane.maxPoolWidth && input.vesselBeamM && input.vesselBeamM > Number(crane.maxPoolWidth)) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Širina plovila (${input.vesselWidth}m) prelazi širinu bazena (${crane.maxPoolWidth}m).`,
+            message: `Širina plovila (${input.vesselBeamM}m) prelazi širinu bazena (${crane.maxPoolWidth}m).`,
           });
         }
 
         // Slot + working-hours validation
         const sysSettings = await getAllSettings();
-        const { bufferMin } = await validateSlotAgainstSettings(input.startDate, input.endDate, sysSettings);
+        const { bufferMin } = await validateSlotAgainstSettings(input.scheduledStart, input.scheduledEnd, sysSettings);
 
         // Overlap check with buffer
-        const effectiveEnd = new Date(input.endDate.getTime() + bufferMin * 60000);
-        const hasOverlap = await checkOverlap(input.craneId, input.startDate, effectiveEnd);
+        const effectiveEnd = new Date(input.scheduledEnd.getTime() + bufferMin * 60000);
+        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, effectiveEnd);
         if (hasOverlap) {
           throw new TRPCError({ code: "CONFLICT", message: "Ovaj termin se preklapa s postojećom rezervacijom (uključujući tampon zonu)." });
         }
@@ -547,27 +561,31 @@ export const appRouter = router({
         const id = await createReservation({
           userId: ctx.user.id,
           craneId: input.craneId,
-          startDate: input.startDate,
-          endDate: input.endDate,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd: input.scheduledEnd,
           status: "pending",
           reservationNumber,
           vesselId: input.vesselId,
           vesselType: input.vesselType,
           vesselName: input.vesselName,
-          vesselLength: String(input.vesselLength),
-          vesselWidth: String(input.vesselWidth),
-          vesselDraft: String(input.vesselDraft),
-          vesselWeight: String(input.vesselWeight),
+          vesselLengthM: input.vesselLengthM ? String(input.vesselLengthM) : undefined,
+          vesselBeamM: input.vesselBeamM ? String(input.vesselBeamM) : undefined,
+          vesselDraftM: input.vesselDraftM ? String(input.vesselDraftM) : undefined,
+          vesselWeightKg: input.vesselWeightKg,
           liftPurpose: input.liftPurpose,
           contactPhone: input.contactPhone,
+          serviceTypeId: input.serviceTypeId,
+          userNote: input.userNote,
+          requestedDate: input.requestedDate,
+          requestedTimeSlot: input.requestedTimeSlot,
         });
 
-        await createAuditEntry({ userId: ctx.user.id, action: "reservation_created", entityType: "reservation", entityId: id });
+        await createAuditEntry({ actorId: ctx.user.id, action: "reservation_created", entityType: "reservation", entityId: id });
 
         // Notify admin
         await notifyOwner({
           title: "Novi zahtjev za rezervaciju",
-          content: `Korisnik ${ctx.user.name || ctx.user.email || "Nepoznat"} zatražio ${crane.name} od ${input.startDate.toLocaleString("hr-HR")} do ${input.endDate.toLocaleString("hr-HR")}. Plovilo: ${input.vesselWeight}t, svrha: ${input.liftPurpose}`,
+          content: `Korisnik ${ctx.user.name || ctx.user.email || "Nepoznat"} zatražio ${crane.name} od ${input.scheduledStart.toLocaleString("hr-HR")} do ${input.scheduledEnd.toLocaleString("hr-HR")}. Plovilo: ${input.vesselWeightKg}kg, svrha: ${input.liftPurpose}`,
         }).catch(console.warn);
 
         return { id };
@@ -576,48 +594,46 @@ export const appRouter = router({
     myReservations: protectedProcedure.query(async ({ ctx }) => {
       const items = await listReservationsByUser(ctx.user.id);
       return Promise.all(items.map(async (r) => {
-        const crane = await getCraneById(r.craneId);
+        const crane = r.craneId ? await getCraneById(r.craneId) : null;
         return { ...r, crane: crane ? { id: crane.id, name: crane.name, location: crane.location } : null };
       }));
     }),
 
     getById: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .query(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
-        if (reservation.userId !== ctx.user.id && ctx.user.role !== "admin") {
+        if (reservation.userId !== ctx.user.id && ctx.user.role !== "admin" && ctx.user.role !== "operator") {
           throw new TRPCError({ code: "FORBIDDEN" });
         }
-        const crane = await getCraneById(reservation.craneId);
+        const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
         const user = await getUserById(reservation.userId);
         return { ...reservation, crane, user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null };
       }),
 
     cancel: protectedProcedure
-      .input(z.object({ id: z.number(), reason: z.string().min(3) }))
+      .input(z.object({ id: z.string().uuid(), reason: z.string().min(3) }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.userId !== ctx.user.id) throw new TRPCError({ code: "FORBIDDEN" });
 
-        // Allow cancelling both pending and approved
         if (reservation.status !== "pending" && reservation.status !== "approved") {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Mogu se otkazati samo rezervacije na čekanju ili odobrene rezervacije." });
         }
 
         await updateReservationStatus(input.id, "cancelled", undefined, undefined, input.reason, "user");
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "reservation_cancelled",
           entityType: "reservation",
           entityId: input.id,
-          details: JSON.stringify({ reason: input.reason })
+          payload: { reason: input.reason },
         });
 
-        // If it was approved, notify waiting list that a slot opened up
-        if (reservation.status === "approved") {
-          const dateStr = reservation.startDate.toISOString().split("T")[0];
+        if (reservation.status === "approved" && reservation.craneId) {
+          const dateStr = reservation.scheduledStart ? new Date(reservation.scheduledStart).toISOString().split("T")[0] : "";
           notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
         }
 
@@ -628,10 +644,10 @@ export const appRouter = router({
     listAll: adminProcedure
       .input(z.object({
         status: z.array(z.string()).optional(),
-        userId: z.number().optional(),
-        vesselId: z.number().optional(),
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
+        userId: z.string().uuid().optional(),
+        vesselId: z.string().uuid().optional(),
+        scheduledStart: z.date().optional(),
+        scheduledEnd: z.date().optional(),
       }).optional())
       .query(async ({ input }) => {
         const db = await getDb();
@@ -644,8 +660,8 @@ export const appRouter = router({
         }
         if (input?.userId) conditions.push(eq(reservations.userId, input.userId));
         if (input?.vesselId) conditions.push(eq(reservations.vesselId, input.vesselId));
-        if (input?.startDate) conditions.push(gte(reservations.startDate, input.startDate));
-        if (input?.endDate) conditions.push(lte(reservations.endDate, input.endDate));
+        if (input?.scheduledStart) conditions.push(gte(reservations.scheduledStart, input.scheduledStart));
+        if (input?.scheduledEnd) conditions.push(lte(reservations.scheduledEnd, input.scheduledEnd));
 
         const query = db.select().from(reservations);
         if (conditions.length > 0) {
@@ -654,47 +670,49 @@ export const appRouter = router({
         const items = await query.orderBy(desc(reservations.createdAt));
 
         return Promise.all(items.map(async (r) => {
-          const crane = await getCraneById(r.craneId);
+          const crane = r.craneId ? await getCraneById(r.craneId) : null;
           const user = await getUserById(r.userId);
           return { ...r, crane: crane ?? null, user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null };
         }));
       }),
 
     approve: adminProcedure
-      .input(z.object({ id: z.number(), adminNotes: z.string().optional() }))
+      .input(z.object({ id: z.string().uuid(), adminNote: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju se mogu odobriti." });
 
-        const sysSettings = await getAllSettings();
-        const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-        const effectiveEnd = new Date(reservation.endDate.getTime() + bufferMin * 60000);
-        const hasOverlap = await checkOverlap(reservation.craneId, reservation.startDate, effectiveEnd, reservation.id);
-        if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+        if (reservation.craneId && reservation.scheduledStart && reservation.scheduledEnd) {
+          const sysSettings = await getAllSettings();
+          const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
+          const effectiveEnd = new Date(new Date(reservation.scheduledEnd).getTime() + bufferMin * 60000);
+          const hasOverlap = await checkOverlap(reservation.craneId, new Date(reservation.scheduledStart), effectiveEnd, reservation.id);
+          if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+        }
 
-        await updateReservationStatus(input.id, "approved", ctx.user.id, input.adminNotes);
-        await createAuditEntry({ userId: ctx.user.id, action: "reservation_approved", entityType: "reservation", entityId: input.id });
+        await updateReservationStatus(input.id, "approved", ctx.user.id, input.adminNote);
+        await createAuditEntry({ actorId: ctx.user.id, action: "reservation_approved", entityType: "reservation", entityId: input.id });
 
         // Notify user
         const user = await getUserById(reservation.userId);
-        const crane = await getCraneById(reservation.craneId);
+        const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
         if (user?.email && crane) {
           await sendReservationConfirmation({
             to: user.email,
             userName: user.name || user.email,
             craneName: crane.name,
-            startDate: reservation.startDate,
-            endDate: reservation.endDate,
+            startDate: reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date(),
+            endDate: reservation.scheduledEnd ? new Date(reservation.scheduledEnd) : new Date(),
             craneLocation: crane.location || crane.name,
-            adminNotes: input.adminNotes,
+            adminNotes: input.adminNote,
           }).catch(console.warn);
         }
         if (user?.phone && crane) {
           await sendReservationConfirmationSms({
             phone: user.phone,
             craneName: crane.name,
-            startDate: reservation.startDate,
+            startDate: reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date(),
             location: crane.location || crane.name,
           }).catch(console.warn);
         }
@@ -703,38 +721,39 @@ export const appRouter = router({
       }),
 
     reject: adminProcedure
-      .input(z.object({ id: z.number(), adminNotes: z.string().optional() }))
+      .input(z.object({ id: z.string().uuid(), adminNote: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju se mogu odbiti." });
 
-        await updateReservationStatus(input.id, "rejected", ctx.user.id, input.adminNotes);
-        await createAuditEntry({ userId: ctx.user.id, action: "reservation_rejected", entityType: "reservation", entityId: input.id });
+        await updateReservationStatus(input.id, "rejected", ctx.user.id, input.adminNote);
+        await createAuditEntry({ actorId: ctx.user.id, action: "reservation_rejected", entityType: "reservation", entityId: input.id });
 
         // Notify user
         const user = await getUserById(reservation.userId);
-        const crane = await getCraneById(reservation.craneId);
+        const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
         if (user?.email && crane) {
           await sendReservationRejection({
             to: user.email,
             userName: user.name || user.email,
             craneName: crane.name,
-            startDate: reservation.startDate,
-            reason: input.adminNotes,
+            startDate: reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date(),
+            reason: input.adminNote,
           }).catch(console.warn);
         }
         if (user?.phone && crane) {
           await sendReservationRejectionSms({
             phone: user.phone,
             craneName: crane.name,
-            reason: input.adminNotes,
+            reason: input.adminNote,
           }).catch(console.warn);
         }
 
-        // Phase 2: Notify waiting list
-        const dateStr = reservation.startDate.toISOString().split("T")[0];
-        notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+        if (reservation.craneId) {
+          const dateStr = reservation.scheduledStart ? new Date(reservation.scheduledStart).toISOString().split("T")[0] : "";
+          notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+        }
 
         return { success: true };
       }),
@@ -742,10 +761,10 @@ export const appRouter = router({
     // Admin: move/reschedule a reservation (drag-and-drop)
     reschedule: adminProcedure
       .input(z.object({
-        id: z.number(),
-        startDate: z.date(),
-        endDate: z.date(),
-        craneId: z.number().optional()
+        id: z.string().uuid(),
+        scheduledStart: z.date(),
+        scheduledEnd: z.date(),
+        craneId: z.string().uuid().optional()
       }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
@@ -755,32 +774,29 @@ export const appRouter = router({
 
         const sysSettings = await getAllSettings();
         const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-        const effectiveEnd = new Date(input.endDate.getTime() + bufferMin * 60000);
+        const effectiveEnd = new Date(input.scheduledEnd.getTime() + bufferMin * 60000);
 
-        // Check overlap on the target crane
-        const hasOverlap = await checkOverlap(targetCraneId, input.startDate, effectiveEnd, input.id);
-        if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Preslagani termin se preklapa." });
+        if (targetCraneId) {
+          const hasOverlap = await checkOverlap(targetCraneId, input.scheduledStart, effectiveEnd, input.id);
+          if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Preslagani termin se preklapa." });
+        }
 
-        // We update directly via db
-        const { getDb } = await import("./db");
-        const { reservations: res } = await import("../drizzle/schema");
-        const { eq } = await import("drizzle-orm");
         const db = await getDb();
         if (db) {
-          await db.update(res).set({
-            startDate: input.startDate,
-            endDate: input.endDate,
+          await db.update(reservations).set({
+            scheduledStart: input.scheduledStart,
+            scheduledEnd: input.scheduledEnd,
             craneId: targetCraneId,
             updatedAt: new Date()
-          }).where(eq(res.id, input.id));
+          }).where(eq(reservations.id, input.id));
         }
 
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "reservation_rescheduled",
           entityType: "reservation",
           entityId: input.id,
-          details: JSON.stringify({ oldCraneId: reservation.craneId, newCraneId: targetCraneId, startDate: input.startDate })
+          payload: { oldCraneId: reservation.craneId, newCraneId: targetCraneId, scheduledStart: input.scheduledStart },
         });
         return { success: true };
       }),
@@ -790,21 +806,21 @@ export const appRouter = router({
   calendar: router({
     events: publicProcedure
       .input(z.object({
-        startDate: z.date().optional(),
-        endDate: z.date().optional(),
-        craneId: z.number().optional(),
+        scheduledStart: z.date().optional(),
+        scheduledEnd: z.date().optional(),
+        craneId: z.string().uuid().optional(),
       }).optional())
       .query(async ({ input }) => {
-        const items = await getReservationsForCalendar(input?.startDate, input?.endDate, true);
+        const items = await getReservationsForCalendar(input?.scheduledStart, input?.scheduledEnd, true);
         const enriched = await Promise.all(items.map(async (r) => {
-          const crane = await getCraneById(r.craneId);
+          const crane = r.craneId ? await getCraneById(r.craneId) : null;
           return {
             id: r.id,
             craneId: r.craneId,
             craneName: crane?.name ?? "Nepoznata dizalica",
             craneLocation: crane?.location ?? "",
-            startDate: r.startDate,
-            endDate: r.endDate,
+            scheduledStart: r.scheduledStart,
+            scheduledEnd: r.scheduledEnd,
             vesselType: r.vesselType,
             liftPurpose: r.liftPurpose,
             status: r.status,
@@ -818,25 +834,19 @@ export const appRouter = router({
 
     availableSlots: publicProcedure
       .input(z.object({
-        craneId: z.number(),
+        craneId: z.string().uuid(),
         date: z.string(), // YYYY-MM-DD
-        slotCount: z.number().min(1).max(8),
+        durationMin: z.number().min(30).max(480).default(60),
       }))
       .query(async ({ input }) => {
         const sysSettings = await getAllSettings();
-        const slotMin = 60;
+        const slotMin = input.durationMin;
         const bufferMin = 0;
 
-        // We use the date string and construct times. 
-        // To be robust against server timezone, we treat the input as a "local" date 
-        // and find the slots. 
-        // Note: New Date("YYYY-MM-DD") is UTC 00:00.
         const dateObj = new Date(input.date);
         const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
         const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
 
-        // We'll calculate slots relative to the UTC 00:00 of that day.
-        // This works if the client also treats the date as a UTC day boundary.
         const dayStartUTC = new Date(dateObj.getTime());
         dayStartUTC.setUTCHours(wsH, wsM, 0, 0);
 
@@ -848,9 +858,9 @@ export const appRouter = router({
 
         const availableStarts: Date[] = [];
 
-        for (let i = 0; i <= totalSlots - input.slotCount; i++) {
+        for (let i = 0; i < totalSlots; i++) {
           const slotStart = new Date(dayStartUTC.getTime() + i * slotMin * 60000);
-          const slotEnd = new Date(slotStart.getTime() + input.slotCount * slotMin * 60000);
+          const slotEnd = new Date(slotStart.getTime() + slotMin * 60000);
           const effectiveEnd = new Date(slotEnd.getTime() + bufferMin * 60000);
 
           const overlap = await checkOverlap(input.craneId, slotStart, effectiveEnd);
@@ -865,18 +875,19 @@ export const appRouter = router({
   waitingList: router({
     join: protectedProcedure
       .input(z.object({
-        craneId: z.number(),
+        craneId: z.string().uuid(),
         requestedDate: z.string(),
-        slotCount: z.number().min(1).max(8),
         vesselData: z.record(z.string(), z.any()).optional(),
+        serviceTypeId: z.string().uuid().optional(),
+        userNote: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const id = await addToWaitingList({
           userId: ctx.user.id,
           craneId: input.craneId,
           requestedDate: input.requestedDate,
-          slotCount: input.slotCount,
           vesselData: input.vesselData ?? null,
+          serviceTypeId: input.serviceTypeId,
         });
         return { id };
       }),
@@ -886,7 +897,7 @@ export const appRouter = router({
     }),
 
     leave: protectedProcedure
-      .input(z.object({ id: z.number() }))
+      .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await removeFromWaitingList(input.id, ctx.user.id);
         return { success: true };
@@ -896,17 +907,17 @@ export const appRouter = router({
       const items = await listAllWaiting();
       return Promise.all(items.map(async (w) => {
         const user = await getUserById(w.userId);
-        const crane = await getCraneById(w.craneId);
+        const crane = w.craneId ? await getCraneById(w.craneId) : null;
         return { ...w, user: user ? { name: user.name, email: user.email, phone: user.phone } : null, crane: crane ? { name: crane.name } : null };
       }));
     }),
 
     update: adminProcedure
       .input(z.object({
-        id: z.number(),
-        craneId: z.number().optional(),
+        id: z.string().uuid(),
+        craneId: z.string().uuid().optional(),
         requestedDate: z.string().optional(),
-        slotCount: z.number().optional(),
+        status: z.enum(["waiting", "notified", "converted", "expired"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const item = await getWaitingListById(input.id);
@@ -915,67 +926,62 @@ export const appRouter = router({
         await updateWaitingList(input.id, {
           craneId: input.craneId,
           requestedDate: input.requestedDate,
-          slotCount: input.slotCount,
         });
 
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "waiting_list_updated",
           entityType: "waiting_list",
           entityId: input.id,
-          details: JSON.stringify(input)
         });
         return { success: true };
       }),
 
     toReservation: adminProcedure
       .input(z.object({
-        id: z.number(),
-        startDate: z.date(),
-        endDate: z.date(),
-        craneId: z.number().optional(),
+        id: z.string().uuid(),
+        scheduledStart: z.date(),
+        scheduledEnd: z.date(),
+        craneId: z.string().uuid().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const item = await getWaitingListById(input.id);
         if (!item) throw new TRPCError({ code: "NOT_FOUND" });
 
-        const targetCraneId = input.craneId ?? item.craneId;
+        const targetCraneId = input.craneId ?? item.craneId ?? undefined;
+        if (!targetCraneId) throw new TRPCError({ code: "BAD_REQUEST", message: "Dizalica nije navedena." });
 
-        // Check overlap
-        const hasOverlap = await checkOverlap(targetCraneId, input.startDate, input.endDate);
+        const hasOverlap = await checkOverlap(targetCraneId, input.scheduledStart, input.scheduledEnd);
         if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Termin je zauzet." });
 
         const vesselData = (item.vesselData as any) || {};
 
-        // Create reservation
         const resId = await createReservation({
           userId: item.userId,
           craneId: targetCraneId,
-          startDate: input.startDate,
-          endDate: input.endDate,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd: input.scheduledEnd,
           status: "approved",
           vesselName: vesselData.name || "Brod s liste čekanja",
-          vesselType: vesselData.type || "motorboat",
-          vesselWeight: String(vesselData.weight || 0),
-          vesselLength: String(vesselData.length || 0),
-          vesselWidth: String(vesselData.width || 0),
-          vesselDraft: String(vesselData.draft || 0),
+          vesselType: vesselData.type || "motorni",
+          vesselWeightKg: Number(vesselData.weightKg || 0),
+          vesselLengthM: vesselData.lengthM ? String(vesselData.lengthM) : undefined,
+          vesselBeamM: vesselData.beamM ? String(vesselData.beamM) : undefined,
+          vesselDraftM: vesselData.draftM ? String(vesselData.draftM) : undefined,
           liftPurpose: "Lista čekanja",
           contactPhone: "N/A",
         });
 
-        // Remove from waiting list
         await adminRemoveFromWaitingList(input.id);
 
-        // Notify user
         notifyStatusChange(resId).catch(console.error);
 
         await createAuditEntry({
-          userId: ctx.user.id,
+          actorId: ctx.user.id,
           action: "waiting_list_converted",
           entityType: "reservation",
           entityId: resId,
-          details: JSON.stringify({ waitingListId: input.id })
+          payload: { waitingListId: input.id },
         });
 
         return { id: resId };
@@ -993,7 +999,7 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         await updateSetting(input.key, input.value);
-        await createAuditEntry({ userId: ctx.user.id, action: "setting_updated", entityType: "setting", entityId: null, details: JSON.stringify(input) });
+        await createAuditEntry({ actorId: ctx.user.id, action: "setting_updated", entityType: "setting", payload: input });
         return { success: true };
       }),
   }),
@@ -1002,13 +1008,13 @@ export const appRouter = router({
   maintenance: router({
     create: adminProcedure
       .input(z.object({
-        craneId: z.number(),
-        startDate: z.date(),
-        endDate: z.date(),
+        craneId: z.string().uuid(),
+        scheduledStart: z.date(),
+        scheduledEnd: z.date(),
         description: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const hasOverlap = await checkOverlap(input.craneId, input.startDate, input.endDate);
+        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, input.scheduledEnd);
         if (hasOverlap) {
           throw new TRPCError({ code: "CONFLICT", message: "Termin se preklapa s postojećim rezervacijama." });
         }
@@ -1016,20 +1022,17 @@ export const appRouter = router({
         const id = await createReservation({
           userId: ctx.user.id,
           craneId: input.craneId,
-          startDate: input.startDate,
-          endDate: input.endDate,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd: input.scheduledEnd,
           status: "approved",
           isMaintenance: true,
           liftPurpose: input.description || "Održavanje",
           contactPhone: "ADMIN",
-          vesselType: "motorboat",
-          vesselLength: "0",
-          vesselWidth: "0",
-          vesselDraft: "0",
-          vesselWeight: "0",
+          vesselType: "ostalo",
+          vesselWeightKg: 0,
         });
 
-        await createAuditEntry({ userId: ctx.user.id, action: "maintenance_blocked", entityType: "reservation", entityId: id });
+        await createAuditEntry({ actorId: ctx.user.id, action: "maintenance_blocked", entityType: "reservation", entityId: id });
         return { id };
       }),
   }),
@@ -1052,7 +1055,7 @@ export const appRouter = router({
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-        const allRes = await db.select().from(reservations).where(gte(reservations.startDate, thirtyDaysAgo));
+        const allRes = await db.select().from(reservations).where(gte(reservations.scheduledStart, thirtyDaysAgo));
         const allCranes = await db.select().from(cranes);
 
         const craneStats = allCranes.map(c => {
@@ -1062,8 +1065,14 @@ export const appRouter = router({
           const rejected = craneRes.filter(r => r.status === "rejected");
           const cancelled = craneRes.filter(r => r.status === "cancelled");
 
-          const totalHoursApproved = approved.reduce((acc, r) => acc + (r.endDate.getTime() - r.startDate.getTime()) / 3600000, 0);
-          const totalHoursMaint = maintenance.reduce((acc, r) => acc + (r.endDate.getTime() - r.startDate.getTime()) / 3600000, 0);
+          const totalHoursApproved = approved.reduce((acc, r) => {
+            if (!r.scheduledStart || !r.scheduledEnd) return acc;
+            return acc + (new Date(r.scheduledEnd).getTime() - new Date(r.scheduledStart).getTime()) / 3600000;
+          }, 0);
+          const totalHoursMaint = maintenance.reduce((acc, r) => {
+            if (!r.scheduledStart || !r.scheduledEnd) return acc;
+            return acc + (new Date(r.scheduledEnd).getTime() - new Date(r.scheduledStart).getTime()) / 3600000;
+          }, 0);
 
           return {
             craneId: c.id,
@@ -1076,7 +1085,7 @@ export const appRouter = router({
         });
 
         // 2. User Statistics (Top 5)
-        const userResCounts: Record<number, { count: number; name: string }> = {};
+        const userResCounts: Record<string, { count: number; name: string }> = {};
         for (const r of allRes) {
           if (r.status === "approved" && !r.isMaintenance) {
             if (!userResCounts[r.userId]) {
@@ -1087,7 +1096,7 @@ export const appRouter = router({
           }
         }
         const topUsers = Object.entries(userResCounts)
-          .map(([id, data]) => ({ id: Number(id), ...data }))
+          .map(([id, data]) => ({ id, ...data }))
           .sort((a, b) => b.count - a.count)
           .slice(0, 5);
 

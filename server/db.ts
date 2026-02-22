@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, sql, ne, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -27,16 +27,6 @@ export async function getDb() {
 }
 
 // ─── Users ────────────────────────────────────────────────────────────
-export async function upsertUser(user: InsertUser) {
-  const db = await getDb();
-  if (!db || !user.openId) return;
-  await db.insert(users).values({ ...user, lastSignedIn: new Date() })
-    .onConflictDoUpdate({
-      target: users.openId,
-      set: { name: user.name, email: user.email, lastSignedIn: new Date() }
-    });
-}
-
 export async function createLocalUser(data: {
   email: string;
   passwordHash: string;
@@ -64,47 +54,64 @@ export async function createLocalUser(data: {
 export async function getUserByEmail(email: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const res = await db.select().from(users).where(and(eq(users.email, email), isNull(users.deletedAt))).limit(1);
+  const res = await db.select().from(users)
+    .where(eq(users.email, email))
+    .limit(1);
   return res[0];
 }
 
-export async function getUserByOpenId(openId: string) {
+export async function getUserByGoogleId(googleId: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const res = await db.select().from(users).where(and(eq(users.openId, openId), isNull(users.deletedAt))).limit(1);
+  const res = await db.select().from(users)
+    .where(eq(users.googleId, googleId))
+    .limit(1);
   return res[0];
 }
 
-export async function getUserById(id: number) {
+export async function getUserById(id: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const res = await db.select().from(users).where(and(eq(users.id, id), isNull(users.deletedAt))).limit(1);
+  const res = await db.select().from(users).where(eq(users.id, id)).limit(1);
   return res[0];
 }
 
 export async function listAllUsers() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(users).where(isNull(users.deletedAt)).orderBy(users.name, users.email);
+  return db.select().from(users)
+    .where(isNull(users.anonymizedAt))
+    .orderBy(users.name, users.email);
 }
 
-export async function updateUserRole(id: number, role: "user" | "admin") {
+export async function updateUserRole(id: string, role: "user" | "operator" | "admin") {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
 }
 
-export async function softDeleteUser(id: number) {
+export async function softDeleteUser(id: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(users).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(users.id, id));
+  // Anonymize instead of hard delete for GDPR compliance
+  await db.update(users).set({
+    anonymizedAt: new Date(),
+    updatedAt: new Date(),
+    email: `deleted-${Date.now()}@deleted.invalid`,
+    firstName: "Obrisani",
+    lastName: "Korisnik",
+    name: "Obrisani Korisnik",
+    phone: null,
+    googleId: null,
+    passwordHash: null,
+  }).where(eq(users.id, id));
 }
 
-export async function updateUser(id: number, data: Partial<InsertUser>) {
+export async function updateUser(id: string, data: Partial<InsertUser>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const { id: _, role: __, ...updateData } = data as any; // Don't allow updating id/role through this general helper
-  await db.update(users).set({ ...updateData, updatedAt: new Date() }).where(eq(users.id, id));
+  const { id: _, role: __, ...updateData } = data as Record<string, unknown>;
+  await db.update(users).set({ ...updateData as Partial<InsertUser>, updatedAt: new Date() }).where(eq(users.id, id));
 }
 
 // ─── Cranes ───────────────────────────────────────────────────────────
@@ -112,11 +119,11 @@ export async function listCranes(activeOnly = true) {
   const db = await getDb();
   if (!db) return [];
   return activeOnly
-    ? db.select().from(cranes).where(eq(cranes.isActive, true))
+    ? db.select().from(cranes).where(eq(cranes.craneStatus, "active"))
     : db.select().from(cranes);
 }
 
-export async function getCraneById(id: number) {
+export async function getCraneById(id: string) {
   const db = await getDb();
   if (!db) return undefined;
   const res = await db.select().from(cranes).where(eq(cranes.id, id)).limit(1);
@@ -130,26 +137,28 @@ export async function createCrane(data: InsertCrane) {
   return res[0].id;
 }
 
-export async function updateCrane(id: number, data: Partial<InsertCrane>) {
+export async function updateCrane(id: string, data: Partial<InsertCrane>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(cranes).set({ ...data, updatedAt: new Date() }).where(eq(cranes.id, id));
 }
 
-export async function deleteCrane(id: number) {
+export async function deleteCrane(id: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(cranes).set({ isActive: false, updatedAt: new Date() }).where(eq(cranes.id, id));
+  await db.update(cranes).set({ craneStatus: "inactive", updatedAt: new Date() }).where(eq(cranes.id, id));
 }
 
 // ─── Vessels ──────────────────────────────────────────────────────────
-export async function listVesselsByUser(userId: number) {
+export async function listVesselsByUser(userId: string) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(vessels).where(eq(vessels.ownerId, userId)).orderBy(desc(vessels.createdAt));
+  return db.select().from(vessels)
+    .where(eq(vessels.ownerId, userId))
+    .orderBy(desc(vessels.createdAt));
 }
 
-export async function getVesselById(id: number) {
+export async function getVesselById(id: string) {
   const db = await getDb();
   if (!db) return undefined;
   const res = await db.select().from(vessels).where(eq(vessels.id, id)).limit(1);
@@ -163,7 +172,7 @@ export async function createVessel(data: InsertVessel) {
   return res[0].id;
 }
 
-export async function updateVessel(id: number, ownerId: number, data: Partial<InsertVessel>) {
+export async function updateVessel(id: string, ownerId: string, data: Partial<InsertVessel>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.update(vessels)
@@ -171,7 +180,7 @@ export async function updateVessel(id: number, ownerId: number, data: Partial<In
     .where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
 }
 
-export async function deleteVessel(id: number, ownerId: number) {
+export async function deleteVessel(id: string, ownerId: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.delete(vessels).where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
@@ -185,14 +194,14 @@ export async function createReservation(data: InsertReservation) {
   return res[0].id;
 }
 
-export async function getReservationById(id: number) {
+export async function getReservationById(id: string) {
   const db = await getDb();
   if (!db) return undefined;
   const res = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
   return res[0];
 }
 
-export async function listReservationsByUser(userId: number) {
+export async function listReservationsByUser(userId: string) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(reservations)
@@ -212,10 +221,10 @@ export async function listAllReservations(status?: string) {
 }
 
 export async function updateReservationStatus(
-  id: number,
-  status: "approved" | "rejected" | "cancelled",
-  reviewedBy?: number,
-  adminNotes?: string,
+  id: string,
+  status: "approved" | "rejected" | "cancelled" | "completed",
+  approvedBy?: string,
+  adminNote?: string,
   cancelReason?: string,
   cancelledByType?: "user" | "admin"
 ) {
@@ -224,25 +233,25 @@ export async function updateReservationStatus(
   await db.update(reservations)
     .set({
       status,
-      reviewedBy,
-      reviewedAt: new Date(),
-      adminNotes,
+      approvedBy,
+      approvedAt: status === "approved" ? new Date() : undefined,
+      completedAt: status === "completed" ? new Date() : undefined,
+      adminNote,
       cancelReason,
       cancelledByType,
-      updatedAt: new Date()
+      updatedAt: new Date(),
     })
     .where(eq(reservations.id, id));
 }
 
 /**
- * Check for time-slot overlap on a crane.
- * The effectiveEnd should include buffer time when checking.
+ * Check for time-slot overlap on a crane using scheduledStart/scheduledEnd.
  */
 export async function checkOverlap(
-  craneId: number,
+  craneId: string,
   startDate: Date,
   effectiveEnd: Date,
-  excludeId?: number
+  excludeId?: string
 ) {
   const db = await getDb();
   if (!db) return false;
@@ -252,8 +261,8 @@ export async function checkOverlap(
       eq(reservations.status, "pending"),
       eq(reservations.status, "approved")
     ),
-    lt(reservations.startDate, effectiveEnd),
-    gt(reservations.endDate, startDate),
+    lt(reservations.scheduledStart, effectiveEnd),
+    gt(reservations.scheduledEnd, startDate),
   ];
   if (excludeId) conditions.push(ne(reservations.id, excludeId));
   const res = await db.select({ id: reservations.id })
@@ -271,8 +280,8 @@ export async function getReservationsForCalendar(start?: Date, end?: Date, inclu
     : [eq(reservations.status, "approved")];
 
   const conditions = [...statusConditions];
-  if (start) conditions.push(gte(reservations.startDate, start));
-  if (end) conditions.push(lte(reservations.endDate, end));
+  if (start) conditions.push(gte(reservations.scheduledStart, start));
+  if (end) conditions.push(lte(reservations.scheduledEnd, end));
   return db.select().from(reservations).where(and(...conditions));
 }
 
@@ -284,7 +293,7 @@ export async function addToWaitingList(data: InsertWaitingList) {
   return res[0].id;
 }
 
-export async function listWaitingListByUser(userId: number) {
+export async function listWaitingListByUser(userId: string) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(waitingList)
@@ -298,26 +307,26 @@ export async function listAllWaiting() {
   return db.select().from(waitingList).orderBy(desc(waitingList.createdAt));
 }
 
-export async function getWaitingListById(id: number) {
+export async function getWaitingListById(id: string) {
   const db = await getDb();
   if (!db) return null;
   const res = await db.select().from(waitingList).where(eq(waitingList.id, id));
   return res[0] ?? null;
 }
 
-export async function updateWaitingList(id: number, data: Partial<InsertWaitingList>) {
+export async function updateWaitingList(id: string, data: Partial<InsertWaitingList>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.update(waitingList).set(data).where(eq(waitingList.id, id));
+  await db.update(waitingList).set({ ...data, updatedAt: new Date() }).where(eq(waitingList.id, id));
 }
 
-export async function adminRemoveFromWaitingList(id: number) {
+export async function adminRemoveFromWaitingList(id: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.delete(waitingList).where(eq(waitingList.id, id));
 }
 
-export async function removeFromWaitingList(id: number, userId: number) {
+export async function removeFromWaitingList(id: string, userId: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
   await db.delete(waitingList)
@@ -337,7 +346,11 @@ export async function getAllSettings(): Promise<Record<string, string>> {
   if (!db) return DEFAULT_SETTINGS;
   const rows = await db.select().from(settings);
   const result = { ...DEFAULT_SETTINGS };
-  for (const row of rows) result[row.key] = row.value;
+  for (const row of rows) {
+    // value is JSONB - cast it to string for backwards compat
+    const val = row.value;
+    result[row.key] = typeof val === "string" ? val : String(val);
+  }
   return result;
 }
 
@@ -350,13 +363,65 @@ export async function updateSetting(key: string, value: string) {
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────
-export async function createAuditEntry(data: InsertAuditLog) {
+export async function createAuditEntry(data: {
+  actorId?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  payload?: unknown;
+  ipAddress?: string;
+}) {
   const db = await getDb();
-  if (db) await db.insert(auditLog).values(data);
+  if (db) await db.insert(auditLog).values({
+    actorId: data.actorId,
+    action: data.action,
+    entityType: data.entityType,
+    entityId: data.entityId,
+    payload: data.payload,
+    ipAddress: data.ipAddress,
+  });
 }
 
 export async function listAuditLog(limit = 50) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit);
+}
+
+// ─── Legacy SDK compatibility ──────────────────────────────────────────
+// These functions support the existing oauth sdk.ts until v2 auth is implemented
+
+export async function getUserByOpenId(openId: string) {
+  return getUserByGoogleId(openId);
+}
+
+export async function upsertUser(data: {
+  openId: string;
+  name?: string | null;
+  email?: string | null;
+  loginMethod?: string | null;
+  lastSignedIn?: Date;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await getUserByGoogleId(data.openId);
+  if (existing) {
+    await db.update(users)
+      .set({
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(typeof data.email === "string" ? { email: data.email } : {}),
+        ...(data.loginMethod !== undefined ? { loginMethod: data.loginMethod } : {}),
+        ...(data.lastSignedIn ? { lastSignedIn: data.lastSignedIn } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.googleId, data.openId));
+  } else {
+    await db.insert(users).values({
+      googleId: data.openId,
+      email: data.email ?? `${data.openId}@oauth.placeholder`,
+      name: data.name,
+      loginMethod: data.loginMethod,
+      lastSignedIn: data.lastSignedIn ?? new Date(),
+    });
+  }
 }

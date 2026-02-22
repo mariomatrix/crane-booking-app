@@ -29,7 +29,7 @@ export default function MyVessels() {
 
     // Form state
     const [name, setName] = useState("");
-    const [type, setType] = useState<"sailboat" | "motorboat" | "catamaran">("motorboat");
+    const [type, setType] = useState<"jedrilica" | "motorni" | "katamaran" | "ostalo">("motorni");
     const [length, setLength] = useState("");
     const [width, setWidth] = useState("");
     const [draft, setDraft] = useState("");
@@ -60,7 +60,7 @@ export default function MyVessels() {
 
     const resetForm = () => {
         setName("");
-        setType("motorboat");
+        setType("motorni");
         setLength("");
         setWidth("");
         setDraft("");
@@ -72,10 +72,10 @@ export default function MyVessels() {
         createMutation.mutate({
             name,
             type,
-            length: length || undefined,
-            width: width || undefined,
-            draft: draft || undefined,
-            weight: weight || undefined,
+            lengthM: length ? Number(length) : undefined,
+            beamM: width ? Number(width) : undefined,
+            draftM: draft ? Number(draft) : undefined,
+            weightKg: weight ? Number(weight) : undefined,
         });
     };
 
@@ -135,9 +135,9 @@ export default function MyVessels() {
                                                     <SelectValue />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="sailboat">{t.form.vesselTypeSailboat}</SelectItem>
-                                                    <SelectItem value="motorboat">{t.form.vesselTypeMotorboat}</SelectItem>
-                                                    <SelectItem value="catamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                                                    <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
+                                                    <SelectItem value="motorni">{t.form.vesselTypeMotorboat}</SelectItem>
+                                                    <SelectItem value="katamaran">{t.form.vesselTypeCatamaran}</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>

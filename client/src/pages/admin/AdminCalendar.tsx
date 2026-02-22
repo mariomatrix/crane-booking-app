@@ -59,9 +59,7 @@ export default function AdminCalendar() {
     const { data: usersList = [] } = trpc.user.list.useQuery();
     const { data: allReservations = [], isLoading: isResLoading } = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
-        userId: selectedUser !== "all" ? Number(selectedUser) : undefined,
-        startDate: viewDate,
-        endDate: addDays(viewDate, 1),
+        userId: selectedUser !== "all" ? selectedUser : undefined,
     });
     const { data: waitingList = [] } = trpc.waitingList.listAll.useQuery();
     const { data: sysSettings } = trpc.settings.get.useQuery();
@@ -158,8 +156,7 @@ export default function AdminCalendar() {
         updateWaitingMutation.mutate({
             id: editingWaiting.id,
             requestedDate: waitEditDate,
-            craneId: Number(waitEditCraneId),
-            slotCount: waitEditSlots
+            craneId: waitEditCraneId,
         });
     };
 
@@ -200,9 +197,9 @@ export default function AdminCalendar() {
         const start = new Date(`${maintDate}T${maintStart}:00`);
         const end = new Date(`${maintDate}T${maintEnd}:00`);
         maintenanceMutation.mutate({
-            craneId: Number(maintCraneId),
-            startDate: start,
-            endDate: end,
+            craneId: maintCraneId,
+            scheduledStart: start,
+            scheduledEnd: end,
             description: maintDesc,
         });
     };
@@ -214,9 +211,9 @@ export default function AdminCalendar() {
         const res = allReservations.find((r: any) => r.id === p.reservationId);
         if (res) {
             setEditingRes(res);
-            setEditDate(new Date(res.startDate));
-            setEditStart(format(new Date(res.startDate), "HH:mm"));
-            setEditEnd(format(new Date(res.endDate), "HH:mm"));
+            setEditDate(new Date(String(res.scheduledStart)));
+            setEditStart(format(new Date(String(res.scheduledStart)), "HH:mm"));
+            setEditEnd(format(new Date(String(res.scheduledEnd)), "HH:mm"));
             setEditCraneId(String(res.craneId));
             setIsEditOpen(true);
         }
@@ -234,9 +231,9 @@ export default function AdminCalendar() {
 
         rescheduleMutation.mutate({
             id: editingRes.id,
-            startDate,
-            endDate,
-            craneId: Number(editCraneId)
+            scheduledStart: startDate,
+            scheduledEnd: endDate,
+            craneId: editCraneId
         }, {
             onSuccess: () => setIsEditOpen(false)
         });
@@ -278,7 +275,7 @@ export default function AdminCalendar() {
                     isMaintenance: r.isMaintenance,
                     user: r.user?.name || r.user?.email || "Nepoznat",
                     craneId: r.craneId,
-                    originalStart: r.startDate,
+                    originalStart: r.scheduledStart,
                     cancelReason: r.cancelReason,
                 },
             };
@@ -286,7 +283,7 @@ export default function AdminCalendar() {
     }, [allReservations, activeCranes, viewDate, lang]);
 
     const handleEventDrop = (info: EventDropArg) => {
-        const id = Number(info.event.extendedProps.reservationId);
+        const id = String(info.event.extendedProps.reservationId);
 
         // Calculate new date and time
         const newOffsetDate = info.event.start!;
@@ -307,8 +304,8 @@ export default function AdminCalendar() {
 
         rescheduleMutation.mutate({
             id,
-            startDate: newStart,
-            endDate: newEnd,
+            scheduledStart: newStart,
+            scheduledEnd: newEnd,
             craneId: newTargetCrane.id
         });
     };
@@ -615,16 +612,16 @@ export default function AdminCalendar() {
                                 info.revert(); // Remove the temp event
 
                                 toReservationMutation.mutate({
-                                    id: Number(p.waitingId),
-                                    startDate,
-                                    endDate,
+                                    id: String(p.waitingId),
+                                    scheduledStart: startDate,
+                                    scheduledEnd: endDate,
                                     craneId: targetCrane.id
                                 });
                             }
                         }}
                         eventDrop={handleEventDrop}
                         eventClick={handleEventClick}
-                        events={calendarEvents}
+                        events={calendarEvents as any}
                         dayHeaderContent={(arg: any) => {
                             const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
                             const crane = activeCranes[diff];
@@ -660,7 +657,7 @@ export default function AdminCalendar() {
                                                 <CheckCircle2 className="h-3 w-3" />
                                             </button>
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); rejectMutation.mutate({ id: p.reservationId, adminNotes: "Preko kalendara" }); }}
+                                                onClick={(e) => { e.stopPropagation(); rejectMutation.mutate({ id: p.reservationId, adminNote: "Preko kalendara" }); }}
                                                 className="hover:bg-red-600/50 rounded p-0.5"
                                             >
                                                 <XCircle className="h-3 w-3" />

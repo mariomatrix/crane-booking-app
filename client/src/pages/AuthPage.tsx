@@ -75,7 +75,7 @@ export default function AuthPage() {
                 firstName,
                 lastName,
                 username: username || undefined,
-                phone: phone || undefined
+                phone: phone
             });
         } else if (mode === "forgotPassword") {
             forgotPasswordMutation.mutate({ email });

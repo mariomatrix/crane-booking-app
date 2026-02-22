@@ -36,7 +36,7 @@ export async function createContext(
           });
           if (payload.sub && !payload.openId) {
             // This is our own JWT from email/password auth
-            const userId = Number(payload.sub);
+            const userId = payload.sub; // UUID string
             user = (await db.getUserById(userId)) ?? null;
           } else {
             throw new Error("Not our JWT — try OAuth");

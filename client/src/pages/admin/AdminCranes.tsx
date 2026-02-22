@@ -37,7 +37,7 @@ import { toast } from "sonner";
 
 type CraneForm = {
   name: string;
-  capacity: string;
+  maxCapacityKg: string;
   maxPoolWidth: string;
   description: string;
   location: string;
@@ -45,7 +45,7 @@ type CraneForm = {
 
 const emptyForm: CraneForm = {
   name: "",
-  capacity: "",
+  maxCapacityKg: "",
   maxPoolWidth: "",
   description: "",
   location: "",
@@ -53,7 +53,7 @@ const emptyForm: CraneForm = {
 
 export default function AdminCranes() {
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CraneForm>(emptyForm);
   const utils = trpc.useUtils();
 
@@ -95,7 +95,7 @@ export default function AdminCranes() {
     setEditingId(crane.id);
     setForm({
       name: crane.name,
-      capacity: crane.capacity,
+      maxCapacityKg: String(crane.maxCapacityKg),
       maxPoolWidth: crane.maxPoolWidth ?? "",
       description: crane.description ?? "",
       location: crane.location ?? "",
@@ -105,7 +105,7 @@ export default function AdminCranes() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.capacity) {
+    if (!form.name || !form.maxCapacityKg) {
       toast.error("Naziv i kapacitet su obavezni.");
       return;
     }
@@ -113,7 +113,7 @@ export default function AdminCranes() {
       updateMutation.mutate({
         id: editingId,
         name: form.name,
-        capacity: form.capacity,
+        maxCapacityKg: Number(form.maxCapacityKg),
         maxPoolWidth: form.maxPoolWidth || undefined,
         description: form.description || undefined,
         location: form.location || undefined,
@@ -121,7 +121,7 @@ export default function AdminCranes() {
     } else {
       createMutation.mutate({
         name: form.name,
-        capacity: form.capacity,
+        maxCapacityKg: Number(form.maxCapacityKg),
         maxPoolWidth: form.maxPoolWidth || undefined,
         description: form.description || undefined,
         location: form.location || undefined,
@@ -167,21 +167,21 @@ export default function AdminCranes() {
       ) : (
         <div className="grid gap-3">
           {cranesList.map((crane) => (
-            <Card key={crane.id} className={!crane.isActive ? "opacity-60" : ""}>
+            <Card key={crane.id} className={crane.craneStatus !== "active" ? "opacity-60" : ""}>
               <CardContent className="p-4 sm:p-6">
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">{crane.name}</span>
-                      {!crane.isActive && (
+                      {!crane.craneStatus || crane.craneStatus !== "active" ? (
                         <Badge variant="outline" className="text-xs text-muted-foreground">
                           Inactive
                         </Badge>
-                      )}
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <Weight className="h-3.5 w-3.5" />
-                      Max {crane.capacity} t
+                      Max {crane.maxCapacityKg} kg
                       {crane.maxPoolWidth && (
                         <span className="ml-3">Bazen: {crane.maxPoolWidth} m</span>
                       )}
@@ -203,7 +203,7 @@ export default function AdminCranes() {
                       <Pencil className="h-3.5 w-3.5 mr-1" />
                       Edit
                     </Button>
-                    {crane.isActive && (
+                    {crane.craneStatus === "active" && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="outline" size="sm" className="text-destructive">
@@ -256,13 +256,13 @@ export default function AdminCranes() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Kapacitet (t) *</Label>
+                <Label>Kapacitet (kg) *</Label>
                 <Input
                   type="number"
                   step="0.5"
-                  value={form.capacity}
-                  onChange={(e) => setForm({ ...form, capacity: e.target.value })}
-                  placeholder="npr. 50"
+                  value={form.maxCapacityKg}
+                  onChange={(e) => setForm({ ...form, maxCapacityKg: e.target.value })}
+                  placeholder="npr. 50000"
                   required
                 />
               </div>

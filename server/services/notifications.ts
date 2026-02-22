@@ -24,12 +24,12 @@ export async function processReminders() {
             .where(and(
                 eq(reservations.status, "approved"),
                 eq(reservations.reminderSent, false),
-                gte(reservations.startDate, twentyFourHoursFromNow),
-                lt(reservations.startDate, windowEnd)
+                gte(reservations.scheduledStart, twentyFourHoursFromNow),
+                lt(reservations.scheduledStart, windowEnd)
             ));
 
         for (const { res, user, crane } of pending) {
-            const dateStr = res.startDate.toLocaleString('hr-HR');
+            const dateStr = res.scheduledStart ? new Date(res.scheduledStart).toLocaleString('hr-HR') : '-';
             const msg = `PODSJETNIK: Vasa rezervacija ${res.reservationNumber} za ${crane.name} je sutra u ${dateStr}.`;
 
             // Use general SMS for reminders as there's no specific reminder core function
@@ -48,7 +48,7 @@ export async function processReminders() {
 /**
  * Triggered on manual admin status change
  */
-export async function notifyStatusChange(reservationId: number) {
+export async function notifyStatusChange(reservationId: string) {
     const db = await getDb();
     if (!db) return;
 
@@ -71,17 +71,17 @@ export async function notifyStatusChange(reservationId: number) {
             to: user.email,
             userName: user.name || user.firstName || "Korisnik",
             craneName: crane.name,
-            startDate: res.startDate,
-            endDate: res.endDate,
+            startDate: res.scheduledStart ?? new Date(),
+            endDate: res.scheduledEnd ?? new Date(),
             craneLocation: crane.location || "-",
-            adminNotes: res.adminNotes || undefined,
+            adminNotes: res.adminNote || undefined,
             lang: "hr"
         });
         if (user.phone) {
             await sendReservationConfirmationSms({
                 phone: user.phone,
                 craneName: crane.name,
-                startDate: res.startDate,
+                startDate: res.scheduledStart ?? new Date(),
                 location: crane.location || "-",
                 lang: "hr"
             });
@@ -91,22 +91,22 @@ export async function notifyStatusChange(reservationId: number) {
             to: user.email,
             userName: user.name || user.firstName || "Korisnik",
             craneName: crane.name,
-            startDate: res.startDate,
-            reason: res.adminNotes || undefined,
+            startDate: res.scheduledStart ?? new Date(),
+            reason: res.adminNote || undefined,
             lang: "hr"
         });
         if (user.phone) {
             await sendReservationRejectionSms({
                 phone: user.phone,
                 craneName: crane.name,
-                reason: res.adminNotes || undefined,
+                reason: res.adminNote || undefined,
                 lang: "hr"
             });
         }
     }
 }
 
-export async function notifyWaitingList(craneId: number, dateStr: string) {
+export async function notifyWaitingList(craneId: string, dateStr: string) {
     const db = await getDb();
     if (!db) return;
 

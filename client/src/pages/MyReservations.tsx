@@ -31,7 +31,7 @@ export default function MyReservations() {
   const { user, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
-  const [cancellingId, setCancellingId] = useState<number | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.myReservations.useQuery(
@@ -137,7 +137,7 @@ export default function MyReservations() {
                       </div>
                       <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                         <CalendarDays className="h-3.5 w-3.5" />
-                        {formatDate(reservation.startDate)} — {formatDate(reservation.endDate)}
+                        {reservation.scheduledStart ? formatDate(reservation.scheduledStart) : (reservation.requestedDate ?? "TBD")} — {reservation.scheduledEnd ? formatDate(reservation.scheduledEnd) : ""}
                       </div>
                       {reservation.liftPurpose && (
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -145,10 +145,10 @@ export default function MyReservations() {
                           {reservation.liftPurpose}
                         </div>
                       )}
-                      {reservation.adminNotes && (
+                      {reservation.adminNote && (
                         <div className="mt-2 p-3 bg-muted rounded-md text-sm">
                           <span className="font-medium">Admin note: </span>
-                          {reservation.adminNotes}
+                          {reservation.adminNote}
                         </div>
                       )}
                     </div>
@@ -198,7 +198,7 @@ export default function MyReservations() {
                 Odustani
               </Button>
               <Button
-                destructive
+                variant="destructive"
                 disabled={cancelReason.length < 3 || cancelMutation.isPending}
                 onClick={() => cancellingId && cancelMutation.mutate({ id: cancellingId, reason: cancelReason })}
               >
