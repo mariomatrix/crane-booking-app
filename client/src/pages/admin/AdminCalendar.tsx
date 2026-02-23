@@ -651,10 +651,11 @@ export default function AdminCalendar() {
                                     {!p.isMaintenance && p.status === 'pending' && (
                                         <div className="mt-auto flex gap-1 pt-1 border-t border-white/20">
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); updateStatusMutation.mutate({ id: p.reservationId }); }}
-                                                className="hover:bg-green-600/50 rounded p-0.5"
+                                                onClick={(e) => { e.stopPropagation(); window.location.href = `/admin/reservations?status=pending`; }}
+                                                className="hover:bg-white/20 rounded p-0.5"
+                                                title="Odobri u Rezervacijama"
                                             >
-                                                <CheckCircle2 className="h-3 w-3" />
+                                                <CheckCircle2 className="h-3 w-3 text-green-300" />
                                             </button>
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); rejectMutation.mutate({ id: p.reservationId, adminNote: "Preko kalendara" }); }}

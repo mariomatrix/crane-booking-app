@@ -286,7 +286,6 @@ export default function Calendar() {
             </DialogHeader>
             <div className="p-1 sm:p-0">
               <ReservationForm
-                initialData={initialFormData}
                 onSuccess={closeBooking}
                 onCancel={() => setBookingOpen(false)}
               />
@@ -301,7 +300,6 @@ export default function Calendar() {
             </DrawerHeader>
             <div className="px-4 pb-8 overflow-y-auto">
               <ReservationForm
-                initialData={initialFormData}
                 onSuccess={closeBooking}
                 onCancel={() => setBookingOpen(false)}
               />

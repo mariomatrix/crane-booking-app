@@ -12,30 +12,28 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Send, AlertTriangle, ListPlus, X } from "lucide-react";
-import { useState, useMemo, useEffect } from "react";
+import { Loader2, Send } from "lucide-react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/_core/hooks/useAuth";
 
 interface ReservationFormProps {
-    initialData?: {
-        craneId?: number;
-        date?: string;
-        startTime?: string;
-        slotCount?: string;
-        isMaintenance?: boolean;
-    };
     onSuccess?: () => void;
     onCancel?: () => void;
 }
 
-export function ReservationForm({ initialData, onSuccess, onCancel }: ReservationFormProps) {
+export function ReservationForm({ onSuccess, onCancel }: ReservationFormProps) {
     const { user } = useAuth();
     const { t, lang } = useLang();
 
-    // Form state
-    const [craneId, setCraneId] = useState(initialData?.craneId ? String(initialData.craneId) : "");
+    // ── Form state ───────────────────────────────────────────────────────
+    const [serviceTypeId, setServiceTypeId] = useState("");
+    const [requestedDate, setRequestedDate] = useState("");
+    const [requestedTimeSlot, setRequestedTimeSlot] = useState("po_dogovoru");
+    const [userNote, setUserNote] = useState("");
+    const [contactPhone, setContactPhone] = useState(user?.phone || "");
+
+    // Vessel state
     const [vesselId, setVesselId] = useState("");
     const [vesselType, setVesselType] = useState("");
     const [vesselName, setVesselName] = useState("");
@@ -43,158 +41,59 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
     const [vesselWidth, setVesselWidth] = useState("");
     const [vesselDraft, setVesselDraft] = useState("");
     const [vesselWeight, setVesselWeight] = useState("");
-    const [selectedDate, setSelectedDate] = useState(initialData?.date || "");
-    const [slotCount, setSlotCount] = useState(initialData?.slotCount || "1");
-    const [startTime, setStartTime] = useState(initialData?.startTime || "");
-    const [liftPurpose, setLiftPurpose] = useState(initialData?.isMaintenance ? "ODRŽAVANJE" : "");
-    const [contactPhone, setContactPhone] = useState(user?.phone || "");
 
-    const [validationWarning, setValidationWarning] = useState<string | null>(null);
     const [hasAttemptedVesselAutoFill, setHasAttemptedVesselAutoFill] = useState(false);
     const [hasSyncedProfile, setHasSyncedProfile] = useState(false);
 
-    const { data: cranesList = [], isLoading: cranesLoading } = trpc.crane.list.useQuery();
-    const { data: myVessels = [], isLoading: vesselsLoading } = trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
-    const slotDuration = 60;
+    // ── Queries ──────────────────────────────────────────────────────────
+    const { data: serviceTypes = [], isLoading: serviceTypesLoading } =
+        trpc.serviceType.list.useQuery({ onlyActive: true });
 
-    const canFetchSlots = !!craneId && !!selectedDate;
-    const { data: slotsData, isFetching: slotsFetching } = trpc.calendar.availableSlots.useQuery(
-        {
-            craneId: craneId,
-            date: selectedDate,
-            durationMin: Number(slotCount) * 60,
-        },
-        { enabled: canFetchSlots }
-    );
+    const { data: myVessels = [], isLoading: vesselsLoading } =
+        trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
 
-    const selectedCrane = useMemo(
-        () => cranesList.find((c: any) => String(c.id) === craneId),
-        [craneId, cranesList]
-    );
-
-    useEffect(() => {
-        if (!selectedCrane || !vesselWeight) { setValidationWarning(null); return; }
-        const weight = Number(vesselWeight);
-        const capacity = Number(selectedCrane.maxCapacityKg);
-        if (weight > capacity) {
-            setValidationWarning(t.form.errors.weightExceeded + ` (max ${capacity}kg)`);
-            return;
-        }
-        if (selectedCrane.maxPoolWidth && vesselWidth) {
-            const width = Number(vesselWidth);
-            if (width > Number(selectedCrane.maxPoolWidth)) {
-                setValidationWarning(t.form.errors.widthExceeded + ` (max ${selectedCrane.maxPoolWidth}m)`);
-                return;
-            }
-        }
-        setValidationWarning(null);
-    }, [vesselWeight, vesselWidth, selectedCrane, t]);
-
-    // Sync profile data (phone) once when user object is available
+    // ── Effects ──────────────────────────────────────────────────────────
     useEffect(() => {
         if (user && !hasSyncedProfile) {
-            if (user.phone && !contactPhone) {
-                setContactPhone(user.phone);
-            }
+            if (user.phone && !contactPhone) setContactPhone(user.phone);
             setHasSyncedProfile(true);
         }
     }, [user, hasSyncedProfile, contactPhone]);
 
-    // Set first vessel as default if available
+    // Auto-select first vessel
     useEffect(() => {
         if (!vesselsLoading && myVessels.length > 0 && !vesselId && !hasAttemptedVesselAutoFill) {
-            const firstVessel = myVessels[0];
-            const firstId = String(firstVessel.id);
-            setVesselId(firstId);
-
-            // Populate fields
-            setVesselType(firstVessel.type);
-            setVesselName(firstVessel.name);
-            setVesselLength(firstVessel.lengthM ? String(firstVessel.lengthM) : "");
-            setVesselWidth(firstVessel.beamM ? String(firstVessel.beamM) : "");
-            setVesselDraft(firstVessel.draftM ? String(firstVessel.draftM) : "");
-            setVesselWeight(firstVessel.weightKg ? String(firstVessel.weightKg) : "");
-
+            const first = myVessels[0] as any;
+            setVesselId(String(first.id));
+            setVesselType(first.type);
+            setVesselName(first.name);
+            setVesselLength(first.lengthM ? String(first.lengthM) : "");
+            setVesselWidth(first.beamM ? String(first.beamM) : "");
+            setVesselDraft(first.draftM ? String(first.draftM) : "");
+            setVesselWeight(first.weightKg ? String(first.weightKg) : "");
             setHasAttemptedVesselAutoFill(true);
         }
     }, [myVessels, vesselsLoading, vesselId, hasAttemptedVesselAutoFill]);
 
-    // Handle case where initial startTime is provided but might not be in slotsData 
-    // (e.g. if it's already busy, we want it to be selected so we can show the "waiting list" UI)
-    // Initialize startTime from initialData only once per set of initialData
-    useEffect(() => {
-        if (initialData?.startTime) {
-            setStartTime(initialData.startTime);
-        }
-    }, [initialData]);
-
-    // Default to smallest capacity crane if nothing selected
-    useEffect(() => {
-        if (!cranesLoading && cranesList.length > 0 && !craneId) {
-            const smallest = [...cranesList].sort((a, b) => Number(a.maxCapacityKg) - Number(b.maxCapacityKg))[0];
-            if (smallest) setCraneId(String(smallest.id));
-        }
-    }, [cranesList, cranesLoading, craneId]);
-
+    // ── Mutation ─────────────────────────────────────────────────────────
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
             toast.success(t.form.successMessage);
             onSuccess?.();
         },
-        onError: (error: any) => {
-            toast.error(error.message);
-        },
+        onError: (error: any) => toast.error(error.message),
     });
 
-    const joinWaitingMutation = trpc.waitingList.join.useMutation({
-        onSuccess: () => {
-            toast.success(lang === "hr" ? "Uspješno ste upisani na listu čekanja." : "You joined the waiting list.");
-            onSuccess?.();
-        },
-        onError: (err: any) => toast.error(err.message),
-    });
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!craneId || !vesselType || !vesselLength || !vesselWidth || !vesselDraft || !vesselWeight || !selectedDate || !startTime || !liftPurpose || !contactPhone) {
-            toast.error(t.form.errors.required);
-            return;
-        }
-        if (validationWarning) { toast.error(validationWarning); return; }
-
-        const startMs = new Date(startTime).getTime();
-        const endMs = startMs + Number(slotCount) * slotDuration * 60000;
-
-        createMutation.mutate({
-            craneId: craneId,
-            scheduledStart: new Date(startMs),
-            scheduledEnd: new Date(endMs),
-            vesselId: vesselId && vesselId !== "new" ? vesselId : undefined,
-            vesselType: vesselType as any,
-            vesselName: vesselName || undefined,
-            vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
-            vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
-            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
-            vesselWeightKg: Number(vesselWeight),
-            liftPurpose,
-            contactPhone,
-        });
-    };
-
+    // ── Handlers ─────────────────────────────────────────────────────────
     const handleVesselSelect = (id: string) => {
         if (id === "new") {
             setVesselId("new");
-            setVesselType("");
-            setVesselName("");
-            setVesselLength("");
-            setVesselWidth("");
-            setVesselDraft("");
-            setVesselWeight("");
+            setVesselType(""); setVesselName(""); setVesselLength("");
+            setVesselWidth(""); setVesselDraft(""); setVesselWeight("");
             return;
         }
-
         setVesselId(id);
-        const vessel = myVessels.find((v: any) => String(v.id) === id);
+        const vessel = (myVessels as any[]).find(v => String(v.id) === id);
         if (vessel) {
             setVesselType(vessel.type);
             setVesselName(vessel.name);
@@ -205,53 +104,58 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
         }
     };
 
-    const handleJoinWaiting = () => {
-        if (!craneId || !selectedDate) { toast.error(t.form.errors.required); return; }
-        joinWaitingMutation.mutate({
-            craneId: craneId,
-            requestedDate: selectedDate,
-            vesselData: {
-                vesselType,
-                vesselName,
-                weightKg: vesselWeight,
-                beamM: vesselWidth,
-                lengthM: vesselLength
-            },
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!serviceTypeId || !requestedDate || !vesselType || !contactPhone) {
+            toast.error(t.form.errors.required);
+            return;
+        }
+        createMutation.mutate({
+            serviceTypeId,
+            requestedDate,
+            requestedTimeSlot: requestedTimeSlot as "jutro" | "poslijepodne" | "po_dogovoru",
+            userNote: userNote || undefined,
+            vesselId: vesselId && vesselId !== "new" ? vesselId : undefined,
+            vesselType: vesselType as any,
+            vesselName: vesselName || undefined,
+            vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
+            vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
+            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
+            vesselWeightKg: vesselWeight ? Number(vesselWeight) : undefined,
+            contactPhone,
         });
     };
 
-    const isStartTimeAvailable = useMemo(() => {
-        if (!startTime || !slotsData?.availableStarts) return true;
-        const startTs = new Date(startTime).getTime();
-        return slotsData.availableStarts.some((s: string | Date) => new Date(s).getTime() === startTs);
-    }, [startTime, slotsData]);
-
-    const noSlots = canFetchSlots && !slotsFetching && (slotsData?.availableStarts.length === 0);
-    const showWaitingListOption = noSlots || (startTime && !isStartTimeAvailable);
-
-    const durationOptions = [
-        { value: "1", label: `1 ${lang === 'hr' ? 'sat' : 'hour'}` },
-        { value: "2", label: `2 ${lang === 'hr' ? 'sata' : 'hours'}` },
-        { value: "3", label: `3 ${lang === 'hr' ? 'sata' : 'hours'}` },
+    const timeSlotOptions = [
+        { value: "jutro", label: lang === "hr" ? "Jutro (08:00–12:00)" : "Morning (08:00–12:00)" },
+        { value: "poslijepodne", label: lang === "hr" ? "Poslijepodne (12:00–16:00)" : "Afternoon (12:00–16:00)" },
+        { value: "po_dogovoru", label: lang === "hr" ? "Po dogovoru" : "By arrangement" },
     ];
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Left Column: Crane & Vessel */}
+                {/* Left Column: Service + Time Preference */}
                 <div className="space-y-6">
                     <div className="space-y-4">
-                        <h3 className="font-medium text-sm border-b pb-2">{t.form.selectCrane}</h3>
+                        <h3 className="font-medium text-sm border-b pb-2">
+                            {lang === "hr" ? "Tip operacije" : "Service Type"}
+                        </h3>
                         <div className="space-y-2">
-                            <Label>{t.form.selectCrane} *</Label>
-                            <Select value={craneId} onValueChange={setCraneId}>
+                            <Label>{lang === "hr" ? "Tip operacije" : "Service type"} *</Label>
+                            <Select value={serviceTypeId} onValueChange={setServiceTypeId}>
                                 <SelectTrigger>
-                                    <SelectValue placeholder={cranesLoading ? "..." : t.form.selectCranePlaceholder} />
+                                    <SelectValue placeholder={
+                                        serviceTypesLoading
+                                            ? "..."
+                                            : lang === "hr" ? "Odaberite tip operacije" : "Select service type"
+                                    } />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {cranesList.map((crane: any) => (
-                                        <SelectItem key={crane.id} value={String(crane.id)}>
-                                            {crane.name} — {crane.maxCapacityKg}kg
+                                    {(serviceTypes as any[]).map((st: any) => (
+                                        <SelectItem key={st.id} value={st.id}>
+                                            {st.name}
+                                            {st.defaultDurationMin && ` (~${st.defaultDurationMin} min)`}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -259,143 +163,130 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                         </div>
                     </div>
 
-                    {!initialData?.isMaintenance && (
-                        <div className="space-y-4">
-                            <h3 className="font-medium text-sm border-b pb-2">{t.form.vesselSection}</h3>
-
-                            {myVessels.length > 0 && (
-                                <div className="space-y-2">
-                                    <Label>{t.nav.vessels}</Label>
-                                    <Select value={vesselId} onValueChange={handleVesselSelect}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder={lang === 'hr' ? 'Odaberite plovilo' : 'Select a vessel'} />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="new">— {t.vessels.addVessel} —</SelectItem>
-                                            {myVessels.map((v: any) => (
-                                                <SelectItem key={v.id} value={String(v.id)}>{v.name} ({v.weight}t)</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
-
-                            <div className="space-y-2">
-                                <Label>{t.form.vesselName} *</Label>
-                                <Input value={vesselName} onChange={(e) => setVesselName(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>{t.form.vesselType} *</Label>
-                                    <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId && vesselId !== "new"}>
-                                        <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
-                                            <SelectItem value="motorni">{t.form.vesselTypeMotorboat}</SelectItem>
-                                            <SelectItem value="katamaran">{t.form.vesselTypeCatamaran}</SelectItem>
-                                            <SelectItem value="ostalo">{t.form.vesselTypeOther}</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>{t.form.vesselWeight} (t) *</Label>
-                                    <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-2">
-                                <div className="space-y-1">
-                                    <Label className="text-xs">{t.form.vesselLength} (m)</Label>
-                                    <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-xs">{t.form.vesselWidth} (m)</Label>
-                                    <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
-                                </div>
-                                <div className="space-y-1">
-                                    <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
-                                    <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} required disabled={!!vesselId && vesselId !== "new"} />
-                                </div>
-                            </div>
-                            {validationWarning && (
-                                <Alert variant="destructive" className="py-2">
-                                    <AlertTriangle className="h-4 w-4" />
-                                    <AlertDescription className="text-xs">{validationWarning}</AlertDescription>
-                                </Alert>
-                            )}
+                    <div className="space-y-4">
+                        <h3 className="font-medium text-sm border-b pb-2">
+                            {lang === "hr" ? "Željeni termin" : "Preferred Date & Time"}
+                        </h3>
+                        <div className="space-y-2">
+                            <Label>{lang === "hr" ? "Okvirni datum" : "Preferred date"} *</Label>
+                            <Input
+                                type="date"
+                                value={requestedDate}
+                                min={new Date().toISOString().split("T")[0]}
+                                onChange={(e) => setRequestedDate(e.target.value)}
+                                required
+                            />
                         </div>
-                    )}
+                        <div className="space-y-2">
+                            <Label>{lang === "hr" ? "Dio dana" : "Time of day"}</Label>
+                            <Select value={requestedTimeSlot} onValueChange={setRequestedTimeSlot}>
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {timeSlotOptions.map((opt) => (
+                                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>{lang === "hr" ? "Napomena" : "Note"}</Label>
+                            <Textarea
+                                value={userNote}
+                                onChange={(e) => setUserNote(e.target.value)}
+                                placeholder={lang === "hr"
+                                    ? "Opišite zahvat, posebne zahtjeve i sl..."
+                                    : "Describe the operation, special requirements..."}
+                                rows={3}
+                            />
+                        </div>
+                    </div>
                 </div>
 
-                {/* Right Column: Time Slot & Contact */}
+                {/* Right Column: Vessel & Contact */}
                 <div className="space-y-6">
                     <div className="space-y-4">
-                        <h3 className="font-medium text-sm border-b pb-2">{t.form.slotSection}</h3>
-                        <div className="grid grid-cols-2 gap-4">
+                        <h3 className="font-medium text-sm border-b pb-2">{t.form.vesselSection}</h3>
+
+                        {(myVessels as any[]).length > 0 && (
                             <div className="space-y-2">
-                                <Label>{t.form.date} *</Label>
-                                <Input type="date" value={selectedDate} min={new Date().toISOString().split("T")[0]} onChange={(e) => setSelectedDate(e.target.value)} required />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>{t.form.duration} *</Label>
-                                <Select value={slotCount} onValueChange={setSlotCount}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                <Label>{t.nav.vessels}</Label>
+                                <Select value={vesselId} onValueChange={handleVesselSelect}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={lang === "hr" ? "Odaberite plovilo" : "Select a vessel"} />
+                                    </SelectTrigger>
                                     <SelectContent>
-                                        {durationOptions.map((opt) => (
-                                            <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                        <SelectItem value="new">— {t.vessels.addVessel} —</SelectItem>
+                                        {(myVessels as any[]).map((v: any) => (
+                                            <SelectItem key={v.id} value={String(v.id)}>
+                                                {v.name} ({v.type})
+                                            </SelectItem>
                                         ))}
                                     </SelectContent>
                                 </Select>
                             </div>
-                        </div>
+                        )}
+
                         <div className="space-y-2">
-                            <Label>{t.form.startTime} *</Label>
-                            {slotsFetching ? (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Loader2 className="h-4 w-4 animate-spin" /> {lang === 'hr' ? 'Provjera termina...' : 'Checking slots...'}
-                                </div>
-                            ) : showWaitingListOption ? (
-                                <Alert variant="default" className="bg-amber-50 border-amber-200">
-                                    <AlertTriangle className="h-4 w-4 text-amber-600" />
-                                    <AlertDescription className="text-xs text-amber-800">
-                                        {lang === 'hr'
-                                            ? "Odabrani termin je zauzet. Možete se upisati na listu čekanja."
-                                            : "Selected slot is busy. You can join the waiting list."}
-                                    </AlertDescription>
-                                    <Button type="button" variant="outline" size="sm" className="mt-2 w-full text-xs" onClick={handleJoinWaiting} disabled={joinWaitingMutation.isPending}>
-                                        <ListPlus className="h-3 w-3 mr-1" /> {t.form.joinWaitingList}
-                                    </Button>
-                                </Alert>
-                            ) : (
-                                <Select value={startTime} onValueChange={setStartTime}>
+                            <Label>{t.form.vesselName}</Label>
+                            <Input
+                                value={vesselName}
+                                onChange={(e) => setVesselName(e.target.value)}
+                                disabled={!!vesselId && vesselId !== "new"}
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>{t.form.vesselType} *</Label>
+                                <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId && vesselId !== "new"}>
                                     <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                                     <SelectContent>
-                                        {((slotsData as any)?.availableStarts || []).map((s: string) => {
-                                            const d = new Date(s);
-                                            return (
-                                                <SelectItem key={d.toISOString()} value={d.toISOString()}>
-                                                    {d.toLocaleTimeString(lang === "hr" ? "hr-HR" : "en-GB", { hour: "2-digit", minute: "2-digit" })}
-                                                </SelectItem>
-                                            );
-                                        })}
+                                        <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
+                                        <SelectItem value="motorni">{t.form.vesselTypeMotorboat}</SelectItem>
+                                        <SelectItem value="katamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                                        <SelectItem value="ostalo">{t.form.vesselTypeOther}</SelectItem>
                                     </SelectContent>
                                 </Select>
-                            )}
+                            </div>
+                            <div className="space-y-2">
+                                <Label>{t.form.vesselWeight} (kg)</Label>
+                                <Input
+                                    type="number"
+                                    value={vesselWeight}
+                                    onChange={(e) => setVesselWeight(e.target.value)}
+                                    disabled={!!vesselId && vesselId !== "new"}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-1">
+                                <Label className="text-xs">{t.form.vesselLength} (m)</Label>
+                                <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                            </div>
+                            <div className="space-y-1">
+                                <Label className="text-xs">{t.form.vesselWidth} (m)</Label>
+                                <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                            </div>
+                            <div className="space-y-1">
+                                <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
+                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                            </div>
                         </div>
                     </div>
 
                     <div className="space-y-4">
-                        <h3 className="font-medium text-sm border-b pb-2">{t.form.operationalSection}</h3>
+                        <h3 className="font-medium text-sm border-b pb-2">
+                            {lang === "hr" ? "Kontakt" : "Contact"}
+                        </h3>
                         <div className="space-y-2">
-                            <Label>{t.form.liftPurpose} *</Label>
-                            <Textarea value={liftPurpose} onChange={(e) => setLiftPurpose(e.target.value)} placeholder={t.form.liftPurposePlaceholder} rows={2} required />
+                            <Label>{t.form.contactPhone} *</Label>
+                            <Input
+                                value={contactPhone}
+                                onChange={(e) => setContactPhone(e.target.value)}
+                                required
+                            />
                         </div>
-                        {!initialData?.isMaintenance && (
-                            <div className="space-y-2">
-                                <Label>{t.form.contactPhone} *</Label>
-                                <Input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} required />
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>
@@ -408,13 +299,13 @@ export function ReservationForm({ initialData, onSuccess, onCancel }: Reservatio
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !!validationWarning || !startTime || !!showWaitingListOption}
+                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType || !contactPhone}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (
                         <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.form.submitting}</>
                     ) : (
-                        <><Send className="h-4 w-4 mr-2" />{initialData?.isMaintenance ? t.admin.save : t.form.submitButton}</>
+                        <><Send className="h-4 w-4 mr-2" />{t.form.submitButton}</>
                     )}
                 </Button>
             </div>

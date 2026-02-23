@@ -39,6 +39,12 @@ import {
   updateWaitingList,
   adminRemoveFromWaitingList,
   getDb,
+  listServiceTypes,
+  getServiceTypeById,
+  createServiceType,
+  updateServiceType,
+  deleteServiceType,
+  seedServiceTypes,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -486,9 +492,12 @@ export const appRouter = router({
   reservation: router({
     create: protectedProcedure
       .input(z.object({
-        craneId: z.string().uuid(),
-        scheduledStart: z.date(),
-        scheduledEnd: z.date(),
+        // Service type — required in v2.0
+        serviceTypeId: z.string().uuid(),
+        // Requested time — user preference (no crane assignment at this stage)
+        requestedDate: z.string().min(1), // YYYY-MM-DD
+        requestedTimeSlot: z.enum(["jutro", "poslijepodne", "po_dogovoru"]).default("po_dogovoru"),
+        userNote: z.string().max(1000).optional(),
         // Vessel data
         vesselId: z.string().uuid().optional(),
         vesselType: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
@@ -496,14 +505,9 @@ export const appRouter = router({
         vesselLengthM: z.number().positive().optional(),
         vesselBeamM: z.number().positive().optional(),
         vesselDraftM: z.number().positive().optional(),
-        vesselWeightKg: z.number().positive().optional(),
-        // Operational
-        liftPurpose: z.string().min(1),
+        vesselWeightKg: z.number().nonnegative().optional(),
+        // Contact
         contactPhone: z.string().min(6),
-        serviceTypeId: z.string().uuid().optional(),
-        userNote: z.string().optional(),
-        requestedDate: z.string().optional(),
-        requestedTimeSlot: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         // 1. Limit check: Max 3 active reservations
@@ -516,79 +520,81 @@ export const appRouter = router({
           });
         }
 
-        if (input.scheduledStart >= input.scheduledEnd) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Kraj termina mora biti nakon početka." });
-        }
-        if (input.scheduledStart < new Date()) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Termin mora biti u budućnosti." });
-        }
-
-        const crane = await getCraneById(input.craneId);
-        if (!crane || crane.craneStatus !== "active") {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Dizalica nije pronađena ili nije aktivna." });
+        // 2. Validate service type exists
+        const serviceType = await getServiceTypeById(input.serviceTypeId);
+        if (!serviceType || !serviceType.isActive) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrani tip operacije nije dostupan." });
         }
 
-        // Vessel weight validation
-        if (input.vesselWeightKg && input.vesselWeightKg > crane.maxCapacityKg) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: `Težina plovila (${input.vesselWeightKg}kg) prelazi kapacitet dizalice (${crane.maxCapacityKg}kg).`,
-          });
-        }
-        if (crane.maxPoolWidth && input.vesselBeamM && input.vesselBeamM > Number(crane.maxPoolWidth)) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: `Širina plovila (${input.vesselBeamM}m) prelazi širinu bazena (${crane.maxPoolWidth}m).`,
-          });
-        }
-
-        // Slot + working-hours validation
-        const sysSettings = await getAllSettings();
-        const { bufferMin } = await validateSlotAgainstSettings(input.scheduledStart, input.scheduledEnd, sysSettings);
-
-        // Overlap check with buffer
-        const effectiveEnd = new Date(input.scheduledEnd.getTime() + bufferMin * 60000);
-        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, effectiveEnd);
-        if (hasOverlap) {
-          throw new TRPCError({ code: "CONFLICT", message: "Ovaj termin se preklapa s postojećom rezervacijom (uključujući tampon zonu)." });
-        }
-
-        // Generate Reservation Number: REV-YY-XXXX
-        const year = new Date().getFullYear().toString().slice(-2);
-        const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
-        const reservationNumber = `REV-${year}-${randomStr}`;
-
-        const id = await createReservation({
-          userId: ctx.user.id,
-          craneId: input.craneId,
-          scheduledStart: input.scheduledStart,
-          scheduledEnd: input.scheduledEnd,
-          status: "pending",
-          reservationNumber,
-          vesselId: input.vesselId,
+        // 3. Build vessel snapshot
+        let vesselSnapshot: Record<string, any> = {
           vesselType: input.vesselType,
           vesselName: input.vesselName,
           vesselLengthM: input.vesselLengthM ? String(input.vesselLengthM) : undefined,
           vesselBeamM: input.vesselBeamM ? String(input.vesselBeamM) : undefined,
           vesselDraftM: input.vesselDraftM ? String(input.vesselDraftM) : undefined,
-          vesselWeightKg: input.vesselWeightKg,
-          liftPurpose: input.liftPurpose,
+          vesselWeightKg: input.vesselWeightKg ?? 0,
           contactPhone: input.contactPhone,
+          liftPurpose: null,  // v2: no liftPurpose, use userNote
+        };
+
+        // If existing vessel, pull snapshot from DB
+        if (input.vesselId) {
+          const vessel = await getVesselById(input.vesselId);
+          if (vessel) {
+            vesselSnapshot = {
+              vesselType: vessel.type,
+              vesselName: vessel.name,
+              vesselLengthM: vessel.lengthM ?? undefined,
+              vesselBeamM: vessel.beamM ?? undefined,
+              vesselDraftM: vessel.draftM ?? undefined,
+              vesselWeightKg: vessel.weightKg ?? 0,
+              contactPhone: input.contactPhone,
+              liftPurpose: null,
+            };
+          }
+        }
+
+        // 4. Generate reservation number
+        const year = new Date().getFullYear().toString().slice(-2);
+        const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
+        const reservationNumber = `REZ-${year}-${randomStr}`;
+
+        // 5. Create reservation (status: pending, no crane yet)
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
+
+        const { reservations: resTable } = await import("../drizzle/schema");
+        const created = await db.insert(resTable).values({
+          userId: ctx.user.id,
+          vesselId: input.vesselId,
           serviceTypeId: input.serviceTypeId,
-          userNote: input.userNote,
           requestedDate: input.requestedDate,
           requestedTimeSlot: input.requestedTimeSlot,
+          status: "pending",
+          reservationNumber,
+          vesselType: vesselSnapshot.vesselType,
+          vesselName: vesselSnapshot.vesselName,
+          vesselLengthM: vesselSnapshot.vesselLengthM,
+          vesselBeamM: vesselSnapshot.vesselBeamM,
+          vesselDraftM: vesselSnapshot.vesselDraftM,
+          vesselWeightKg: vesselSnapshot.vesselWeightKg,
+          contactPhone: input.contactPhone,
+          userNote: input.userNote,
+        }).returning({ id: resTable.id });
+
+        const resId = created[0]?.id;
+        if (!resId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_created",
+          entityType: "reservation",
+          entityId: resId,
+          payload: { serviceTypeId: input.serviceTypeId, requestedDate: input.requestedDate },
         });
 
-        await createAuditEntry({ actorId: ctx.user.id, action: "reservation_created", entityType: "reservation", entityId: id });
-
-        // Notify admin
-        await notifyOwner({
-          title: "Novi zahtjev za rezervaciju",
-          content: `Korisnik ${ctx.user.name || ctx.user.email || "Nepoznat"} zatražio ${crane.name} od ${input.scheduledStart.toLocaleString("hr-HR")} do ${input.scheduledEnd.toLocaleString("hr-HR")}. Plovilo: ${input.vesselWeightKg}kg, svrha: ${input.liftPurpose}`,
-        }).catch(console.warn);
-
-        return { id };
+        return { id: resId, reservationNumber };
       }),
 
     myReservations: protectedProcedure.query(async ({ ctx }) => {
@@ -677,48 +683,82 @@ export const appRouter = router({
       }),
 
     approve: adminProcedure
-      .input(z.object({ id: z.string().uuid(), adminNote: z.string().optional() }))
+      .input(z.object({
+        id: z.string().uuid(),
+        craneId: z.string().uuid(),
+        scheduledStart: z.date(),
+        durationMin: z.number().int().positive().default(60),
+        adminNote: z.string().optional(),
+      }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju se mogu odobriti." });
 
-        if (reservation.craneId && reservation.scheduledStart && reservation.scheduledEnd) {
-          const sysSettings = await getAllSettings();
-          const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-          const effectiveEnd = new Date(new Date(reservation.scheduledEnd).getTime() + bufferMin * 60000);
-          const hasOverlap = await checkOverlap(reservation.craneId, new Date(reservation.scheduledStart), effectiveEnd, reservation.id);
-          if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+        // Validate crane
+        const crane = await getCraneById(input.craneId);
+        if (!crane || crane.craneStatus !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
         }
 
-        await updateReservationStatus(input.id, "approved", ctx.user.id, input.adminNote);
+        // Compute scheduled end
+        const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
+
+        // Validate weight vs crane capacity
+        if (reservation.vesselWeightKg && Number(reservation.vesselWeightKg) > crane.maxCapacityKg) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Težina plovila (${reservation.vesselWeightKg}kg) prelazi kapacitet dizalice (${crane.maxCapacityKg}kg).`,
+          });
+        }
+
+        // Overlap check
+        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, scheduledEnd, input.id);
+        if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+
+        // Update reservation
+        const db = await getDb();
+        if (db) {
+          await db.update(reservations).set({
+            craneId: input.craneId,
+            scheduledStart: input.scheduledStart,
+            scheduledEnd,
+            durationMin: input.durationMin,
+            status: "approved",
+            adminNote: input.adminNote,
+            approvedBy: ctx.user.id,
+            approvedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(reservations.id, input.id));
+        }
+
         await createAuditEntry({ actorId: ctx.user.id, action: "reservation_approved", entityType: "reservation", entityId: input.id });
 
         // Notify user
         const user = await getUserById(reservation.userId);
-        const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
-        if (user?.email && crane) {
+        if (user?.email) {
           await sendReservationConfirmation({
             to: user.email,
             userName: user.name || user.email,
             craneName: crane.name,
-            startDate: reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date(),
-            endDate: reservation.scheduledEnd ? new Date(reservation.scheduledEnd) : new Date(),
+            startDate: input.scheduledStart,
+            endDate: scheduledEnd,
             craneLocation: crane.location || crane.name,
             adminNotes: input.adminNote,
           }).catch(console.warn);
         }
-        if (user?.phone && crane) {
+        if (user?.phone) {
           await sendReservationConfirmationSms({
             phone: user.phone,
             craneName: crane.name,
-            startDate: reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date(),
+            startDate: input.scheduledStart,
             location: crane.location || crane.name,
           }).catch(console.warn);
         }
 
         return { success: true };
       }),
+
 
     reject: adminProcedure
       .input(z.object({ id: z.string().uuid(), adminNote: z.string().optional() }))
@@ -798,6 +838,86 @@ export const appRouter = router({
           entityId: input.id,
           payload: { oldCraneId: reservation.craneId, newCraneId: targetCraneId, scheduledStart: input.scheduledStart },
         });
+        return { success: true };
+      }),
+
+    // Mark reservation as completed
+    complete: operatorProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+        if (reservation.status !== "approved") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Samo odobrene rezervacije se mogu označiti kao završene." });
+        }
+        const db = await getDb();
+        if (db) {
+          await db.update(reservations).set({
+            status: "completed",
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          }).where(eq(reservations.id, input.id));
+        }
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_completed",
+          entityType: "reservation",
+          entityId: input.id,
+        });
+        return { success: true };
+      }),
+  }),
+
+  // ─── Service Types ─────────────────────────────────────────────────────
+  serviceType: router({
+    list: publicProcedure
+      .input(z.object({ onlyActive: z.boolean().optional().default(true) }).optional())
+      .query(async ({ input }) => listServiceTypes(input?.onlyActive ?? true)),
+
+    listAll: adminProcedure
+      .query(async () => listServiceTypes(false)),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1).max(255),
+        description: z.string().optional(),
+        defaultDurationMin: z.number().int().positive().default(60),
+        isActive: z.boolean().default(true),
+        sortOrder: z.number().int().default(0),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const item = await createServiceType(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "service_type_created", entityType: "service_type", entityId: item?.id });
+        return item;
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        name: z.string().min(1).max(255).optional(),
+        description: z.string().optional(),
+        defaultDurationMin: z.number().int().positive().optional(),
+        isActive: z.boolean().optional(),
+        sortOrder: z.number().int().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        const item = await updateServiceType(id, data);
+        await createAuditEntry({ actorId: ctx.user.id, action: "service_type_updated", entityType: "service_type", entityId: id });
+        return item;
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteServiceType(input.id);
+        await createAuditEntry({ actorId: ctx.user.id, action: "service_type_deleted", entityType: "service_type", entityId: input.id });
+        return { success: true };
+      }),
+
+    seed: adminProcedure
+      .mutation(async () => {
+        await seedServiceTypes();
         return { success: true };
       }),
   }),

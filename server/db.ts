@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -9,12 +9,14 @@ import {
   waitingList,
   settings,
   auditLog,
+  serviceTypes,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
   type InsertVessel,
   type InsertWaitingList,
   type InsertAuditLog,
+  type InsertServiceType,
 } from "../drizzle/schema";
 
 // ─── DB Connection ────────────────────────────────────────────────────
@@ -386,6 +388,60 @@ export async function listAuditLog(limit = 50) {
   const db = await getDb();
   if (!db) return [];
   return db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit);
+}
+
+// ─── Service Types ────────────────────────────────────────────────────
+export async function listServiceTypes(onlyActive = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const query = db.select().from(serviceTypes);
+  if (onlyActive) query.where(eq(serviceTypes.isActive, true));
+  return query.orderBy(asc(serviceTypes.sortOrder), asc(serviceTypes.name));
+}
+
+export async function getServiceTypeById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(serviceTypes).where(eq(serviceTypes.id, id)).limit(1);
+  return res[0];
+}
+
+export async function createServiceType(data: Omit<InsertServiceType, "id" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(serviceTypes).values(data).returning();
+  return res[0];
+}
+
+export async function updateServiceType(id: string, data: Partial<Omit<InsertServiceType, "id" | "createdAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.update(serviceTypes)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(serviceTypes.id, id))
+    .returning();
+  return res[0];
+}
+
+export async function deleteServiceType(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(serviceTypes).where(eq(serviceTypes.id, id));
+}
+
+export async function seedServiceTypes() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(serviceTypes).limit(1);
+  if (existing.length > 0) return; // already seeded
+  const defaults = [
+    { name: "Spuštanje", description: "Spuštanje plovila u more", defaultDurationMin: 60, sortOrder: 0 },
+    { name: "Vađenje", description: "Vađenje plovila iz mora", defaultDurationMin: 60, sortOrder: 1 },
+    { name: "Premještanje", description: "Premještanje plovila unutar marine", defaultDurationMin: 90, sortOrder: 2 },
+    { name: "Zimovanje", description: "Skladištenje plovila za zimu", defaultDurationMin: 120, sortOrder: 3 },
+    { name: "Ostalo", description: "Ostale operacije dizalicom", defaultDurationMin: 60, sortOrder: 4 },
+  ];
+  await db.insert(serviceTypes).values(defaults);
 }
 
 // ─── Legacy SDK compatibility ──────────────────────────────────────────
