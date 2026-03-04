@@ -55,10 +55,10 @@ export function ReservationForm({ onSuccess, onCancel }: ReservationFormProps) {
     // ── Effects ──────────────────────────────────────────────────────────
     useEffect(() => {
         if (user && !hasSyncedProfile) {
-            if (user.phone && !contactPhone) setContactPhone(user.phone);
+            if (user.phone) setContactPhone(user.phone);
             setHasSyncedProfile(true);
         }
-    }, [user, hasSyncedProfile, contactPhone]);
+    }, [user, hasSyncedProfile]);
 
     // Auto-select first vessel
     useEffect(() => {

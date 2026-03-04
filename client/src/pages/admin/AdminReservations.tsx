@@ -312,7 +312,13 @@ export default function AdminReservations() {
                 <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselName} ({selectedReservation.vesselType}){selectedReservation.vesselWeightKg ? ` — ${selectedReservation.vesselWeightKg}kg` : ""}</div>
               )}
               {selectedReservation.requestedDate && (
-                <div><span className="font-medium">Željeni datum:</span> {selectedReservation.requestedDate} ({selectedReservation.requestedTimeSlot})</div>
+                <div>
+                  <span className="font-medium">Željeni termin:</span> {selectedReservation.requestedDate}
+                  <span className="ml-1 opacity-70">
+                    ({selectedReservation.requestedTimeSlot === "jutro" ? "08:00–12:00" :
+                      selectedReservation.requestedTimeSlot === "poslijepodne" ? "12:00–16:00" : "Po dogovoru"})
+                  </span>
+                </div>
               )}
               {selectedReservation.userNote && (
                 <div><span className="font-medium">Napomena:</span> {selectedReservation.userNote}</div>
@@ -350,11 +356,23 @@ export default function AdminReservations() {
               </div>
               <div className="space-y-2">
                 <Label>Vrijeme *</Label>
-                <Input
-                  type="time"
-                  value={approveTime}
-                  onChange={(e) => setApproveTime(e.target.value)}
-                />
+                <Select value={approveTime} onValueChange={setApproveTime}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="--:--" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[200px]">
+                    {Array.from({ length: 24 * 4 }).map((_, i) => {
+                      const hour = Math.floor(i / 4).toString().padStart(2, '0');
+                      const min = ((i % 4) * 15).toString().padStart(2, '0');
+                      const time = `${hour}:${min}`;
+                      return (
+                        <SelectItem key={time} value={time}>
+                          {time}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 

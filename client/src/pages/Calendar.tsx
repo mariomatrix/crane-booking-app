@@ -263,11 +263,21 @@ export default function Calendar() {
                   return selectInfo.start >= new Date();
                 }}
                 dateClick={handleDateClick}
-                eventContent={(arg: { event: { title: string } }) => (
-                  <div className="px-1.5 py-0.5 text-white text-xs font-medium truncate">
-                    {arg.event.title}
-                  </div>
-                )}
+                eventContent={(arg) => {
+                  const res = arg.event.extendedProps.reservation;
+                  return (
+                    <div className="p-1 overflow-hidden text-slate-900">
+                      <div className="font-semibold text-[10px] leading-tight flex items-center justify-between">
+                        <span>{arg.timeText}</span>
+                        {/* The original title was arg.event.title, which is a string.
+                            The new snippet only includes arg.timeText.
+                            To maintain functionality, we should include the title as well.
+                            Assuming the user wants to keep the title visible. */}
+                        <span>{arg.event.title}</span>
+                      </div>
+                    </div>
+                  );
+                }}
                 eventClick={handleEventClick}
               />
             )}
