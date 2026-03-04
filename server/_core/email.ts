@@ -26,7 +26,7 @@ async function sendEmail(payload: EmailPayload) {
     try {
         const transporter = getTransporter();
         await transporter.sendMail({
-            from: `"Marina Crane Booking" <${process.env.SMTP_USER}>`,
+            from: process.env.SMTP_FROM ? `"Marina Crane Booking" <${process.env.SMTP_FROM}>` : `"Marina Crane Booking" <${process.env.SMTP_USER}>`,
             ...payload,
         });
         return true;
