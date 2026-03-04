@@ -231,15 +231,26 @@ export default function Calendar() {
               <FullCalendar
                 ref={calendarRef}
                 plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
-                initialView="timeGridDay"
+                initialView="dayGridMonth"
                 headerToolbar={{
                   left: "prev,next today",
                   center: "title",
-                  right: "timeGridDay,timeGridWeek,dayGridMonth",
+                  right: "dayGridMonth,timeGridWeek,timeGridDay",
                 }}
                 locale={lang === "hr" ? "hr" : "en"}
                 slotMinTime={workStart + ":00"}
                 slotMaxTime={workEnd + ":00"}
+                slotLabelFormat={{
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false
+                }}
+                eventTimeFormat={{
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  meridiem: false,
+                  hour12: false
+                }}
                 businessHours={{
                   daysOfWeek: [1, 2, 3, 4, 5, 6],
                   startTime: workStart,

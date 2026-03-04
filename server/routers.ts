@@ -594,6 +594,16 @@ export const appRouter = router({
           payload: { serviceTypeId: input.serviceTypeId, requestedDate: input.requestedDate },
         });
 
+        // Send confirmation email to user
+        const { sendReservationReceived } = await import("./_core/email");
+        sendReservationReceived({
+          to: ctx.user.email,
+          userName: ctx.user.name || ctx.user.firstName || ctx.user.email,
+          reservationNumber,
+          requestedDate: input.requestedDate,
+          lang: "hr"
+        }).catch(console.warn);
+
         return { id: resId, reservationNumber };
       }),
 
@@ -830,6 +840,9 @@ export const appRouter = router({
             updatedAt: new Date()
           }).where(eq(reservations.id, input.id));
         }
+
+        const { notifyStatusChange } = await import("./services/notifications");
+        notifyStatusChange(input.id).catch(console.error);
 
         await createAuditEntry({
           actorId: ctx.user.id,

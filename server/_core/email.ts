@@ -155,3 +155,34 @@ export async function sendPasswordResetEmail(opts: {
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
+
+export async function sendReservationReceived(opts: {
+    to: string;
+    userName: string;
+    reservationNumber: string;
+    craneName?: string;
+    requestedDate: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? `Zahtjev zaprimljen — ${opts.reservationNumber}`
+        : `Request Received — ${opts.reservationNumber}`;
+
+    const html = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr
+            ? "Vaš zahtjev za rezervaciju je uspješno zaprimljen i trenutno čeka na odobrenje administratora."
+            : "Your reservation request has been successfully received and is currently waiting for administrator approval."
+        }</p>
+    <table style="border-collapse:collapse;font-family:sans-serif">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Broj rezervacije" : "Reservation Number"}:</td><td>${opts.reservationNumber}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Traženi datum" : "Requested Date"}:</td><td>${opts.requestedDate}</td></tr>
+      ${opts.craneName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>` : ""}
+    </table>
+    <p style="margin-top:16px">${isHr ? "Obavijestit ćemo vas čim status vaše rezervacije bude promijenjen." : "We will notify you as soon as the status of your reservation is changed."}</p>
+    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+  `;
+    return sendEmail({ to: opts.to, subject, html });
+}
