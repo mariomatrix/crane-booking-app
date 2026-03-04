@@ -601,6 +601,11 @@ export const appRouter = router({
           userName: ctx.user.name || ctx.user.firstName || ctx.user.email,
           reservationNumber,
           requestedDate: input.requestedDate,
+          vesselName: vesselSnapshot.vesselName || undefined,
+          vesselType: vesselSnapshot.vesselType || undefined,
+          vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
+          contactPhone: input.contactPhone,
+          userNote: input.userNote || undefined,
           lang: "hr"
         }).catch(console.warn);
 
@@ -755,6 +760,10 @@ export const appRouter = router({
             endDate: scheduledEnd,
             craneLocation: crane.location || crane.name,
             adminNotes: input.adminNote,
+            vesselName: reservation.vesselName || undefined,
+            vesselType: reservation.vesselType || undefined,
+            vesselWeightKg: reservation.vesselWeightKg || undefined,
+            userNote: reservation.userNote || undefined,
           }).catch(console.warn);
         }
         if (user?.phone) {

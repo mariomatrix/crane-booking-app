@@ -20,16 +20,21 @@ import { useAuth } from "@/_core/hooks/useAuth";
 interface ReservationFormProps {
     onSuccess?: () => void;
     onCancel?: () => void;
+    initialData?: {
+        date?: string;
+        serviceTypeId?: string;
+        requestedTimeSlot?: string;
+    };
 }
 
-export function ReservationForm({ onSuccess, onCancel }: ReservationFormProps) {
+export function ReservationForm({ onSuccess, onCancel, initialData }: ReservationFormProps) {
     const { user } = useAuth();
     const { t, lang } = useLang();
 
     // ── Form state ───────────────────────────────────────────────────────
-    const [serviceTypeId, setServiceTypeId] = useState("");
-    const [requestedDate, setRequestedDate] = useState("");
-    const [requestedTimeSlot, setRequestedTimeSlot] = useState("po_dogovoru");
+    const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
+    const [requestedDate, setRequestedDate] = useState(initialData?.date || "");
+    const [requestedTimeSlot, setRequestedTimeSlot] = useState(initialData?.requestedTimeSlot || "po_dogovoru");
     const [userNote, setUserNote] = useState("");
     const [contactPhone, setContactPhone] = useState(user?.phone || "");
 
@@ -55,10 +60,23 @@ export function ReservationForm({ onSuccess, onCancel }: ReservationFormProps) {
     // ── Effects ──────────────────────────────────────────────────────────
     useEffect(() => {
         if (user && !hasSyncedProfile) {
-            if (user.phone) setContactPhone(user.phone);
+            if (user.phone && !contactPhone) setContactPhone(user.phone);
             setHasSyncedProfile(true);
         }
-    }, [user, hasSyncedProfile]);
+    }, [user, hasSyncedProfile, contactPhone]);
+
+    // Update date if initialData changes (e.g. user clicks different day on calendar)
+    useEffect(() => {
+        if (initialData?.date) {
+            setRequestedDate(initialData.date);
+        }
+        if (initialData?.serviceTypeId) {
+            setServiceTypeId(initialData.serviceTypeId);
+        }
+        if (initialData?.requestedTimeSlot) {
+            setRequestedTimeSlot(initialData.requestedTimeSlot);
+        }
+    }, [initialData]);
 
     // Auto-select first vessel
     useEffect(() => {

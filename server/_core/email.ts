@@ -44,6 +44,10 @@ export async function sendReservationConfirmation(opts: {
     endDate: Date;
     craneLocation: string;
     adminNotes?: string;
+    vesselName?: string;
+    vesselType?: string;
+    vesselWeightKg?: number | string;
+    userNote?: string;
     lang?: "hr" | "en";
 }) {
     const { lang = "hr" } = opts;
@@ -56,15 +60,26 @@ export async function sendReservationConfirmation(opts: {
 
     const html = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
-    <p>${isHr ? "Vaša rezervacija je potvrđena." : "Your reservation has been confirmed."}</p>
-    <table style="border-collapse:collapse;font-family:sans-serif">
-      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>
+    <p>${isHr
+            ? "Vaša rezervacija je potvrđena. Molimo Vas da se pojavite u lučici na vrijeme."
+            : "Your reservation has been confirmed. Please arrive at the marina on time."
+        }</p>
+    <table style="border-collapse:collapse;font-family:sans-serif;width:100%;max-width:500px">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;width:140px">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Početak" : "Start"}:</td><td>${startStr}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Kraj" : "End"}:</td><td>${endStr}</td></tr>
-      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Bazen/Pozicija" : "Basin/Position"}:</td><td><strong>${opts.craneLocation}</strong></td></tr>
-      ${opts.adminNotes ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Napomena" : "Note"}:</td><td>${opts.adminNotes}</td></tr>` : ""}
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Lokacija" : "Location"}:</td><td><strong>${opts.craneLocation}</strong></td></tr>
+      
+      <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
+      ${opts.vesselName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo" : "Vessel"}:</td><td>${opts.vesselName}</td></tr>` : ""}
+      ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
+      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${opts.vesselWeightKg}kg</td></tr>` : ""}
+      
+      ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Vaša napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
+      
+      ${opts.adminNotes ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Napomena administratora" : "Admin Note"}</td></tr><tr><td colspan="2" style="padding:4px 0;color:#2563eb">${opts.adminNotes}</td></tr>` : ""}
     </table>
-    <p style="margin-top:16px">${isHr ? "Molimo uplovite u navedeni bazen do navedenog vremena." : "Please sail into the specified basin by the specified time."}</p>
+    <p style="margin-top:24px">${isHr ? "Vidimo se!" : "See you there!"}</p>
     <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
@@ -163,6 +178,11 @@ export async function sendReservationReceived(opts: {
     craneName?: string;
     requestedDate: string;
     lang?: "hr" | "en";
+    vesselName?: string;
+    vesselType?: string;
+    vesselWeightKg?: number | string;
+    userNote?: string;
+    contactPhone?: string;
 }) {
     const { lang = "hr" } = opts;
     const isHr = lang === "hr";
@@ -176,10 +196,19 @@ export async function sendReservationReceived(opts: {
             ? "Vaš zahtjev za rezervaciju je uspješno zaprimljen i trenutno čeka na odobrenje administratora."
             : "Your reservation request has been successfully received and is currently waiting for administrator approval."
         }</p>
-    <table style="border-collapse:collapse;font-family:sans-serif">
-      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Broj rezervacije" : "Reservation Number"}:</td><td>${opts.reservationNumber}</td></tr>
+    <table style="border-collapse:collapse;font-family:sans-serif;width:100%;max-width:500px">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;width:140px">${isHr ? "Broj rezervacije" : "Reservation Number"}:</td><td>${opts.reservationNumber}</td></tr>
       <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Traženi datum" : "Requested Date"}:</td><td>${opts.requestedDate}</td></tr>
       ${opts.craneName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>` : ""}
+      
+      <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
+      ${opts.vesselName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo" : "Vessel"}:</td><td>${opts.vesselName}</td></tr>` : ""}
+      ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
+      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${opts.vesselWeightKg}kg</td></tr>` : ""}
+      
+      ${opts.contactPhone ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Kontakt telefon" : "Contact Phone"}:</td><td>${opts.contactPhone}</td></tr>` : ""}
+      
+      ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Vaša napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
     </table>
     <p style="margin-top:16px">${isHr ? "Obavijestit ćemo vas čim status vaše rezervacije bude promijenjen." : "We will notify you as soon as the status of your reservation is changed."}</p>
     <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
