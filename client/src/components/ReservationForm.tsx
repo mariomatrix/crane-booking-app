@@ -59,11 +59,11 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
 
     // ── Effects ──────────────────────────────────────────────────────────
     useEffect(() => {
-        if (user && !hasSyncedProfile) {
-            if (user.phone && !contactPhone) setContactPhone(user.phone);
-            setHasSyncedProfile(true);
+        // Sync phone from user profile if not already set by user or initialData
+        if (user?.phone && !contactPhone) {
+            setContactPhone(user.phone);
         }
-    }, [user, hasSyncedProfile, contactPhone]);
+    }, [user?.phone, contactPhone]);
 
     // Update date if initialData changes (e.g. user clicks different day on calendar)
     useEffect(() => {
