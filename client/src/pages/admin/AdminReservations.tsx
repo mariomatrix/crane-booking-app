@@ -261,6 +261,12 @@ export default function AdminReservations() {
                         {reservation.adminNote}
                       </div>
                     )}
+
+                    {reservation.approver && (
+                      <div className="text-xs text-muted-foreground mt-2 bg-slate-50 border rounded py-1.5 px-2 inline-block shadow-sm">
+                        <span className="font-medium">Zadnje operater:</span> {reservation.approver.name}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex gap-2 shrink-0">

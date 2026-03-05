@@ -26,4 +26,11 @@ export const systemRouter = router({
         success: delivered,
       } as const;
     }),
+
+  auditLogs: adminProcedure
+    .input(z.object({ limit: z.number().int().positive().default(100).optional() }).optional())
+    .query(async ({ input }) => {
+      const { listAuditLog } = await import("../db");
+      return listAuditLog(input?.limit ?? 100);
+    }),
 });

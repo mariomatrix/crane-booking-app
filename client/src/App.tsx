@@ -21,6 +21,7 @@ import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminServiceTypes from "./pages/admin/AdminServiceTypes";
 import AdminSeasons from "./pages/admin/AdminSeasons";
 import AdminHolidays from "./pages/admin/AdminHolidays";
+import AdminAuditLog from "./pages/admin/AdminAuditLog";
 import Profile from "./pages/Profile";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 
@@ -66,6 +67,9 @@ function Router() {
       </Route>
       <Route path="/admin/holidays">
         <AdminLayout><AdminHolidays /></AdminLayout>
+      </Route>
+      <Route path="/admin/audit-log">
+        <AdminLayout><AdminAuditLog /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />

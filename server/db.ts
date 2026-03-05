@@ -392,7 +392,24 @@ export async function createAuditEntry(data: {
 export async function listAuditLog(limit = 50) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(auditLog).orderBy(desc(auditLog.createdAt)).limit(limit);
+  return db
+    .select({
+      id: auditLog.id,
+      action: auditLog.action,
+      entityType: auditLog.entityType,
+      entityId: auditLog.entityId,
+      payload: auditLog.payload,
+      ipAddress: auditLog.ipAddress,
+      createdAt: auditLog.createdAt,
+      actor: {
+        id: users.id,
+        name: users.name,
+      },
+    })
+    .from(auditLog)
+    .leftJoin(users, eq(auditLog.actorId, users.id))
+    .orderBy(desc(auditLog.createdAt))
+    .limit(limit);
 }
 
 // ─── Service Types ────────────────────────────────────────────────────

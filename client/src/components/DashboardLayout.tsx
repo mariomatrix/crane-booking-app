@@ -38,6 +38,7 @@ import {
   Users,
   BarChart3,
   Globe,
+  History,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -135,6 +136,7 @@ function DashboardLayoutContent({
     { icon: CalendarOff, label: "Praznici", path: "/admin/holidays", adminOnly: true },
     { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics", adminOnly: true },
+    { icon: History, label: "Povijest radnji", path: "/admin/audit-log", adminOnly: true },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
     { icon: Globe, label: "Nazad na web", path: "/" },
   ];
