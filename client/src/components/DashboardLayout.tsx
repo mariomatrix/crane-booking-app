@@ -121,16 +121,21 @@ function DashboardLayoutContent({
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
 
-  const menuItems = [
+  const allMenuItems = [
     { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
     { icon: Layers, label: "Tipovi operacija", path: "/admin/service-types" },
-    { icon: Users, label: t.admin.users, path: "/admin/users" },
-    { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
-    { icon: Settings, label: t.admin.settings, path: "/admin/settings" },
+    { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
+    { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics", adminOnly: true },
+    { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
   ];
+
+  const isOperator = user?.role === "operator";
+  const menuItems = isOperator
+    ? allMenuItems.filter(item => !(item as any).adminOnly)
+    : allMenuItems;
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);

@@ -7,7 +7,7 @@ import { ReservationForm } from "@/components/ReservationForm";
 
 export default function NewReservation() {
   const [, setLocation] = useLocation();
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   return (
     <div className="min-h-screen bg-background">
@@ -25,7 +25,7 @@ export default function NewReservation() {
       <div className="container py-6">
         <Card className="max-w-4xl mx-auto">
           <CardHeader>
-            <CardTitle>{t.form.selectCrane}</CardTitle>
+            <CardTitle>{lang === "hr" ? "Detalji zahtjeva" : "Request Details"}</CardTitle>
             <CardDescription>
               {t.form.subtitle}
             </CardDescription>

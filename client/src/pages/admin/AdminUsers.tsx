@@ -46,7 +46,7 @@ export default function AdminUsers() {
     const [editFirstName, setEditFirstName] = useState("");
     const [editLastName, setEditLastName] = useState("");
     const [editPhone, setEditPhone] = useState("");
-    const [editRole, setEditRole] = useState<"user" | "admin">("user");
+    const [editRole, setEditRole] = useState<"user" | "admin" | "operator">("user");
 
     const setRole = trpc.user.setRole.useMutation({
         onSuccess: () => {
@@ -146,7 +146,7 @@ export default function AdminUsers() {
                                         <Select
                                             defaultValue={user.role}
                                             onValueChange={(val: string) =>
-                                                setRole.mutate({ id: user.id, role: val as "user" | "admin" })
+                                                setRole.mutate({ id: user.id, role: val as "user" | "admin" | "operator" })
                                             }
                                             disabled={setRole.isPending}
                                         >
@@ -154,6 +154,8 @@ export default function AdminUsers() {
                                                 <div className="flex items-center gap-2">
                                                     {user.role === "admin" ? (
                                                         <ShieldAlert className="h-4 w-4 text-red-500" />
+                                                    ) : user.role === "operator" ? (
+                                                        <Shield className="h-4 w-4 text-blue-500" />
                                                     ) : (
                                                         <Shield className="h-4 w-4 text-gray-500" />
                                                     )}
@@ -162,6 +164,7 @@ export default function AdminUsers() {
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem value="user">Korisnik</SelectItem>
+                                                <SelectItem value="operator">Operater</SelectItem>
                                                 <SelectItem value="admin">Administrator</SelectItem>
                                             </SelectContent>
                                         </Select>
@@ -285,13 +288,14 @@ export default function AdminUsers() {
                             <Label htmlFor="editRole">{t.admin.userRole}</Label>
                             <Select
                                 value={editRole}
-                                onValueChange={(val) => setEditRole(val as "user" | "admin")}
+                                onValueChange={(val) => setEditRole(val as "user" | "admin" | "operator")}
                             >
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="user">Korisnik</SelectItem>
+                                    <SelectItem value="operator">Operater</SelectItem>
                                     <SelectItem value="admin">Administrator</SelectItem>
                                 </SelectContent>
                             </Select>

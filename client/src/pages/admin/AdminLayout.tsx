@@ -8,13 +8,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    if (!loading && user && user.role !== "admin") {
+    if (!loading && user && user.role !== "admin" && user.role !== "operator") {
       setLocation("/");
     }
   }, [loading, user, setLocation]);
 
   if (loading) return null;
-  if (!user || user.role !== "admin") return null;
+  if (!user || (user.role !== "admin" && user.role !== "operator")) return null;
 
   return <DashboardLayout>{children}</DashboardLayout>;
 }
+

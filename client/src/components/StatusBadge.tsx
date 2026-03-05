@@ -1,23 +1,27 @@
 import { Badge } from "@/components/ui/badge";
 
-type Status = "pending" | "approved" | "rejected" | "cancelled";
+type Status = "pending" | "approved" | "rejected" | "cancelled" | "completed";
 
 const statusConfig: Record<Status, { label: string; className: string }> = {
   pending: {
-    label: "Pending",
+    label: "Na čekanju",
     className: "status-badge-pending border-0 font-medium",
   },
   approved: {
-    label: "Approved",
+    label: "Odobreno",
     className: "status-badge-approved border-0 font-medium",
   },
   rejected: {
-    label: "Rejected",
+    label: "Odbijeno",
     className: "status-badge-rejected border-0 font-medium",
   },
   cancelled: {
-    label: "Cancelled",
+    label: "Otkazano",
     className: "status-badge-cancelled border-0 font-medium",
+  },
+  completed: {
+    label: "Završeno",
+    className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 border-0 font-medium",
   },
 };
 
@@ -32,3 +36,4 @@ export function StatusBadge({ status }: { status: string }) {
     </Badge>
   );
 }
+

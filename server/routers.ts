@@ -587,6 +587,14 @@ export const appRouter = router({
         contactPhone: z.string().min(6),
       }))
       .mutation(async ({ input, ctx }) => {
+        // 0. Email verification check
+        if (!ctx.user.emailVerifiedAt) {
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: "Molimo potvrdite svoju email adresu prije kreiranja rezervacije.",
+          });
+        }
+
         // 1. Limit check: Max 3 active reservations
         const myActive = await listReservationsByUser(ctx.user.id);
         const activeCount = myActive.filter(r => r.status === "pending" || r.status === "approved").length;

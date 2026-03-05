@@ -3,10 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, CalendarDays, Loader2, MapPin, Plus, X } from "lucide-react";
+import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { getLoginUrl } from "@/const";
+import { useLang } from "@/contexts/LangContext";
 import {
   Dialog,
   DialogContent,
@@ -20,28 +20,43 @@ import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
 
 function formatDate(date: Date | string) {
-  return new Date(date).toLocaleDateString("en-US", {
+  return new Date(date).toLocaleDateString("hr-HR", {
     year: "numeric",
     month: "short",
     day: "numeric",
   });
 }
 
+function formatDateTime(date: Date | string) {
+  return new Date(date).toLocaleString("hr-HR", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export default function MyReservations() {
   const { user, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
+  const { lang } = useLang();
   const utils = trpc.useUtils();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+
+  const isHr = lang === "hr";
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.myReservations.useQuery(
     undefined,
     { enabled: !!user }
   );
 
+  const { data: serviceTypes = [] } = trpc.serviceType.list.useQuery({ onlyActive: false });
+
   const cancelMutation = trpc.reservation.cancel.useMutation({
     onSuccess: () => {
-      toast.success("Rezervacija je otkazana.");
+      toast.success(isHr ? "Rezervacija je otkazana." : "Reservation cancelled.");
       setCancellingId(null);
       setCancelReason("");
       utils.reservation.myReservations.invalidate();
@@ -50,6 +65,13 @@ export default function MyReservations() {
       toast.error(error.message);
     },
   });
+
+  // Helper: get service type name by ID
+  const getServiceTypeName = (id: string | null | undefined) => {
+    if (!id) return null;
+    const st = (serviceTypes as any[]).find((s: any) => s.id === id);
+    return st?.name ?? null;
+  };
 
   if (authLoading) {
     return (
@@ -64,12 +86,12 @@ export default function MyReservations() {
       <div className="min-h-screen flex items-center justify-center">
         <Card className="max-w-md w-full mx-4">
           <CardHeader className="text-center">
-            <CardTitle>Sign In Required</CardTitle>
-            <CardDescription>You need to be signed in to view your reservations.</CardDescription>
+            <CardTitle>{isHr ? "Potrebna prijava" : "Sign In Required"}</CardTitle>
+            <CardDescription>{isHr ? "Morate biti prijavljeni za pregled rezervacija." : "You need to be signed in to view your reservations."}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button className="w-full" onClick={() => { window.location.href = getLoginUrl(); }}>
-              Sign In
+            <Button className="w-full" onClick={() => setLocation("/auth")}>
+              {isHr ? "Prijava" : "Sign In"}
             </Button>
           </CardContent>
         </Card>
@@ -85,16 +107,16 @@ export default function MyReservations() {
             <div>
               <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="mb-2 -ml-2">
                 <ArrowLeft className="h-4 w-4 mr-1" />
-                Back to Calendar
+                {isHr ? "Kalendar" : "Calendar"}
               </Button>
-              <h1 className="text-xl font-semibold">My Reservations</h1>
+              <h1 className="text-xl font-semibold">{isHr ? "Moje rezervacije" : "My Reservations"}</h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Track the status of your crane reservation requests.
+                {isHr ? "Pratite status vaših zahtjeva za rezervaciju." : "Track the status of your reservation requests."}
               </p>
             </div>
             <Button onClick={() => setLocation("/new-reservation")}>
               <Plus className="h-4 w-4 mr-2" />
-              New Reservation
+              {isHr ? "Nova rezervacija" : "New Reservation"}
             </Button>
           </div>
         </div>
@@ -109,84 +131,118 @@ export default function MyReservations() {
           <Card>
             <CardContent className="py-12 text-center">
               <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-              <h3 className="text-lg font-medium mb-2">No reservations yet</h3>
+              <h3 className="text-lg font-medium mb-2">{isHr ? "Nemate rezervacija" : "No reservations yet"}</h3>
               <p className="text-muted-foreground mb-4">
-                You haven't made any crane reservation requests.
+                {isHr ? "Još niste podnijeli zahtjev za rezervaciju." : "You haven't made any reservation requests."}
               </p>
               <Button onClick={() => setLocation("/new-reservation")}>
                 <Plus className="h-4 w-4 mr-2" />
-                Request a Reservation
+                {isHr ? "Zatraži rezervaciju" : "Request a Reservation"}
               </Button>
             </CardContent>
           </Card>
         ) : (
           <div className="space-y-3">
-            {reservationsList.map((reservation) => (
-              <Card key={reservation.id}>
-                <CardContent className="p-4 sm:p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">
-                          {reservation.crane?.name ?? `Crane #${reservation.craneId}`}
-                        </span>
-                        {reservation.crane?.location && (
-                          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded ml-1">{reservation.crane.location}</span>
+            {reservationsList.map((reservation) => {
+              const serviceTypeName = getServiceTypeName((reservation as any).serviceTypeId);
+              return (
+                <Card key={reservation.id}>
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Show service type name as primary label */}
+                          <span className="font-medium">
+                            {serviceTypeName || (reservation.crane?.name ?? (isHr ? "Čekanje na odobrenje" : "Awaiting approval"))}
+                          </span>
+                          <StatusBadge status={reservation.status} />
+                        </div>
+
+                        {/* For approved/completed: show assigned crane */}
+                        {reservation.crane && (
+                          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                            <Anchor className="h-3.5 w-3.5" />
+                            {reservation.crane.name}
+                            {reservation.crane.location && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded ml-1">{reservation.crane.location}</span>
+                            )}
+                          </div>
                         )}
-                        <StatusBadge status={reservation.status} />
-                      </div>
-                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <CalendarDays className="h-3.5 w-3.5" />
-                        {reservation.scheduledStart ? formatDate(reservation.scheduledStart) : (reservation.requestedDate ?? "TBD")} — {reservation.scheduledEnd ? formatDate(reservation.scheduledEnd) : ""}
-                      </div>
-                      {reservation.liftPurpose && (
+
+                        {/* Date info */}
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                          <MapPin className="h-3.5 w-3.5" />
-                          {reservation.liftPurpose}
+                          <CalendarDays className="h-3.5 w-3.5" />
+                          {reservation.scheduledStart
+                            ? `${formatDateTime(reservation.scheduledStart)} — ${reservation.scheduledEnd ? formatDateTime(reservation.scheduledEnd) : ""}`
+                            : `${isHr ? "Traženi datum" : "Requested"}: ${(reservation as any).requestedDate ?? "TBD"}`
+                          }
                         </div>
-                      )}
-                      {reservation.adminNote && (
-                        <div className="mt-2 p-3 bg-muted rounded-md text-sm">
-                          <span className="font-medium">Admin note: </span>
-                          {reservation.adminNote}
-                        </div>
+
+                        {/* Time slot preference for pending */}
+                        {reservation.status === "pending" && (reservation as any).requestedTimeSlot && (
+                          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                            <Clock className="h-3.5 w-3.5" />
+                            {(reservation as any).requestedTimeSlot === "jutro"
+                              ? (isHr ? "Jutro (08-12h)" : "Morning")
+                              : (reservation as any).requestedTimeSlot === "poslijepodne"
+                                ? (isHr ? "Poslijepodne (12-16h)" : "Afternoon")
+                                : (isHr ? "Po dogovoru" : "By arrangement")}
+                          </div>
+                        )}
+
+                        {/* Completed date */}
+                        {reservation.status === "completed" && (reservation as any).completedAt && (
+                          <div className="text-xs text-emerald-600 dark:text-emerald-400">
+                            {isHr ? "Završeno" : "Completed"}: {formatDate((reservation as any).completedAt)}
+                          </div>
+                        )}
+
+                        {/* Admin note */}
+                        {reservation.adminNote && (
+                          <div className="mt-2 p-3 bg-muted rounded-md text-sm">
+                            <span className="font-medium">{isHr ? "Napomena administratora:" : "Admin note:"} </span>
+                            {reservation.adminNote}
+                          </div>
+                        )}
+                      </div>
+                      {(reservation.status === "pending" || reservation.status === "approved") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-destructive shrink-0"
+                          onClick={() => {
+                            setCancellingId(reservation.id);
+                            setCancelReason("");
+                          }}
+                        >
+                          <X className="h-3.5 w-3.5 mr-1" />
+                          {isHr ? "Otkazivanje" : "Cancel"}
+                        </Button>
                       )}
                     </div>
-                    {(reservation.status === "pending" || reservation.status === "approved") && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive shrink-0"
-                        onClick={() => {
-                          setCancellingId(reservation.id);
-                          setCancelReason("");
-                        }}
-                      >
-                        <X className="h-3.5 w-3.5 mr-1" />
-                        Otkazivanje
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
 
         <Dialog open={!!cancellingId} onOpenChange={(open) => !open && setCancellingId(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Otkazivanje rezervacije</DialogTitle>
+              <DialogTitle>{isHr ? "Otkazivanje rezervacije" : "Cancel Reservation"}</DialogTitle>
               <DialogDescription>
-                Molimo navedite razlog otkazivanja. Ovo nam pomaže u boljem planiranju termina.
+                {isHr
+                  ? "Molimo navedite razlog otkazivanja. Ovo nam pomaže u boljem planiranju termina."
+                  : "Please provide a reason for cancellation. This helps us plan better."}
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="reason">Razlog otkazivanja</Label>
+                <Label htmlFor="reason">{isHr ? "Razlog otkazivanja" : "Reason for cancellation"}</Label>
                 <Textarea
                   id="reason"
-                  placeholder="npr. Promjena plana, loše vrijeme, brod nije spreman..."
+                  placeholder={isHr ? "npr. Promjena plana, loše vrijeme, brod nije spreman..." : "e.g. Change of plans, bad weather..."}
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
                   className="min-h-[100px]"
@@ -195,7 +251,7 @@ export default function MyReservations() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCancellingId(null)}>
-                Odustani
+                {isHr ? "Odustani" : "Cancel"}
               </Button>
               <Button
                 variant="destructive"
@@ -203,7 +259,7 @@ export default function MyReservations() {
                 onClick={() => cancellingId && cancelMutation.mutate({ id: cancellingId, reason: cancelReason })}
               >
                 {cancelMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Potvrdi otkazivanje
+                {isHr ? "Potvrdi otkazivanje" : "Confirm Cancellation"}
               </Button>
             </DialogFooter>
           </DialogContent>

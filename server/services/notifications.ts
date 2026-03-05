@@ -146,8 +146,66 @@ export async function notifyWaitingList(craneId: string, dateStr: string) {
     }
 }
 
+export async function processWaitingListExpiry() {
+    try {
+        const db = await getDb();
+        if (!db) return;
+
+        const { waitingList } = await import("../../drizzle/schema");
+
+        // Find expired waiting list entries
+        const expired = await db.select({
+            w: waitingList,
+            user: users,
+        })
+            .from(waitingList)
+            .innerJoin(users, eq(waitingList.userId, users.id))
+            .where(and(
+                eq(waitingList.status, "waiting"),
+                lt(waitingList.expiresAt, new Date())
+            ));
+
+        for (const { w, user } of expired) {
+            // Mark as expired
+            await db.update(waitingList)
+                .set({ status: "expired" as any, updatedAt: new Date() })
+                .where(eq(waitingList.id, w.id));
+
+            // Notify user
+            if (user.email) {
+                const { sendWaitingListNotification } = await import("../_core/email");
+                await sendWaitingListNotification({
+                    to: user.email,
+                    userName: user.name || user.firstName || "Korisnik",
+                    craneName: "—",
+                    date: w.requestedDate,
+                    lang: "hr",
+                }).catch(console.warn);
+            }
+
+            if (user.phone) {
+                const { sendSms } = await import("../_core/sms");
+                await sendSms(
+                    user.phone,
+                    `MARINA: Vaša ponuda na listi čekanja za ${w.requestedDate} je istekla. Molimo zakažite novi termin.`
+                ).catch(console.warn);
+            }
+        }
+
+        if (expired.length > 0) {
+            console.log(`[WaitingList] Processed ${expired.length} expired entries`);
+        }
+    } catch (error) {
+        console.error("Failed to process waiting list expiry:", error);
+    }
+}
+
 export function startNotificationCron() {
-    console.log("Notification service started (hourly check)");
+    console.log("Notification service started (reminders hourly, waiting list every 30min)");
+    // Reminders: every hour
     processReminders();
     setInterval(processReminders, 60 * 60 * 1000);
+    // Waiting list expiry: every 30 minutes
+    processWaitingListExpiry();
+    setInterval(processWaitingListExpiry, 30 * 60 * 1000);
 }
