@@ -5,6 +5,7 @@ import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
+import restApiRouter from "../restApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -76,6 +77,10 @@ async function startServer() {
       createContext,
     })
   );
+
+  // REST API v1
+  app.use("/api/v1", restApiRouter);
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

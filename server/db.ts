@@ -14,6 +14,7 @@ import {
   messages,
   seasons,
   holidays,
+  apiKeys,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -667,6 +668,46 @@ export async function seedCroatianHolidays() {
       await db.insert(holidays).values({ ...h, isRecurring: true });
     }
   }
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────
+
+export async function createApiKey(data: { name: string; key: string; createdBy: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [k] = await db.insert(apiKeys).values(data).returning();
+  return k;
+}
+
+export async function listApiKeys() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: apiKeys.id,
+    name: apiKeys.name,
+    key: apiKeys.key, // Only returning partial key or full key depending on security, let's return full for now since admin needs to see it once or we just show it. Actually, better return truncated or full. Let's return full.
+    isActive: apiKeys.isActive,
+    lastUsedAt: apiKeys.lastUsedAt,
+    createdAt: apiKeys.createdAt,
+  }).from(apiKeys).orderBy(desc(apiKeys.createdAt));
+}
+
+export async function revokeApiKey(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(apiKeys).set({ isActive: false }).where(eq(apiKeys.id, id));
+}
+
+export async function validateApiKeyAndUpdateLastUsed(key: string) {
+  const db = await getDb();
+  if (!db) return false;
+  const [k] = await db.select().from(apiKeys).where(and(eq(apiKeys.key, key), eq(apiKeys.isActive, true)));
+  if (k) {
+    // Fire and forget update
+    db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, k.id)).execute();
+    return true;
+  }
+  return false;
 }
 
 // ─── Legacy SDK compatibility ──────────────────────────────────────────

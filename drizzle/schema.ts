@@ -208,6 +208,17 @@ export const settings = pgTable("settings", {
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ─── API Keys (REST API integracija) ──────────────────────────────────
+export const apiKeys = pgTable("api_keys", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 100 }).notNull(),
+    key: varchar("key", { length: 128 }).notNull().unique(),
+    isActive: boolean("is_active").default(true).notNull(),
+    lastUsedAt: timestamp("last_used_at"),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // ─── Audit Log ────────────────────────────────────────────────────────
 export const auditLog = pgTable("audit_log", {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

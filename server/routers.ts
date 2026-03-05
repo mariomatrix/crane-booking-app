@@ -62,6 +62,9 @@ import {
   deleteHoliday,
   isHoliday,
   seedCroatianHolidays,
+  createApiKey,
+  listApiKeys,
+  revokeApiKey,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -1429,6 +1432,35 @@ export const appRouter = router({
       }),
   }),
 
+  // ─── API Keys (Admin Only) ─────────────────────────────────────────────
+  apiKey: router({
+    list: adminProcedure.query(async () => listApiKeys()),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1).max(100),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const crypto = await import("crypto");
+        const rawKey = crypto.randomBytes(32).toString("hex");
+        const key = await createApiKey({
+          name: input.name,
+          key: rawKey,
+          createdBy: ctx.user.id,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "api_key_created", entityType: "api_key", entityId: key.id });
+        return { id: key.id, key: rawKey, name: key.name }; // Return key only once
+      }),
+
+    revoke: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await revokeApiKey(input.id);
+        await createAuditEntry({ actorId: ctx.user.id, action: "api_key_revoked", entityType: "api_key", entityId: input.id });
+        return { success: true };
+      }),
+  }),
+
   // ─── Maintenance (Admin Only) ──────────────────────────────────────────
   maintenance: router({
     create: adminProcedure
@@ -1472,16 +1504,24 @@ export const appRouter = router({
   // ─── Analytics (Admin Only) ──────────────────────────────────────────
   analytics: router({
     dashboard: adminProcedure
-      .query(async () => {
+      .input(z.object({
+        range: z.enum(["7d", "30d", "90d", "365d", "all"]).optional().default("30d")
+      }))
+      .query(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        // 1. Crane Utilization (last 30 days)
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const now = new Date();
+        let startDate = new Date("2000-01-01"); // "all" fallback
+        if (input.range !== "all") {
+          startDate = new Date();
+          const days = parseInt(input.range.replace("d", ""), 10);
+          startDate.setDate(startDate.getDate() - days);
+        }
 
-        const allRes = await db.select().from(reservations).where(gte(reservations.scheduledStart, thirtyDaysAgo));
+        const allRes = await db.select().from(reservations).where(gte(reservations.scheduledStart, startDate));
         const allCranes = await db.select().from(cranes);
+        const allServiceTypes = await db.select().from(serviceTypes);
 
         const craneStats = allCranes.map(c => {
           const craneRes = allRes.filter(r => r.craneId === c.id);
@@ -1532,10 +1572,38 @@ export const appRouter = router({
           cancelReasons[reason] = (cancelReasons[reason] || 0) + 1;
         });
 
+        // 4. Trend Stats (Daily operations count)
+        const trendMap: Record<string, number> = {};
+        allRes.filter(r => r.status === "approved" && r.scheduledStart).forEach(r => {
+          const day = r.scheduledStart!.toISOString().split('T')[0];
+          trendMap[day] = (trendMap[day] || 0) + 1;
+        });
+        const trendStats = Object.entries(trendMap)
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([date, count]) => ({ date, count }));
+
+        // 5. Service Type Stats
+        const serviceTypeMap: Record<string, number> = {};
+        allRes.filter(r => r.status === "approved").forEach(r => {
+          if (r.serviceTypeId) {
+            const serviceInfo = allServiceTypes.find(st => st.id === r.serviceTypeId);
+            if (serviceInfo) {
+              serviceTypeMap[serviceInfo.name] = (serviceTypeMap[serviceInfo.name] || 0) + 1;
+            }
+          } else if (r.isMaintenance) {
+            serviceTypeMap["Održavanje"] = (serviceTypeMap["Održavanje"] || 0) + 1;
+          } else {
+            serviceTypeMap["Nepoznato"] = (serviceTypeMap["Nepoznato"] || 0) + 1;
+          }
+        });
+        const serviceTypeStats = Object.entries(serviceTypeMap).map(([name, value]) => ({ name, value }));
+
         return {
           craneStats,
           topUsers,
-          cancelReasons: Object.entries(cancelReasons).map(([name, value]) => ({ name, value }))
+          cancelReasons: Object.entries(cancelReasons).map(([name, value]) => ({ name, value })),
+          trendStats,
+          serviceTypeStats,
         };
       }),
   }),

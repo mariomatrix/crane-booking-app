@@ -13,14 +13,18 @@ import {
     Cell,
     Legend
 } from "recharts";
-import { Loader2, Download, Users, Anchor, AlertTriangle, Hammer } from "lucide-react";
+import { Loader2, Download, Users, Anchor, AlertTriangle, Hammer, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LineChart, Line } from "recharts";
 import { toast } from "sonner";
+import { useState } from "react";
 
 const COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
 export default function AdminAnalytics() {
-    const { data, isLoading } = trpc.analytics.dashboard.useQuery();
+    const [range, setRange] = useState<"7d" | "30d" | "90d" | "365d" | "all">("30d");
+    const { data, isLoading } = trpc.analytics.dashboard.useQuery({ range });
 
     if (isLoading) {
         return (
@@ -62,15 +66,30 @@ export default function AdminAnalytics() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold">Analitika i izvještaji</h1>
-                    <p className="text-muted-foreground">Pregled rada u zadnjih 30 dana</p>
+                    <p className="text-muted-foreground">Pregled rada sustava za odabrani period</p>
                 </div>
-                <Button onClick={exportToCSV} variant="outline" className="gap-2">
-                    <Download className="h-4 w-4" />
-                    Izvezi u CSV
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Select value={range} onValueChange={(val: any) => setRange(val)}>
+                        <SelectTrigger className="w-[180px]">
+                            <Filter className="w-4 h-4 mr-2" />
+                            <SelectValue placeholder="Odaberi period" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="7d">Zadnjih 7 dana</SelectItem>
+                            <SelectItem value="30d">Zadnjih 30 dana</SelectItem>
+                            <SelectItem value="90d">Zadnjih 3 mjeseca</SelectItem>
+                            <SelectItem value="365d">Zadnja godina</SelectItem>
+                            <SelectItem value="all">Sijelo vrijeme</SelectItem>
+                        </SelectContent>
+                    </Select>
+                    <Button onClick={exportToCSV} variant="outline" className="gap-2">
+                        <Download className="h-4 w-4" />
+                        Izvezi
+                    </Button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -137,6 +156,67 @@ export default function AdminAnalytics() {
                                 <Bar dataKey="maintenanceHours" name="Održavanje" fill="#f97316" radius={[4, 4, 0, 0]} />
                             </BarChart>
                         </ResponsiveContainer>
+                    </CardContent>
+                </Card>
+
+                {/* Trend Chart */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Trend odrađenih operacija</CardTitle>
+                        <CardDescription>Dnevni broj završenih operacija</CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px]">
+                        {data.trendStats?.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <LineChart data={data.trendStats}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis dataKey="date" />
+                                    <YAxis allowDecimals={false} />
+                                    <Tooltip />
+                                    <Legend />
+                                    <Line type="monotone" dataKey="count" name="Operacije" stroke="#10b981" strokeWidth={2} />
+                                </LineChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-muted-foreground italic">
+                                Nema podataka za prikaz trenda.
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Service Types Pie Chart */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Vrst usluga (Udio)</CardTitle>
+                        <CardDescription>Distribucija završenih operacija po tipu</CardDescription>
+                    </CardHeader>
+                    <CardContent className="h-[300px]">
+                        {data.serviceTypeStats?.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={data.serviceTypeStats}
+                                        innerRadius={60}
+                                        outerRadius={80}
+                                        paddingAngle={5}
+                                        dataKey="value"
+                                    >
+                                        {data.serviceTypeStats.map((_: any, index: number) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip />
+                                    <Legend />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <div className="flex items-center justify-center h-full text-muted-foreground italic">
+                                Nema podataka o tipovima usluga.
+                            </div>
+                        )}
                     </CardContent>
                 </Card>
 
