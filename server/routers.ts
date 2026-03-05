@@ -524,6 +524,45 @@ export const appRouter = router({
         });
         return { success: true };
       }),
+
+    anonymize: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        if (input.id === ctx.user.id) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ne možete anonimizirati sami sebe." });
+        }
+        await softDeleteUser(input.id);
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "user_anonymized",
+          entityType: "user",
+          entityId: input.id,
+        });
+        return { success: true };
+      }),
+
+    exportData: protectedProcedure
+      .query(async ({ ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const userRecord = await getUserById(ctx.user.id);
+        const userVessels = await listVesselsByUser(ctx.user.id);
+
+        // Fetch user reservations
+        const userReservations = await db.select().from(reservations).where(eq(reservations.userId, ctx.user.id));
+
+        // Fetch waiting list entries
+        const userWaitingList = await db.select().from(waitingList).where(eq(waitingList.userId, ctx.user.id));
+
+        return {
+          profile: userRecord,
+          vessels: userVessels,
+          reservations: userReservations,
+          waitingList: userWaitingList,
+          exportedAt: new Date().toISOString(),
+        };
+      }),
   }),
 
   // ─── Cranes ──────────────────────────────────────────────────────────

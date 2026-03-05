@@ -24,6 +24,7 @@ export default function AuthPage() {
     const [username, setUsername] = useState("");
     const [phone, setPhone] = useState("");
     const [token, setToken] = useState("");
+    const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -69,6 +70,10 @@ export default function AuthPage() {
         if (mode === "login") {
             loginMutation.mutate({ email, password });
         } else if (mode === "register") {
+            if (!privacyAccepted) {
+                toast.error("Morate prihvatiti Uvjete korištenja i Politiku privatnosti za registraciju.");
+                return;
+            }
             registerMutation.mutate({
                 email,
                 password,
@@ -169,6 +174,19 @@ export default function AuthPage() {
                                 <div className="space-y-2">
                                     <Label>{t.auth.phone} *</Label>
                                     <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
+                                </div>
+                                <div className="flex items-center space-x-2 mt-4 text-sm">
+                                    <Input
+                                        type="checkbox"
+                                        id="privacy-policy"
+                                        className="w-4 h-4 cursor-pointer"
+                                        checked={privacyAccepted}
+                                        onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                                        required
+                                    />
+                                    <Label htmlFor="privacy-policy" className="cursor-pointer text-muted-foreground font-normal">
+                                        Prihvaćam <a href="/privacy" target="_blank" className="text-primary hover:underline">Uvjete korištenja i Politiku privatnosti</a> *
+                                    </Label>
                                 </div>
                             </>
                         )}

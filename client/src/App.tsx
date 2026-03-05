@@ -22,6 +22,7 @@ import AdminServiceTypes from "./pages/admin/AdminServiceTypes";
 import AdminSeasons from "./pages/admin/AdminSeasons";
 import AdminHolidays from "./pages/admin/AdminHolidays";
 import Profile from "./pages/Profile";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 function Router() {
   return (
@@ -33,6 +34,7 @@ function Router() {
       <Route path="/my-reservations" component={MyReservations} />
       <Route path="/my-vessels" component={MyVessels} />
       <Route path="/profile" component={Profile} />
+      <Route path="/privacy" component={PrivacyPolicy} />
 
       {/* Admin routes */}
       <Route path="/admin">

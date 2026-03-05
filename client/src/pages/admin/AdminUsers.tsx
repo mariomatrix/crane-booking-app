@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2 } from "lucide-react";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX } from "lucide-react";
 import { useState } from "react";
 
 export default function AdminUsers() {
@@ -39,6 +39,7 @@ export default function AdminUsers() {
 
     const [resetUser, setResetUser] = useState<{ id: string; name: string } | null>(null);
     const [deleteUser, setDeleteUser] = useState<{ id: string; name: string } | null>(null);
+    const [anonymizeUser, setAnonymizeUser] = useState<{ id: string; name: string } | null>(null);
     const [editUser, setEditUser] = useState<any | null>(null);
     const [newPassword, setNewPassword] = useState("");
 
@@ -77,6 +78,17 @@ export default function AdminUsers() {
         },
         onError: (err: any) => {
             toast.error(err.message || "Greška pri brisanju korisnika.");
+        },
+    });
+
+    const adminAnonymizeUser = trpc.user.anonymize.useMutation({
+        onSuccess: () => {
+            toast.success("Korisnik je uspješno anonimiziran.");
+            setAnonymizeUser(null);
+            utils.user.list.invalidate();
+        },
+        onError: (err: any) => {
+            toast.error(err.message || "Greška pri anonimizaciji korisnika.");
         },
     });
 
@@ -189,6 +201,15 @@ export default function AdminUsers() {
                                                 title="Reset lozinke"
                                             >
                                                 <Key className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="text-amber-500 hover:text-amber-600 hover:bg-amber-50"
+                                                onClick={() => setAnonymizeUser({ id: user.id, name: user.name || user.email || "Korisnik" })}
+                                                title="Anonimiziraj (GDPR)"
+                                            >
+                                                <UserX className="h-4 w-4" />
                                             </Button>
                                             <Button
                                                 variant="outline"
@@ -319,7 +340,7 @@ export default function AdminUsers() {
                     <DialogHeader>
                         <DialogTitle>Obriši korisnika: {deleteUser?.name}</DialogTitle>
                         <DialogDescription className="text-red-500">
-                            Pažnja: Ovom akcijom ćete deaktivirati korisnički račun. Korisnik se više neće moći prijaviti, ali će njegovi povijesni podaci (rezervacije) ostati sačuvani u bazi podataka.
+                            Pažnja: Ovom akcijom ćete obrisati korisnički račun.
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
@@ -330,6 +351,33 @@ export default function AdminUsers() {
                             onClick={() => adminDeleteUser.mutate({ id: deleteUser!.id })}
                         >
                             {adminDeleteUser.isPending ? t.vessels.delete : "Potvrdi Brisanje"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Anonymize User Confirmation */}
+            <Dialog open={!!anonymizeUser} onOpenChange={(open: boolean) => !open && setAnonymizeUser(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Anonimiziraj korisnika: {anonymizeUser?.name}</DialogTitle>
+                        <DialogDescription className="text-amber-600 font-medium pb-2">
+                            Pažnja: Ovom akcijom ćete trajno anonimizirati osobne podatke korisnika prema GDPR-u.
+                        </DialogDescription>
+                        <div className="text-sm text-muted-foreground space-y-1">
+                            <p>Korisnik se više neće moći prijaviti, email, ime i kontakt će biti izbrisani, ali će se njegove povijesne rezervacije zadržati u obliku anonimne statistike za analitiku.</p>
+                            <p className="font-bold underline pt-2">Ova akcija je nepovratna.</p>
+                        </div>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setAnonymizeUser(null)}>Odustani</Button>
+                        <Button
+                            variant="destructive"
+                            className="bg-amber-600 hover:bg-amber-700"
+                            disabled={adminAnonymizeUser.isPending}
+                            onClick={() => adminAnonymizeUser.mutate({ id: anonymizeUser!.id })}
+                        >
+                            {adminAnonymizeUser.isPending ? "Anonimiziranje..." : "Potvrdi Anonimizaciju"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

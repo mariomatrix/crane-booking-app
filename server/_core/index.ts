@@ -43,21 +43,21 @@ async function startServer() {
   const loginLimiter = createRateLimiter({
     name: "login",
     maxRequests: 10,
-    windowMs: 60_000, // 10 req/min
+    windowMs: 900_000, // 10 req / 15 min
     message: "Previše pokušaja prijave. Pokušajte ponovo za minutu.",
   });
 
   const registerLimiter = createRateLimiter({
     name: "register",
     maxRequests: 5,
-    windowMs: 60_000, // 5 req/min
+    windowMs: 900_000, // 5 req / 15 min
     message: "Previše pokušaja registracije. Pokušajte ponovo za minutu.",
   });
 
   const forgotPasswordLimiter = createRateLimiter({
     name: "forgotPassword",
     maxRequests: 3,
-    windowMs: 60_000, // 3 req/min
+    windowMs: 900_000, // 3 req / 15 min
     message: "Previše zahtjeva za reset lozinke. Pokušajte ponovo za minutu.",
   });
 

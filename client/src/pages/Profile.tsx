@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
-import { Loader2, User, Save } from "lucide-react";
+import { Loader2, User, Save, Download } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
@@ -42,6 +42,27 @@ export default function Profile() {
             lastName,
             phone,
         });
+    };
+
+    const { refetch: fetchExportData, isFetching: isExporting } = trpc.user.exportData.useQuery(undefined, { enabled: false });
+
+    const handleExportData = async () => {
+        try {
+            const { data } = await fetchExportData();
+            if (data) {
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `moji_podaci_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                toast.success("Podaci su uspješno preuzeti.");
+            }
+        } catch (error: any) {
+            toast.error("Greška pri preuzimanju podataka: " + error.message);
+        }
     };
 
     if (loading) {
@@ -114,6 +135,21 @@ export default function Profile() {
                             </Button>
                         </div>
                     </form>
+                </CardContent>
+            </Card>
+
+            <Card className="border-border">
+                <CardHeader>
+                    <CardTitle className="text-lg">Vaši podaci (GDPR)</CardTitle>
+                    <CardDescription>
+                        Preuzmite arhivu svih vaših osobnih podataka, plovila i rezervacija iz sustava.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Button variant="outline" onClick={handleExportData} disabled={isExporting}>
+                        {isExporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                        Preuzmi moje podatke
+                    </Button>
                 </CardContent>
             </Card>
         </div>
