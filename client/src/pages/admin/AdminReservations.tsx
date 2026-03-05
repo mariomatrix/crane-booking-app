@@ -107,6 +107,12 @@ export default function AdminReservations() {
 
   const openApprove = (id: string) => {
     setSelectedId(id);
+    const reservation = (reservationsList as any[]).find((r: any) => r.id === id);
+    if (reservation && reservation.requestedDate) {
+      setApproveDate(reservation.requestedDate);
+    } else {
+      setApproveDate("");
+    }
     setApproveOpen(true);
   };
 
@@ -364,7 +370,7 @@ export default function AdminReservations() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Vrijeme *</Label>
+                <Label>Sat *</Label>
                 <Select value={approveTime} onValueChange={setApproveTime}>
                   <SelectTrigger>
                     <SelectValue placeholder="--:--" />

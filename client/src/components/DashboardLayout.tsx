@@ -37,6 +37,7 @@ import {
   User,
   Users,
   BarChart3,
+  Globe,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -135,6 +136,7 @@ function DashboardLayoutContent({
     { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics", adminOnly: true },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
+    { icon: Globe, label: "Nazad na web", path: "/" },
   ];
 
   const isOperator = user?.role === "operator";

@@ -70,6 +70,7 @@ export default function AdminCalendar() {
 
     // Maintenance Form State
     const [maintCraneId, setMaintCraneId] = useState("");
+    const [maintDateObj, setMaintDateObj] = useState<Date | undefined>(new Date());
     const [maintDate, setMaintDate] = useState(new Date().toISOString().split("T")[0]);
     const [maintStart, setMaintStart] = useState("08:00");
     const [maintEnd, setMaintEnd] = useState("09:00");
@@ -108,6 +109,8 @@ export default function AdminCalendar() {
             utils.reservation.listAll.invalidate();
             setIsMaintOpen(false);
             setMaintDesc("");
+            setMaintDateObj(new Date());
+            setMaintDate(new Date().toISOString().split("T")[0]);
         },
         onError: (err: any) => toast.error(err.message),
     });
@@ -352,7 +355,33 @@ export default function AdminCalendar() {
                                     </div>
                                     <div className="grid gap-2">
                                         <Label>Datum</Label>
-                                        <Input type="date" value={maintDate} onChange={(e) => setMaintDate(e.target.value)} required />
+                                        <Popover>
+                                            <PopoverTrigger asChild>
+                                                <Button
+                                                    variant={"outline"}
+                                                    className={cn(
+                                                        "w-full justify-start text-left font-normal",
+                                                        !maintDateObj && "text-muted-foreground"
+                                                    )}
+                                                >
+                                                    <CalendarIcon className="mr-2 h-4 w-4" />
+                                                    {maintDateObj ? format(maintDateObj, "PPP", { locale: lang === 'hr' ? hr : enUS }) : <span>Odaberi datum</span>}
+                                                </Button>
+                                            </PopoverTrigger>
+                                            <PopoverContent className="w-auto p-0" align="start">
+                                                <Calendar
+                                                    mode="single"
+                                                    selected={maintDateObj}
+                                                    onSelect={(d) => {
+                                                        if (d) {
+                                                            setMaintDateObj(d);
+                                                            setMaintDate(format(d, "yyyy-MM-dd"));
+                                                        }
+                                                    }}
+                                                    initialFocus
+                                                />
+                                            </PopoverContent>
+                                        </Popover>
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="grid gap-2">
