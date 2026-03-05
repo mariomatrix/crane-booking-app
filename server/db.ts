@@ -12,6 +12,8 @@ import {
   serviceTypes,
   emailVerificationTokens,
   messages,
+  seasons,
+  holidays,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -564,6 +566,106 @@ export async function countUnreadMessages(userId: string, role: string) {
         ne(users.role, "user")
       ));
     return result.length;
+  }
+}
+
+// ─── Seasons ──────────────────────────────────────────────────────────────
+
+export async function createSeason(data: { name: string; startDate: string; endDate: string; workingHours: any }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [s] = await db.insert(seasons).values(data).returning();
+  return s;
+}
+
+export async function listSeasons() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(seasons).orderBy(asc(seasons.startDate));
+}
+
+export async function updateSeason(id: string, data: Partial<{ name: string; startDate: string; endDate: string; workingHours: any; isActive: boolean }>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(seasons).set(data).where(eq(seasons.id, id));
+}
+
+export async function deleteSeason(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(seasons).where(eq(seasons.id, id));
+}
+
+export async function getActiveSeason(dateStr: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [s] = await db.select().from(seasons)
+    .where(and(
+      eq(seasons.isActive, true),
+      lte(seasons.startDate, dateStr),
+      gte(seasons.endDate, dateStr)
+    ));
+  return s ?? null;
+}
+
+// ─── Holidays ─────────────────────────────────────────────────────────────
+
+export async function createHoliday(data: { date: string; name: string; isRecurring?: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [h] = await db.insert(holidays).values(data).returning();
+  return h;
+}
+
+export async function listHolidays() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(holidays).orderBy(asc(holidays.date));
+}
+
+export async function deleteHoliday(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(holidays).where(eq(holidays.id, id));
+}
+
+export async function isHoliday(dateStr: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  // Check exact date match
+  const [exact] = await db.select().from(holidays).where(eq(holidays.date, dateStr));
+  if (exact) return true;
+  // Check recurring: match month-day across years
+  const md = dateStr.slice(5); // "MM-DD"
+  const recurring = await db.select().from(holidays)
+    .where(eq(holidays.isRecurring, true));
+  return recurring.some(h => h.date.slice(5) === md);
+}
+
+export async function seedCroatianHolidays() {
+  const db = await getDb();
+  if (!db) return;
+  const currentYear = new Date().getFullYear();
+  const hrHolidays = [
+    { date: `${currentYear}-01-01`, name: "Nova godina" },
+    { date: `${currentYear}-01-06`, name: "Sveta tri kralja" },
+    { date: `${currentYear}-05-01`, name: "Praznik rada" },
+    { date: `${currentYear}-05-30`, name: "Dan državnosti" },
+    { date: `${currentYear}-06-22`, name: "Dan antifašističke borbe" },
+    { date: `${currentYear}-08-05`, name: "Dan pobjede" },
+    { date: `${currentYear}-08-15`, name: "Velika Gospa" },
+    { date: `${currentYear}-10-08`, name: "Dan neovisnosti" },
+    { date: `${currentYear}-11-01`, name: "Svi sveti" },
+    { date: `${currentYear}-11-18`, name: "Dan sjećanja na Vukovar" },
+    { date: `${currentYear}-12-25`, name: "Božić" },
+    { date: `${currentYear}-12-26`, name: "Sveti Stjepan" },
+  ];
+  for (const h of hrHolidays) {
+    // Upsert: skip if already exists for that date
+    const existing = await db.select().from(holidays).where(eq(holidays.date, h.date));
+    if (existing.length === 0) {
+      await db.insert(holidays).values({ ...h, isRecurring: true });
+    }
   }
 }
 

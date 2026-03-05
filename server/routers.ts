@@ -52,6 +52,16 @@ import {
   listMessages,
   markMessagesRead,
   countUnreadMessages,
+  createSeason,
+  listSeasons,
+  updateSeason,
+  deleteSeason,
+  getActiveSeason,
+  createHoliday,
+  listHolidays,
+  deleteHoliday,
+  isHoliday,
+  seedCroatianHolidays,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -609,7 +619,24 @@ export const appRouter = router({
           });
         }
 
-        // 2. Validate service type exists
+        // 2. Check date is not a holiday or outside season
+        const dateIsHoliday = await isHoliday(input.requestedDate);
+        if (dateIsHoliday) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Odabrani datum je praznik ili neradni dan.",
+          });
+        }
+
+        const activeSeason = await getActiveSeason(input.requestedDate);
+        if (!activeSeason) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Odabrani datum je izvan sezone rada. Molimo odaberite datum unutar aktivne sezone.",
+          });
+        }
+
+        // 3. Validate service type exists
         const serviceType = await getServiceTypeById(input.serviceTypeId);
         if (!serviceType || !serviceType.isActive) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrani tip operacije nije dostupan." });
@@ -1311,6 +1338,94 @@ export const appRouter = router({
         await updateSetting(input.key, input.value);
         await createAuditEntry({ actorId: ctx.user.id, action: "setting_updated", entityType: "setting", payload: input });
         return { success: true };
+      }),
+  }),
+
+  // ─── Seasons ───────────────────────────────────────────────────────────
+  season: router({
+    list: publicProcedure.query(async () => listSeasons()),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1).max(100),
+        startDate: z.string(), // YYYY-MM-DD
+        endDate: z.string(),
+        workingHours: z.record(z.string(), z.object({ from: z.string(), to: z.string() })),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const season = await createSeason(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "season_created", entityType: "season", entityId: season.id });
+        return season;
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        name: z.string().min(1).max(100).optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        workingHours: z.record(z.string(), z.object({ from: z.string(), to: z.string() })).optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        await updateSeason(id, data);
+        await createAuditEntry({ actorId: ctx.user.id, action: "season_updated", entityType: "season", entityId: id });
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteSeason(input.id);
+        await createAuditEntry({ actorId: ctx.user.id, action: "season_deleted", entityType: "season", entityId: input.id });
+        return { success: true };
+      }),
+  }),
+
+  // ─── Holidays ──────────────────────────────────────────────────────────
+  holiday: router({
+    list: publicProcedure.query(async () => listHolidays()),
+
+    create: adminProcedure
+      .input(z.object({
+        date: z.string(), // YYYY-MM-DD
+        name: z.string().min(1).max(255),
+        isRecurring: z.boolean().default(true),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const holiday = await createHoliday(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "holiday_created", entityType: "holiday", entityId: holiday.id });
+        return holiday;
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteHoliday(input.id);
+        await createAuditEntry({ actorId: ctx.user.id, action: "holiday_deleted", entityType: "holiday", entityId: input.id });
+        return { success: true };
+      }),
+
+    seed: adminProcedure
+      .mutation(async ({ ctx }) => {
+        await seedCroatianHolidays();
+        await createAuditEntry({ actorId: ctx.user.id, action: "holidays_seeded", entityType: "holiday" });
+        return { success: true };
+      }),
+
+    // Public: check if a date is blocked
+    checkDate: publicProcedure
+      .input(z.object({ date: z.string() }))
+      .query(async ({ input }) => {
+        const holiday = await isHoliday(input.date);
+        const season = await getActiveSeason(input.date);
+        return {
+          isBlocked: holiday || !season,
+          isHoliday: holiday,
+          isOutOfSeason: !season,
+          season: season ? { name: season.name, workingHours: season.workingHours } : null,
+        };
       }),
   }),
 
