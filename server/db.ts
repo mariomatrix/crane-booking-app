@@ -11,6 +11,7 @@ import {
   auditLog,
   serviceTypes,
   emailVerificationTokens,
+  messages,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -490,6 +491,80 @@ export async function deleteExpiredVerificationTokens() {
   if (!db) return;
   await db.delete(emailVerificationTokens)
     .where(lt(emailVerificationTokens.expiresAt, new Date()));
+}
+
+// ─── Messages ─────────────────────────────────────────────────────────
+import { sql as sqlTag } from "drizzle-orm";
+
+export async function sendMessage(data: { reservationId: string; senderId: string; body: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [msg] = await db.insert(messages).values(data).returning();
+  return msg;
+}
+
+export async function listMessages(reservationId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: messages.id,
+    reservationId: messages.reservationId,
+    senderId: messages.senderId,
+    senderName: users.name,
+    senderRole: users.role,
+    body: messages.body,
+    isRead: messages.isRead,
+    createdAt: messages.createdAt,
+  })
+    .from(messages)
+    .innerJoin(users, eq(messages.senderId, users.id))
+    .where(eq(messages.reservationId, reservationId))
+    .orderBy(asc(messages.createdAt));
+}
+
+export async function markMessagesRead(reservationId: string, readerId: string) {
+  const db = await getDb();
+  if (!db) return;
+  // Mark as read all messages NOT sent by the reader
+  await db.update(messages)
+    .set({ isRead: true })
+    .where(and(
+      eq(messages.reservationId, reservationId),
+      ne(messages.senderId, readerId),
+      eq(messages.isRead, false)
+    ));
+}
+
+export async function countUnreadMessages(userId: string, role: string) {
+  const db = await getDb();
+  if (!db) return 0;
+  if (role === "admin" || role === "operator") {
+    // Count unread messages sent by users (not by admin/operator)
+    const result = await db.select({
+      id: messages.id,
+    })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(
+        eq(messages.isRead, false),
+        eq(users.role, "user")
+      ));
+    return result.length;
+  } else {
+    // Count unread messages on user's reservations sent by staff
+    const result = await db.select({
+      id: messages.id,
+    })
+      .from(messages)
+      .innerJoin(reservations, eq(messages.reservationId, reservations.id))
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(
+        eq(messages.isRead, false),
+        eq(reservations.userId, userId),
+        ne(users.role, "user")
+      ));
+    return result.length;
+  }
 }
 
 // ─── Legacy SDK compatibility ──────────────────────────────────────────

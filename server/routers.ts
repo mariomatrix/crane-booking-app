@@ -48,6 +48,10 @@ import {
   seedServiceTypes,
   createEmailVerificationToken,
   verifyEmailToken,
+  sendMessage,
+  listMessages,
+  markMessagesRead,
+  countUnreadMessages,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -972,6 +976,85 @@ export const appRouter = router({
           entityId: input.id,
         });
         return { success: true };
+      }),
+  }),
+
+  // ─── Messages ───────────────────────────────────────────────────────────
+  message: router({
+    send: protectedProcedure
+      .input(z.object({
+        reservationId: z.string().uuid(),
+        body: z.string().min(1).max(2000),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        // Verify the user has access to this reservation
+        const reservation = await getReservationById(input.reservationId);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        const isStaff = ctx.user.role === "admin" || ctx.user.role === "operator";
+        if (!isStaff && reservation.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        const msg = await sendMessage({
+          reservationId: input.reservationId,
+          senderId: ctx.user.id,
+          body: input.body,
+        });
+
+        // Email notification to the other party
+        try {
+          if (isStaff) {
+            // Staff sent message → notify user
+            const owner = await getUserById(reservation.userId);
+            if (owner?.email) {
+              const { sendEmail } = await import("./_core/email");
+              await (sendEmail as any)({
+                to: owner.email,
+                subject: `Nova poruka u vezi rezervacije — Marina Crane Booking`,
+                html: `<h2>Pozdrav, ${owner.name || owner.firstName || "Korisnik"}!</h2>
+                  <p>Imate novu poruku od osoblja marine u vezi vaše rezervacije <strong>${reservation.reservationNumber || ""}</strong>.</p>
+                  <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;">${input.body}</blockquote>
+                  <p>Prijavite se na platformu za odgovor.</p>
+                  <p style="color:#888;font-size:12px">Marina Crane Booking System</p>`,
+              });
+            }
+          }
+        } catch (e) {
+          console.warn("[Messages] Email notification failed:", e);
+        }
+
+        return msg;
+      }),
+
+    list: protectedProcedure
+      .input(z.object({ reservationId: z.string().uuid() }))
+      .query(async ({ input, ctx }) => {
+        const reservation = await getReservationById(input.reservationId);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        const isStaff = ctx.user.role === "admin" || ctx.user.role === "operator";
+        if (!isStaff && reservation.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        // Mark messages as read for the reader
+        await markMessagesRead(input.reservationId, ctx.user.id);
+
+        return listMessages(input.reservationId);
+      }),
+
+    markRead: protectedProcedure
+      .input(z.object({ reservationId: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await markMessagesRead(input.reservationId, ctx.user.id);
+        return { success: true };
+      }),
+
+    unreadCount: protectedProcedure
+      .query(async ({ ctx }) => {
+        const count = await countUnreadMessages(ctx.user.id, ctx.user.role);
+        return { count };
       }),
   }),
 

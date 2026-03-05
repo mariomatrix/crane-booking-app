@@ -3,10 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock } from "lucide-react";
+import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock, MessageSquare } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
+import { ReservationChat } from "@/components/ReservationChat";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,7 @@ export default function MyReservations() {
   const utils = trpc.useUtils();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
+  const [chatReservationId, setChatReservationId] = useState<string | null>(null);
 
   const isHr = lang === "hr";
 
@@ -205,20 +207,30 @@ export default function MyReservations() {
                           </div>
                         )}
                       </div>
-                      {(reservation.status === "pending" || reservation.status === "approved") && (
+                      <div className="flex flex-col gap-2 shrink-0">
                         <Button
                           variant="outline"
                           size="sm"
-                          className="text-destructive shrink-0"
-                          onClick={() => {
-                            setCancellingId(reservation.id);
-                            setCancelReason("");
-                          }}
+                          onClick={() => setChatReservationId(reservation.id)}
                         >
-                          <X className="h-3.5 w-3.5 mr-1" />
-                          {isHr ? "Otkazivanje" : "Cancel"}
+                          <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                          {isHr ? "Poruke" : "Messages"}
                         </Button>
-                      )}
+                        {(reservation.status === "pending" || reservation.status === "approved") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => {
+                              setCancellingId(reservation.id);
+                              setCancelReason("");
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5 mr-1" />
+                            {isHr ? "Otkazivanje" : "Cancel"}
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -262,6 +274,21 @@ export default function MyReservations() {
                 {isHr ? "Potvrdi otkazivanje" : "Confirm Cancellation"}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Chat Dialog */}
+        <Dialog open={!!chatReservationId} onOpenChange={(open) => !open && setChatReservationId(null)}>
+          <DialogContent className="max-w-lg p-0">
+            <DialogHeader className="p-4 pb-0">
+              <DialogTitle>{isHr ? "Poruke" : "Messages"}</DialogTitle>
+              <DialogDescription>
+                {isHr ? "Razgovarajte s osobljem marine u vezi vaše rezervacije." : "Chat with marina staff about your reservation."}
+              </DialogDescription>
+            </DialogHeader>
+            {chatReservationId && (
+              <ReservationChat reservationId={chatReservationId} pollInterval={15000} />
+            )}
           </DialogContent>
         </Dialog>
       </div>

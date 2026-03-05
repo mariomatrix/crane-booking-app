@@ -20,9 +20,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { CalendarDays, Check, CheckCircle2, Loader2, User, X } from "lucide-react";
+import { CalendarDays, Check, CheckCircle2, Loader2, User, X, MessageSquare } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { ReservationChat } from "@/components/ReservationChat";
 
 function formatDate(date: Date | string | null | undefined) {
   if (!date) return "—";
@@ -47,9 +48,9 @@ export default function AdminReservations() {
   const [approveDuration, setApproveDuration] = useState("60");
   const [adminNote, setAdminNote] = useState("");
 
-  // Reject dialog state
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [chatReservationId, setChatReservationId] = useState<string | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -288,6 +289,14 @@ export default function AdminReservations() {
                         Završeno
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setChatReservationId(reservation.id)}
+                    >
+                      <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                      Poruke
+                    </Button>
                   </div>
                 </div>
               </CardContent>
@@ -444,6 +453,21 @@ export default function AdminReservations() {
               Odbij
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Chat Dialog */}
+      <Dialog open={!!chatReservationId} onOpenChange={(open) => !open && setChatReservationId(null)}>
+        <DialogContent className="max-w-lg p-0">
+          <DialogHeader className="p-4 pb-0">
+            <DialogTitle>Poruke</DialogTitle>
+            <DialogDescription>
+              Razgovarajte s korisnikom u vezi ove rezervacije.
+            </DialogDescription>
+          </DialogHeader>
+          {chatReservationId && (
+            <ReservationChat reservationId={chatReservationId} pollInterval={15000} />
+          )}
         </DialogContent>
       </Dialog>
     </div>

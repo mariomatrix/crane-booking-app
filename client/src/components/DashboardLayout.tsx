@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
+import { trpc } from "@/lib/trpc";
 import {
   CalendarDays,
   ClipboardList,
@@ -143,6 +144,13 @@ function DashboardLayoutContent({
   const activeMenuItem = menuItems.find((item) => item.path === location);
   const isMobile = useIsMobile();
 
+  // Unread messages polling (30s)
+  const { data: unreadData } = trpc.message.unreadCount.useQuery(undefined, {
+    refetchInterval: 30000,
+    enabled: !!user,
+  });
+  const unreadCount = unreadData?.count ?? 0;
+
   useEffect(() => {
     if (isCollapsed) {
       setIsResizing(false);
@@ -224,6 +232,11 @@ function DashboardLayoutContent({
                         className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
                       />
                       <span>{item.label}</span>
+                      {item.path === "/admin/reservations" && unreadCount > 0 && (
+                        <span className="ml-auto inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );

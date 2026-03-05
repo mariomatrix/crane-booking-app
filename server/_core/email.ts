@@ -18,7 +18,7 @@ function getTransporter() {
     });
 }
 
-async function sendEmail(payload: EmailPayload) {
+export async function sendEmail(payload: EmailPayload) {
     if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
         console.warn("[Email] SMTP not configured — skipping email to", payload.to);
         return false;
