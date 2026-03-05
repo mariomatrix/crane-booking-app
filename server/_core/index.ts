@@ -35,6 +35,39 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+
+  // ─── Rate Limiting on auth endpoints ────────────────────────────────
+  const { createRateLimiter } = await import("./rateLimit");
+
+  const loginLimiter = createRateLimiter({
+    name: "login",
+    maxRequests: 10,
+    windowMs: 60_000, // 10 req/min
+    message: "Previše pokušaja prijave. Pokušajte ponovo za minutu.",
+  });
+
+  const registerLimiter = createRateLimiter({
+    name: "register",
+    maxRequests: 5,
+    windowMs: 60_000, // 5 req/min
+    message: "Previše pokušaja registracije. Pokušajte ponovo za minutu.",
+  });
+
+  const forgotPasswordLimiter = createRateLimiter({
+    name: "forgotPassword",
+    maxRequests: 3,
+    windowMs: 60_000, // 3 req/min
+    message: "Previše zahtjeva za reset lozinke. Pokušajte ponovo za minutu.",
+  });
+
+  // Apply rate limiters to specific tRPC procedure paths
+  app.use("/api/trpc/auth.login", loginLimiter);
+  app.use("/api/trpc/auth.register", registerLimiter);
+  app.use("/api/trpc/auth.forgotPassword", forgotPasswordLimiter);
+
+  // Rate limit Google OAuth (reuse login limiter)
+  app.use("/auth/google", loginLimiter);
+
   // tRPC API
   app.use(
     "/api/trpc",

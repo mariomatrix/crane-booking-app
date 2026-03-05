@@ -14,7 +14,7 @@
 | **2** | Uloga Operatera + Autentifikacija | 1–2 tjedna | Must |
 | **3** | Sustav poruka (Messaging) | 1–2 tjedna | Must |
 | **4** | Napredne postavke i sezonalnost | 1–2 tjedna | Should |
-| **5** | Analitika v2 + Billing API | 1–2 tjedna | Should |
+| **5** | Analitika v2 + REST API (Marina integracija) | 2–3 tjedna | Should |
 | **6** | GDPR i sigurnost | 1 tjedan | Must |
 | **7** | Polish i testiranje | 1 tjedan | Must |
 
@@ -145,22 +145,41 @@
 
 ---
 
-## Faza 5 — Analitika v2 + Billing API
+## Faza 5 — Analitika v2 + REST API (Marina integracija)
 
-**Cilj:** Proširiti analitički modul i izložiti read-only REST API.
+**Cilj:** Proširiti analitički modul i izložiti read-only REST API za vanjsku konzumaciju — primarno za Marina ERP aplikaciju.
 
 ### 5.1 Analitika v2
 - Novi grafovi: _trendovi rezervacija (line chart)_, _peak sati/dani (heatmap)_, _iskorištenost po tipu operacije_, _sezonska usporedba_, KPI kartica _prosječno čekanje na odobrenje_
 - Vremenski filter: dan, tjedan, mjesec, sezona, prilagođeni raspon
 - CSV izvoz za sve tablice i sirove podatke
 
-### 5.2 Billing REST API
+### 5.2 REST API (Marina integracija + Billing)
+
+#### Infrastruktura
 - Express router na `/api/v1/`
-- API Key middleware (generiranje API ključeva iz Admin → Postavke)
+- API Key middleware (generiranje i opoziv API ključeva iz Admin → Postavke)
 - Rate limiting (100 req/min po API ključu)
-- Endpointi: `GET reservations`, `GET reservations/:id`, `GET users`, `GET users/:id`, `GET service-types`, `GET cranes`
-- Swagger/OpenAPI dokumentacija (auto-generirana)
-- ✅ **Definirani kriteriji završetka:** Billing sustav može dohvatiti podatke. Admin može generirati i upravljati API ključevima.
+- Swagger/OpenAPI dokumentacija (auto-generirana) na `/api/v1/docs`
+
+#### Marina-specifični endpointi
+- `GET /api/v1/vessels/:registration/reservations`
+  — dohvat svih rezervacija za brod po registraciji plovila
+  — Query parametri: `status` (filter), `from`/`to` (datumski raspon)
+  — Vraća: datum, tip operacije, dizalica, status, bilješke
+- `GET /api/v1/reservations/completed`
+  — lista svih završenih operacija
+  — Query parametri: `from`/`to`, `registration`, `limit`, `offset`
+  — Vraća: datum, brod (ime + registracija), dizalica, tip operacije
+- `GET /api/v1/service-types`
+  — referentna lista tipova operacija
+
+#### Generički endpointi
+- `GET /api/v1/reservations` — sve rezervacije (filtrirano po statusu, datumu)
+- `GET /api/v1/reservations/:id` — detalj jedne rezervacije
+- `GET /api/v1/cranes` — lista dizalica
+
+- ✅ **Definirani kriteriji završetka:** Marina aplikacija može dohvatiti completed operacije za određeni brod po registraciji. Admin može generirati i opozvati API ključeve. Swagger dokumentacija dostupna na `/api/v1/docs`.
 
 ---
 

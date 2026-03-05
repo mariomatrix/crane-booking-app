@@ -215,3 +215,32 @@ export async function sendReservationReceived(opts: {
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
+
+export async function sendEmailVerification(opts: {
+    to: string;
+    userName: string;
+    verifyUrl: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? "Potvrdite email adresu — Marina Crane Booking"
+        : "Verify your email — Marina Crane Booking";
+
+    const html = `
+    <h2>${isHr ? "Dobrodošli" : "Welcome"}, ${opts.userName}!</h2>
+    <p>${isHr
+            ? "Hvala na registraciji. Molimo potvrdite svoju email adresu klikom na gumb ispod:"
+            : "Thank you for registering. Please verify your email address by clicking the button below:"
+        }</p>
+    <div style="margin:24px 0">
+      <a href="${opts.verifyUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+        ${isHr ? "Potvrdi email" : "Verify Email"}
+      </a>
+    </div>
+    <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 24 sata." : "This link is valid for 24 hours."}</p>
+    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+  `;
+    return sendEmail({ to: opts.to, subject, html });
+}

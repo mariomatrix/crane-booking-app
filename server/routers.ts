@@ -1,5 +1,6 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
+import { COOKIE_NAME, REFRESH_COOKIE_NAME, ACCESS_TOKEN_EXPIRY_MS, REFRESH_TOKEN_EXPIRY_MS } from "@shared/const";
+import { getSessionCookieOptions, getRefreshCookieOptions } from "./_core/cookies";
+import { getJwtSecret, getRefreshSecret } from "./_core/context";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, operatorProcedure, router } from "./_core/trpc";
 import { z } from "zod";
@@ -45,6 +46,8 @@ import {
   updateServiceType,
   deleteServiceType,
   seedServiceTypes,
+  createEmailVerificationToken,
+  verifyEmailToken,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -52,6 +55,7 @@ import {
   sendReservationRejection,
   sendWaitingListNotification,
   sendPasswordResetEmail,
+  sendEmailVerification,
 } from "./_core/email";
 import { notifyStatusChange, notifyWaitingList } from "./services/notifications";
 import { notifyOwner } from "./_core/notification";
@@ -78,10 +82,25 @@ import {
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 
-// ─── Helper: get JWT secret ──────────────────────────────────────────
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET || "marina-dev-secret-change-in-production";
-  return new TextEncoder().encode(secret);
+// ─── Helper: issue token pair ────────────────────────────────────────
+async function issueTokenPair(userId: string, role: string, ctx: any) {
+  const accessToken = await new SignJWT({ sub: userId, role })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1000}s`)
+    .setIssuedAt()
+    .sign(getJwtSecret());
+
+  const refreshToken = await new SignJWT({ sub: userId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime(`${REFRESH_TOKEN_EXPIRY_MS / 1000}s`)
+    .setIssuedAt()
+    .sign(getRefreshSecret());
+
+  const sessionOpts = getSessionCookieOptions(ctx.req);
+  const refreshOpts = getRefreshCookieOptions(ctx.req);
+
+  ctx.res.cookie(COOKIE_NAME, accessToken, { ...sessionOpts, maxAge: ACCESS_TOKEN_EXPIRY_MS });
+  ctx.res.cookie(REFRESH_COOKIE_NAME, refreshToken, { ...refreshOpts, maxAge: REFRESH_TOKEN_EXPIRY_MS });
 }
 
 // ─── Helper: parse working hours ─────────────────────────────────────
@@ -165,12 +184,20 @@ export const appRouter = router({
           phone: input.phone,
         });
         if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
-        const token = await new SignJWT({ sub: String(userId), role: "user" })
-          .setProtectedHeader({ alg: "HS256" })
-          .setExpirationTime("24h")
-          .sign(getJwtSecret());
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: 86400000 });
+
+        // Issue access + refresh token pair
+        await issueTokenPair(String(userId), "user", ctx);
+
+        // Send verification email
+        const verifyToken = await createEmailVerificationToken(String(userId));
+        const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+        const verifyUrl = `${baseUrl}/auth/verify-email?token=${verifyToken}`;
+        sendEmailVerification({
+          to: input.email,
+          userName: input.firstName,
+          verifyUrl,
+        }).catch(console.warn);
+
         return { success: true };
       }),
 
@@ -188,19 +215,43 @@ export const appRouter = router({
         if (!valid) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Pogrešan email ili lozinka." });
         }
-        const token = await new SignJWT({ sub: String(user.id), role: user.role })
-          .setProtectedHeader({ alg: "HS256" })
-          .setExpirationTime("24h")
-          .sign(getJwtSecret());
-        const cookieOptions = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie(COOKIE_NAME, token, { ...cookieOptions, maxAge: 86400000 });
+
+        // Issue access + refresh token pair
+        await issueTokenPair(String(user.id), user.role, ctx);
         return { success: true, role: user.role };
       }),
 
     logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      const sessionOpts = getSessionCookieOptions(ctx.req);
+      const refreshOpts = getRefreshCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...sessionOpts, maxAge: -1 });
+      ctx.res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshOpts, maxAge: -1 });
       return { success: true } as const;
+    }),
+
+    refresh: publicProcedure.mutation(async ({ ctx }) => {
+      const cookieHeader = ctx.req.headers.cookie;
+      if (!cookieHeader) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sesija je istekla." });
+
+      const { parse: parseCookies } = await import("cookie");
+      const cookies = parseCookies(cookieHeader);
+      const refreshToken = cookies[REFRESH_COOKIE_NAME];
+      if (!refreshToken) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sesija je istekla." });
+
+      try {
+        const { payload } = await jwtVerify(refreshToken, getRefreshSecret(), { algorithms: ["HS256"] });
+        const userId = payload.sub as string;
+        if (!userId) throw new Error("missing sub");
+
+        const user = await getUserById(userId);
+        if (!user) throw new TRPCError({ code: "UNAUTHORIZED", message: "Korisnik nije pronađen." });
+
+        // Issue a fresh pair
+        await issueTokenPair(user.id, user.role, ctx);
+        return { success: true };
+      } catch {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "Sesija je istekla. Molimo prijavite se ponovo." });
+      }
     }),
 
     forgotPassword: publicProcedure
@@ -254,6 +305,32 @@ export const appRouter = router({
         // Cleanup tokens for this user
         await db.delete(passwordResets).where(eq(passwordResets.userId, reset.userId));
 
+        return { success: true };
+      }),
+
+    verifyEmail: publicProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        const userId = await verifyEmailToken(input.token);
+        if (!userId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Link za verifikaciju je nevažeći ili je istekao." });
+        }
+        return { success: true };
+      }),
+
+    resendVerification: protectedProcedure
+      .mutation(async ({ ctx }) => {
+        if (ctx.user.emailVerifiedAt) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Email je već verificiran." });
+        }
+        const verifyToken = await createEmailVerificationToken(ctx.user.id);
+        const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+        const verifyUrl = `${baseUrl}/auth/verify-email?token=${verifyToken}`;
+        await sendEmailVerification({
+          to: ctx.user.email,
+          userName: ctx.user.name || ctx.user.firstName || "Korisnik",
+          verifyUrl,
+        });
         return { success: true };
       }),
   }),

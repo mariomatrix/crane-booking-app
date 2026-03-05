@@ -10,6 +10,7 @@ import {
   settings,
   auditLog,
   serviceTypes,
+  emailVerificationTokens,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -442,6 +443,53 @@ export async function seedServiceTypes() {
     { name: "Ostalo", description: "Ostale operacije dizalicom", defaultDurationMin: 60, sortOrder: 4 },
   ];
   await db.insert(serviceTypes).values(defaults);
+}
+
+// ─── Email Verification ───────────────────────────────────────────────
+import crypto from "crypto";
+
+export async function createEmailVerificationToken(userId: string): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  await db.insert(emailVerificationTokens).values({
+    userId,
+    token,
+    expiresAt,
+  });
+  return token;
+}
+
+export async function verifyEmailToken(token: string): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select()
+    .from(emailVerificationTokens)
+    .where(and(
+      eq(emailVerificationTokens.token, token),
+      gte(emailVerificationTokens.expiresAt, new Date())
+    ))
+    .limit(1);
+  if (!row) return null;
+
+  // Mark user as verified
+  await db.update(users)
+    .set({ emailVerifiedAt: new Date(), userStatus: "active", updatedAt: new Date() })
+    .where(eq(users.id, row.userId));
+
+  // Cleanup used tokens
+  await db.delete(emailVerificationTokens)
+    .where(eq(emailVerificationTokens.userId, row.userId));
+
+  return row.userId;
+}
+
+export async function deleteExpiredVerificationTokens() {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(emailVerificationTokens)
+    .where(lt(emailVerificationTokens.expiresAt, new Date()));
 }
 
 // ─── Legacy SDK compatibility ──────────────────────────────────────────

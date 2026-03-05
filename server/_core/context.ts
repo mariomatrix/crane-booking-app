@@ -1,10 +1,14 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { sdk } from "./sdk";
-import { jwtVerify } from "jose";
-import { COOKIE_NAME } from "@shared/const";
+import { jwtVerify, SignJWT } from "jose";
+import {
+  COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+  ACCESS_TOKEN_EXPIRY_MS,
+} from "@shared/const";
 import { parse as parseCookieHeader } from "cookie";
 import * as db from "../db";
+import { getSessionCookieOptions } from "./cookies";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -12,9 +16,55 @@ export type TrpcContext = {
   user: User | null;
 };
 
-function getJwtSecret() {
+export function getJwtSecret() {
   const secret = process.env.JWT_SECRET || "marina-dev-secret-change-in-production";
   return new TextEncoder().encode(secret);
+}
+
+export function getRefreshSecret() {
+  const secret = process.env.JWT_REFRESH_SECRET || "marina-dev-refresh-change-in-production";
+  return new TextEncoder().encode(secret);
+}
+
+/**
+ * Try to verify an access token and return the user ID.
+ * Returns null if the token is invalid or expired.
+ */
+async function verifyAccessToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
+      algorithms: ["HS256"],
+    });
+    return (payload.sub as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Try to verify a refresh token and return the user ID.
+ * Returns null if the token is invalid or expired.
+ */
+async function verifyRefreshToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getRefreshSecret(), {
+      algorithms: ["HS256"],
+    });
+    return (payload.sub as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue a new short-lived access token for the given user ID.
+ */
+async function issueAccessToken(userId: string): Promise<string> {
+  return new SignJWT({ sub: userId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1000}s`)
+    .setIssuedAt()
+    .sign(getJwtSecret());
 }
 
 export async function createContext(
@@ -26,24 +76,31 @@ export async function createContext(
     const cookieHeader = opts.req.headers.cookie;
     if (cookieHeader) {
       const cookies = parseCookieHeader(cookieHeader);
-      const sessionCookie = cookies[COOKIE_NAME];
+      const accessToken = cookies[COOKIE_NAME];
+      const refreshToken = cookies[REFRESH_COOKIE_NAME];
 
-      if (sessionCookie) {
-        // Try email/password JWT first (has 'sub' claim, signed with JWT_SECRET)
-        try {
-          const { payload } = await jwtVerify(sessionCookie, getJwtSecret(), {
-            algorithms: ["HS256"],
-          });
-          if (payload.sub && !payload.openId) {
-            // This is our own JWT from email/password auth
-            const userId = payload.sub; // UUID string
-            user = (await db.getUserById(userId)) ?? null;
-          } else {
-            throw new Error("Not our JWT — try OAuth");
+      // 1. Try access token first (fast path)
+      if (accessToken) {
+        const userId = await verifyAccessToken(accessToken);
+        if (userId) {
+          user = (await db.getUserById(userId)) ?? null;
+        }
+      }
+
+      // 2. If access token failed/expired, try silent refresh
+      if (!user && refreshToken) {
+        const userId = await verifyRefreshToken(refreshToken);
+        if (userId) {
+          user = (await db.getUserById(userId)) ?? null;
+          if (user) {
+            // Issue a new access token and set it as a cookie
+            const newAccessToken = await issueAccessToken(user.id);
+            const cookieOptions = getSessionCookieOptions(opts.req);
+            opts.res.cookie(COOKIE_NAME, newAccessToken, {
+              ...cookieOptions,
+              maxAge: ACCESS_TOKEN_EXPIRY_MS,
+            });
           }
-        } catch {
-          // Fall back to OAuth flow
-          user = await sdk.authenticateRequest(opts.req);
         }
       }
     }

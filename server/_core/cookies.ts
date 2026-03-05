@@ -46,3 +46,17 @@ export function getSessionCookieOptions(
     secure: isSecureRequest(req),
   };
 }
+
+/**
+ * Cookie options for the refresh token — same security, different path scope.
+ */
+export function getRefreshCookieOptions(
+  req: Request
+): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
+  return {
+    httpOnly: true,
+    path: "/",          // needs to be accessible for silent refresh
+    sameSite: "none",
+    secure: isSecureRequest(req),
+  };
+}
