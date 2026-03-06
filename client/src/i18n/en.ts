@@ -111,6 +111,8 @@ export const en: Translations = {
         backToLogin: "Back to Login",
         signInRequired: "You must be signed in to do this.",
         signInButton: "Sign In",
+        privacyLabel: "I accept the ",
+        privacyLink: "Terms of Use and Privacy Policy",
     },
     admin: {
         dashboard: "Dashboard",

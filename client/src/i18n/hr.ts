@@ -115,6 +115,8 @@ export const hr = {
         backToLogin: "Povratak na prijavu",
         signInRequired: "Morate biti prijavljeni za ovu akciju.",
         signInButton: "Prijavite se",
+        privacyLabel: "Prihvaćam ",
+        privacyLink: "Uvjete korištenja i Politiku privatnosti",
     },
     // Admin
     admin: {

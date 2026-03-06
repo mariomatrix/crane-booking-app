@@ -185,7 +185,10 @@ export default function AuthPage() {
                                         required
                                     />
                                     <Label htmlFor="privacy-policy" className="cursor-pointer text-muted-foreground font-normal">
-                                        Prihvaćam <a href="/privacy" target="_blank" className="text-primary hover:underline">Uvjete korištenja i Politiku privatnosti</a> *
+                                        {(t.auth as any).privacyLabel}
+                                        <a href="/privacy" target="_blank" className="text-primary hover:underline">
+                                            {(t.auth as any).privacyLink}
+                                        </a> *
                                     </Label>
                                 </div>
                             </>
