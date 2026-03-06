@@ -244,3 +244,44 @@ export async function sendEmailVerification(opts: {
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
+
+export async function sendUserInvitation(opts: {
+    to: string;
+    userName: string;
+    tempPassword: string;
+    loginUrl: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? "Vaš korisnički račun je kreiran — Marina Crane Booking"
+        : "Your account has been created — Marina Crane Booking";
+
+    const html = `
+    <h2>${isHr ? "Dobrodošli" : "Welcome"}, ${opts.userName}!</h2>
+    <p>${isHr
+            ? "Administrator je kreirao vaš korisnički račun za sustav rezervacije dizalice."
+            : "An administrator has created your account for the crane booking system."
+        }</p>
+    <p>${isHr
+            ? "Vaši podaci za prijavu su:"
+            : "Your login credentials are:"
+        }</p>
+    <table style="border-collapse:collapse;font-family:sans-serif;margin:16px 0">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Email:</td><td>${opts.to}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Lozinka" : "Password"}:</td><td><code>${opts.tempPassword}</code></td></tr>
+    </table>
+    <p style="color:#ef4444;font-weight:bold">${isHr
+            ? "Molimo vas da promijenite lozinku odmah nakon prve prijave."
+            : "Please change your password immediately after your first login."
+        }</p>
+    <div style="margin:24px 0">
+      <a href="${opts.loginUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+        ${isHr ? "Prijavi se" : "Log In"}
+      </a>
+    </div>
+    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+  `;
+    return sendEmail({ to: opts.to, subject, html });
+}

@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX } from "lucide-react";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus } from "lucide-react";
 import { useState } from "react";
 
 export default function AdminUsers() {
@@ -48,6 +48,15 @@ export default function AdminUsers() {
     const [editLastName, setEditLastName] = useState("");
     const [editPhone, setEditPhone] = useState("");
     const [editRole, setEditRole] = useState<"user" | "admin" | "operator">("user");
+    const [showCreateDialog, setShowCreateDialog] = useState(false);
+    const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
+
+    // Create form state
+    const [newEmail, setNewEmail] = useState("");
+    const [newFirstName, setNewFirstName] = useState("");
+    const [newLastName, setNewLastName] = useState("");
+    const [newPhone, setNewPhone] = useState("");
+    const [newRole, setNewRole] = useState<"user" | "admin" | "operator">("user");
 
     const setRole = trpc.user.setRole.useMutation({
         onSuccess: () => {
@@ -103,6 +112,24 @@ export default function AdminUsers() {
         },
     });
 
+    const adminCreateUser = trpc.user.create.useMutation({
+        onSuccess: (data) => {
+            toast.success("Korisnik uspješno kreiran i dobio je email s lozinkom.");
+            setCreatedTempPassword(data.tempPassword || null);
+            setShowCreateDialog(false);
+            // Reset form
+            setNewEmail("");
+            setNewFirstName("");
+            setNewLastName("");
+            setNewPhone("");
+            setNewRole("user");
+            utils.user.list.invalidate();
+        },
+        onError: (err: any) => {
+            toast.error(err.message || "Greška pri kreiranju korisnika.");
+        },
+    });
+
     const openEdit = (user: any) => {
         setEditUser(user);
         setEditFirstName(user.firstName || "");
@@ -122,6 +149,16 @@ export default function AdminUsers() {
         });
     };
 
+    const handleCreate = () => {
+        adminCreateUser.mutate({
+            email: newEmail,
+            firstName: newFirstName,
+            lastName: newLastName,
+            phone: newPhone,
+            role: newRole,
+        });
+    };
+
     if (users.isLoading) {
         return (
             <div className="flex justify-center p-8">
@@ -133,8 +170,12 @@ export default function AdminUsers() {
     return (
         <div className="space-y-6">
             <Card>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle>Upravljanje Korisnicima</CardTitle>
+                    <Button onClick={() => setShowCreateDialog(true)} className="flex items-center gap-2">
+                        <UserPlus className="h-4 w-4" />
+                        Novi Korisnik
+                    </Button>
                 </CardHeader>
                 <CardContent>
                     <Table>
@@ -379,6 +420,105 @@ export default function AdminUsers() {
                         >
                             {adminAnonymizeUser.isPending ? "Anonimiziranje..." : "Potvrdi Anonimizaciju"}
                         </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Create User Dialog */}
+            <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Dodaj novog korisnika</DialogTitle>
+                        <DialogDescription>
+                            Unesite podatke za novog korisnika. Korisnik će primiti email s privremenom lozinkom.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4 space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="newEmail">Email</Label>
+                            <Input
+                                id="newEmail"
+                                type="email"
+                                value={newEmail}
+                                onChange={(e) => setNewEmail(e.target.value)}
+                                placeholder="korisnik@example.com"
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="newFirstName">{t.auth.firstName}</Label>
+                                <Input
+                                    id="newFirstName"
+                                    value={newFirstName}
+                                    onChange={(e) => setNewFirstName(e.target.value)}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="newLastName">{t.auth.lastName}</Label>
+                                <Input
+                                    id="newLastName"
+                                    value={newLastName}
+                                    onChange={(e) => setNewLastName(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="newPhone">{t.auth.phone}</Label>
+                            <Input
+                                id="newPhone"
+                                value={newPhone}
+                                onChange={(e) => setNewPhone(e.target.value)}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="newRole">{t.admin.userRole}</Label>
+                            <Select
+                                value={newRole}
+                                onValueChange={(val) => setNewRole(val as "user" | "admin" | "operator")}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="user">Korisnik</SelectItem>
+                                    <SelectItem value="operator">Operater</SelectItem>
+                                    <SelectItem value="admin">Administrator</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Odustani</Button>
+                        <Button
+                            disabled={!newEmail || !newFirstName || !newLastName || adminCreateUser.isPending}
+                            onClick={handleCreate}
+                        >
+                            {adminCreateUser.isPending ? "Kreiranje..." : "Kreiraj korisnika"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Success/Password Dialog */}
+            <Dialog open={!!createdTempPassword} onOpenChange={(open) => !open && setCreatedTempPassword(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Korisnik uspješno kreiran!</DialogTitle>
+                        <DialogDescription>
+                            Korisnik je kreiran i poslan mu je email s podacima za prijavu.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-6 text-center space-y-4">
+                        <p className="text-sm text-muted-foreground">Privremena lozinka korisnika je:</p>
+                        <div className="bg-muted p-4 rounded-lg font-mono text-xl tracking-wider select-all">
+                            {createdTempPassword}
+                        </div>
+                        <p className="text-xs text-amber-600 font-medium">
+                            Zabilježite ovu lozinku jer je više nećete moći vidjeti.
+                        </p>
+                    </div>
+                    <DialogFooter>
+                        <Button onClick={() => setCreatedTempPassword(null)}>Zatvori</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

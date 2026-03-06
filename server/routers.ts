@@ -74,6 +74,7 @@ import {
   sendWaitingListNotification,
   sendPasswordResetEmail,
   sendEmailVerification,
+  sendUserInvitation,
 } from "./_core/email";
 import { notifyStatusChange, notifyWaitingList } from "./services/notifications";
 import { notifyOwner } from "./_core/notification";
@@ -420,6 +421,61 @@ export const appRouter = router({
     list: adminProcedure.query(async () => {
       return listAllUsers();
     }),
+
+    create: adminProcedure
+      .input(z.object({
+        email: z.string().email(),
+        firstName: z.string().min(1),
+        lastName: z.string().min(1),
+        phone: z.string().optional(),
+        role: z.enum(["user", "operator", "admin"]).default("user"),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const existing = await getUserByEmail(input.email);
+        if (existing) {
+          throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        }
+
+        // Generate random 10 char password
+        const tempPassword = crypto.randomBytes(5).toString("hex");
+        const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+        const userId = await createLocalUser({
+          email: input.email,
+          passwordHash,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          phone: input.phone,
+        });
+
+        if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        // Update role if not default "user"
+        if (input.role !== "user") {
+          await updateUserRole(String(userId), input.role);
+        }
+
+        // Send invitation email
+        const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+        const loginUrl = `${baseUrl}/auth/login`;
+
+        sendUserInvitation({
+          to: input.email,
+          userName: input.firstName,
+          tempPassword,
+          loginUrl,
+        }).catch(console.warn);
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "user_created_admin",
+          entityType: "user",
+          entityId: String(userId),
+          payload: { email: input.email, role: input.role },
+        });
+
+        return { success: true, tempPassword };
+      }),
 
     setRole: adminProcedure
       .input(z.object({ id: z.string().uuid(), role: z.enum(["user", "operator", "admin"]) }))
@@ -834,7 +890,7 @@ export const appRouter = router({
         scheduledStart: z.date().optional(),
         scheduledEnd: z.date().optional(),
       }).optional())
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) return [];
 
