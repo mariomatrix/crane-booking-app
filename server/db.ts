@@ -587,6 +587,32 @@ export async function countUnreadMessages(userId: string, role: string) {
   }
 }
 
+export async function getUnreadCountForReservation(reservationId: string, userId: string, role: string) {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const conditions = [
+    eq(messages.reservationId, reservationId),
+    eq(messages.isRead, false),
+  ];
+
+  if (role === "admin" || role === "operator") {
+    // Staff sees unread messages from users
+    const result = await db.select({ id: messages.id })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(...conditions, eq(users.role, "user")));
+    return result.length;
+  } else {
+    // Users see unread messages from staff
+    const result = await db.select({ id: messages.id })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(...conditions, ne(users.role, "user")));
+    return result.length;
+  }
+}
+
 // ─── Seasons ──────────────────────────────────────────────────────────────
 
 export async function createSeason(data: { name: string; startDate: string; endDate: string; workingHours: any }) {

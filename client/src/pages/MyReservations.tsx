@@ -192,14 +192,21 @@ export default function MyReservations() {
                         )}
                       </div>
                       <div className="flex flex-col gap-2 shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setChatReservationId(reservation.id)}
-                        >
-                          <MessageSquare className="h-3.5 w-3.5 mr-1" />
-                          {isHr ? "Poruke" : "Messages"}
-                        </Button>
+                        <div className="relative">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setChatReservationId(reservation.id)}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                            {isHr ? "Poruke" : "Messages"}
+                          </Button>
+                          {(reservation as any).unreadCount > 0 && (
+                            <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-background">
+                              {(reservation as any).unreadCount}
+                            </span>
+                          )}
+                        </div>
                         {(reservation.status === "pending" || reservation.status === "approved") && (
                           <Button
                             variant="outline"

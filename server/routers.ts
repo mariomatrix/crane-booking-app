@@ -52,6 +52,7 @@ import {
   listMessages,
   markMessagesRead,
   countUnreadMessages,
+  getUnreadCountForReservation,
   createSeason,
   listSeasons,
   updateSeason,
@@ -774,7 +775,12 @@ export const appRouter = router({
       const items = await listReservationsByUser(ctx.user.id);
       return Promise.all(items.map(async (r) => {
         const crane = r.craneId ? await getCraneById(r.craneId) : null;
-        return { ...r, crane: crane ? { id: crane.id, name: crane.name, location: crane.location } : null };
+        const unreadCount = await getUnreadCountForReservation(r.id, ctx.user.id, ctx.user.role);
+        return {
+          ...r,
+          crane: crane ? { id: crane.id, name: crane.name, location: crane.location } : null,
+          unreadCount
+        };
       }));
     }),
 
@@ -851,7 +857,13 @@ export const appRouter = router({
         return Promise.all(items.map(async (r) => {
           const crane = r.craneId ? await getCraneById(r.craneId) : null;
           const user = await getUserById(r.userId);
-          return { ...r, crane: crane ?? null, user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null };
+          const unreadCount = await getUnreadCountForReservation(r.id, ctx.user.id, ctx.user.role);
+          return {
+            ...r,
+            crane: crane ?? null,
+            user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null,
+            unreadCount
+          };
         }));
       }),
 

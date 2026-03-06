@@ -297,14 +297,21 @@ export default function AdminReservations() {
                         Završeno
                       </Button>
                     )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setChatReservationId(reservation.id)}
-                    >
-                      <MessageSquare className="h-3.5 w-3.5 mr-1" />
-                      Poruke
-                    </Button>
+                    <div className="relative">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setChatReservationId(reservation.id)}
+                      >
+                        <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                        Poruke
+                      </Button>
+                      {reservation.unreadCount > 0 && (
+                        <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-background">
+                          {reservation.unreadCount}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </CardContent>
