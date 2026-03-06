@@ -475,11 +475,27 @@ export default function AdminCalendar() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="grid gap-2">
                                             <Label>Početak</Label>
-                                            <Input type="time" step="3600" value={maintStart} onChange={(e) => setMaintStart(e.target.value)} required />
+                                            <Select value={maintStart} onValueChange={setMaintStart} required>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {Array.from({ length: 24 }).map((_, i) => {
+                                                        const val = `${String(i).padStart(2, '0')}:00`;
+                                                        return <SelectItem key={val} value={val}>{val}</SelectItem>;
+                                                    })}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                         <div className="grid gap-2">
                                             <Label>Kraj</Label>
-                                            <Input type="time" step="3600" value={maintEnd} onChange={(e) => setMaintEnd(e.target.value)} required />
+                                            <Select value={maintEnd} onValueChange={setMaintEnd} required>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    {Array.from({ length: 24 }).map((_, i) => {
+                                                        const val = `${String(i).padStart(2, '0')}:00`;
+                                                        return <SelectItem key={val} value={val}>{val}</SelectItem>;
+                                                    })}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
                                     </div>
                                     <div className="grid gap-2">
