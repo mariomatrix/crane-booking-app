@@ -37,11 +37,11 @@ import { useSearch } from "wouter";
 import { CalendarIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
-    pending: "#f59e0b",
-    approved: "#10b981",
-    completed: "#16a34a",
-    rejected: "#ef4444",
-    cancelled: "#6b7280",
+    pending: "#f59e0b",   // Amber
+    approved: "#059669",  // Emerald 600 (Darker/more vibrant green)
+    completed: "#16a34a", // Green 600
+    rejected: "#dc2626",  // Red 600
+    cancelled: "#4b5563", // Gray 600
 };
 
 const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
@@ -803,7 +803,7 @@ export default function AdminCalendar() {
                                     </div>
                                     <div className="text-[10px] font-bold opacity-80 leading-tight truncate">{p.user}</div>
                                     <div className="mt-0.5">
-                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-black/20 text-white leading-none">
+                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/30 text-white shadow-sm backdrop-blur-[2px] leading-none">
                                             {STATUS_LABELS[p.status] || p.status}
                                         </span>
                                     </div>

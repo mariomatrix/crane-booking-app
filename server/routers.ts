@@ -318,7 +318,7 @@ export const appRouter = router({
 
         const passwordHash = await bcrypt.hash(input.password, 12);
         await db.update(users)
-          .set({ passwordHash, updatedAt: new Date() })
+          .set({ passwordHash, mustChangePassword: false, updatedAt: new Date() })
           .where(eq(users.id, reset.userId));
 
         // Cleanup tokens for this user
@@ -575,7 +575,7 @@ export const appRouter = router({
 
         const passwordHash = await bcrypt.hash(input.password, 12);
         await db.update(users)
-          .set({ passwordHash, updatedAt: new Date() })
+          .set({ passwordHash, mustChangePassword: false, updatedAt: new Date() })
           .where(eq(users.id, input.id));
 
         await createAuditEntry({
