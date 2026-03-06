@@ -576,11 +576,31 @@ export default function AdminCalendar() {
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="grid gap-2">
                                                 <Label>Vrijeme početka</Label>
-                                                <Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} required />
+                                                <Select value={editStart} onValueChange={setEditStart}>
+                                                    <SelectTrigger><SelectValue placeholder="Odaberi" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {Array.from({ length: 33 }, (_, i) => {
+                                                            const h = Math.floor((i + 12) / 2);
+                                                            const m = (i % 2) * 30;
+                                                            const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                                                            return <SelectItem key={val} value={val}>{val}</SelectItem>;
+                                                        })}
+                                                    </SelectContent>
+                                                </Select>
                                             </div>
                                             <div className="grid gap-2">
                                                 <Label>Vrijeme završetka</Label>
-                                                <Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} required />
+                                                <Select value={editEnd} onValueChange={setEditEnd}>
+                                                    <SelectTrigger><SelectValue placeholder="Odaberi" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {Array.from({ length: 33 }, (_, i) => {
+                                                            const h = Math.floor((i + 12) / 2);
+                                                            const m = (i % 2) * 30;
+                                                            const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                                                            return <SelectItem key={val} value={val}>{val}</SelectItem>;
+                                                        })}
+                                                    </SelectContent>
+                                                </Select>
                                             </div>
                                         </div>
                                         <div className="grid gap-2">
