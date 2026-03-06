@@ -113,18 +113,21 @@ export default function Home() {
                     <Ship className="h-4 w-4 mr-2" />
                     {t.nav.vessels}
                   </DropdownMenuItem>
-                  {user.role === "admin" && (
+                  {user.role === "admin" || user.role === "operator" ? (
                     <>
                       <DropdownMenuItem onClick={() => setLocation("/admin")}>
                         <Settings className="h-4 w-4 mr-2" />
-                        {t.nav.adminPanel}
+                        {user.role === "admin" ? t.nav.adminPanel : "Operator Panel"}
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => setLocation("/admin/users")}>
-                        <Users className="h-4 w-4 mr-2" />
-                        {t.admin.users}
-                      </DropdownMenuItem>
+
+                      {user.role === "admin" && (
+                        <DropdownMenuItem onClick={() => setLocation("/admin/users")}>
+                          <Users className="h-4 w-4 mr-2" />
+                          {t.admin.users}
+                        </DropdownMenuItem>
+                      )}
                     </>
-                  )}
+                  ) : null}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
                     <LogOut className="h-4 w-4 mr-2" />

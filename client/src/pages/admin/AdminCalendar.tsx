@@ -262,8 +262,15 @@ export default function AdminCalendar() {
             let end = new Date(r.scheduledEnd);
 
             if (viewMode === 'master') {
-                // Offset the date by crane index to show in correct column
                 const originalStart = new Date(r.scheduledStart);
+                const currentViewStart = startOfDay(viewDate);
+                const eventStartDay = startOfDay(originalStart);
+
+                if (eventStartDay.getTime() !== currentViewStart.getTime()) {
+                    return null;
+                }
+
+                // Offset the date by crane index to show in correct column
                 const originalEnd = new Date(r.scheduledEnd);
 
                 start = addDays(viewDate, craneIdx);
@@ -277,7 +284,7 @@ export default function AdminCalendar() {
                 id: String(r.id),
                 title: r.isMaintenance
                     ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselName || "Plovilo"} - ${r.vesselWeightKg}kg`,
+                    : `${r.vesselName || "Plovilo"} - ${r.vesselWeightKg} t`,
                 start,
                 end,
                 backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
@@ -297,6 +304,12 @@ export default function AdminCalendar() {
 
         const holidayEvents = holidays.map((h: any) => {
             if (viewMode === 'master') {
+                const holidayDate = startOfDay(new Date(h.date));
+                const currentViewStart = startOfDay(viewDate);
+                if (holidayDate.getTime() !== currentViewStart.getTime()) {
+                    return [];
+                }
+
                 // In master view, holidays apply to all columns (cranes)
                 return activeCranes.map((_, idx) => ({
                     id: `holiday-${h.id}-${idx}`,
@@ -690,6 +703,7 @@ export default function AdminCalendar() {
                         .fc-v-event .fc-event-main { padding: 4px; }
                     `}} />
                     <FullCalendar
+                        key={`${viewMode}-${selectedCrane}`}
                         ref={calendarRef}
                         plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
                         initialView={viewMode === 'master' ? 'timeGrid' : viewMode}

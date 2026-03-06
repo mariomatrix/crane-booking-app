@@ -183,7 +183,7 @@ export default function AdminCranes() {
                     </div>
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <Weight className="h-3.5 w-3.5" />
-                      Max {crane.maxCapacityKg} kg
+                      Max {crane.maxCapacityKg} t
                       {crane.maxPoolWidth && (
                         <span className="ml-3">Bazen: {crane.maxPoolWidth} m</span>
                       )}
@@ -258,7 +258,7 @@ export default function AdminCranes() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>{t.admin.craneCapacity} (kg) *</Label>
+                <Label>{t.admin.craneCapacity} (t) *</Label>
                 <Input
                   type="number"
                   step="0.5"

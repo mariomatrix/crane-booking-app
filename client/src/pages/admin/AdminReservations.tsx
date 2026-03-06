@@ -360,7 +360,7 @@ export default function AdminReservations() {
                 <SelectContent>
                   {(cranesList as any[]).filter((c: any) => c.craneStatus === "active").map((crane: any) => (
                     <SelectItem key={crane.id} value={String(crane.id)}>
-                      {crane.name} (max {crane.maxCapacityKg}kg)
+                      {crane.name} (max {crane.maxCapacityKg} t)
                       {crane.location ? ` — ${crane.location}` : ""}
                     </SelectItem>
                   ))}
