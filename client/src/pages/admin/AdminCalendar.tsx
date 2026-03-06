@@ -39,6 +39,7 @@ import { CalendarIcon } from "lucide-react";
 const STATUS_COLORS: Record<string, string> = {
     pending: "#f59e0b",
     approved: "#10b981",
+    completed: "#16a34a",
     rejected: "#ef4444",
     cancelled: "#6b7280",
 };
@@ -639,7 +640,7 @@ export default function AdminCalendar() {
                         <Filter className="h-4 w-4 text-muted-foreground mr-1" />
                         <span className="text-sm font-medium">Statusi:</span>
                         <div className="flex bg-background border rounded-md p-1">
-                            {["pending", "approved", "rejected", "cancelled"].map(s => (
+                            {["pending", "approved", "completed", "rejected", "cancelled"].map(s => (
                                 <Button
                                     key={s}
                                     variant={statusFilters.includes(s) ? "secondary" : "ghost"}
@@ -651,7 +652,7 @@ export default function AdminCalendar() {
                                         className="h-2 w-2 rounded-full mr-1.5"
                                         style={{ backgroundColor: STATUS_COLORS[s] }}
                                     />
-                                    {s === "pending" ? "Na čekanju" : s === "approved" ? "Odobreno" : s === "rejected" ? "Odbijeno" : "Otkazano"}
+                                    {s === "pending" ? "Na čekanju" : s === "approved" ? "Odobreno" : s === "completed" ? "Izvršeno" : s === "rejected" ? "Odbijeno" : "Otkazano"}
                                 </Button>
                             ))}
                         </div>
