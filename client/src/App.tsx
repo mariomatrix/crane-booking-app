@@ -23,7 +23,9 @@ import AdminServiceTypes from "./pages/admin/AdminServiceTypes";
 import AdminSeasons from "./pages/admin/AdminSeasons";
 import AdminHolidays from "./pages/admin/AdminHolidays";
 import AdminAuditLog from "./pages/admin/AdminAuditLog";
+import AdminUserCard from "./pages/admin/AdminUserCard";
 import Profile from "./pages/Profile";
+import MyCard from "./pages/MyCard";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 function Router() {
@@ -36,6 +38,7 @@ function Router() {
       <Route path="/my-reservations" component={MyReservations} />
       <Route path="/my-vessels" component={MyVessels} />
       <Route path="/profile" component={Profile} />
+      <Route path="/my-card" component={MyCard} />
       <Route path="/privacy" component={PrivacyPolicy} />
 
       {/* Admin routes */}
@@ -56,6 +59,9 @@ function Router() {
       </Route>
       <Route path="/admin/users">
         <AdminLayout><AdminUsers /></AdminLayout>
+      </Route>
+      <Route path="/admin/users/:id">
+        <AdminLayout><AdminUserCard /></AdminLayout>
       </Route>
       <Route path="/admin/analytics">
         <AdminLayout><AdminAnalytics /></AdminLayout>

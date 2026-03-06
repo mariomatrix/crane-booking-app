@@ -29,11 +29,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus } from "lucide-react";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays } from "lucide-react";
 import { useState } from "react";
+import { useLocation } from "wouter";
 
 export default function AdminUsers() {
     const { t } = useLang();
+    const [, setLocation] = useLocation();
     const users = trpc.user.list.useQuery();
     const utils = trpc.useUtils();
 
@@ -192,7 +194,14 @@ export default function AdminUsers() {
                         <TableBody>
                             {users.data?.map((user) => (
                                 <TableRow key={user.id}>
-                                    <TableCell className="font-medium">{user.name}</TableCell>
+                                    <TableCell className="font-medium">
+                                        <button
+                                            className="text-primary hover:underline text-left"
+                                            onClick={() => setLocation(`/admin/users/${user.id}`)}
+                                        >
+                                            {user.name}
+                                        </button>
+                                    </TableCell>
                                     <TableCell>{user.email}</TableCell>
                                     <TableCell>{user.phone || "-"}</TableCell>
                                     <TableCell>
@@ -227,6 +236,14 @@ export default function AdminUsers() {
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setLocation(`/admin/calendar?userId=${user.id}`)}
+                                                title="Prikaži kalendar"
+                                            >
+                                                <CalendarDays className="h-4 w-4" />
+                                            </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"

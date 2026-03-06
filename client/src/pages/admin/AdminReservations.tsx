@@ -27,10 +27,12 @@ import { ReservationChat } from "@/components/ReservationChat";
 
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 
 export default function AdminReservations() {
   const { lang } = useLang();
   const [statusFilter, setStatusFilter] = useState("pending");
+  const [selectedUser, setSelectedUser] = useState("all");
 
   // Approve dialog state
   const [approveOpen, setApproveOpen] = useState(false);
@@ -56,10 +58,14 @@ export default function AdminReservations() {
   }, []);
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.listAll.useQuery(
-    { status: statusFilter !== "all" ? [statusFilter] : undefined }
+    {
+      status: statusFilter !== "all" ? [statusFilter] : undefined,
+      userId: selectedUser !== "all" ? selectedUser : undefined,
+    }
   );
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
+  const { data: usersList = [] } = trpc.user.list.useQuery();
 
   const approveMutation = trpc.reservation.approve.useMutation({
     onSuccess: () => {
@@ -162,19 +168,26 @@ export default function AdminReservations() {
               : "Upravljanje zahtjevima za operacije dizalicom"}
           </p>
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="pending">Na čekanju</SelectItem>
-            <SelectItem value="approved">Odobreni</SelectItem>
-            <SelectItem value="completed">Završeni</SelectItem>
-            <SelectItem value="rejected">Odbijeni</SelectItem>
-            <SelectItem value="cancelled">Otkazani</SelectItem>
-            <SelectItem value="all">Svi</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-3">
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pending">Na čekanju</SelectItem>
+              <SelectItem value="approved">Odobreni</SelectItem>
+              <SelectItem value="completed">Završeni</SelectItem>
+              <SelectItem value="rejected">Odbijeni</SelectItem>
+              <SelectItem value="cancelled">Otkazani</SelectItem>
+              <SelectItem value="all">Svi</SelectItem>
+            </SelectContent>
+          </Select>
+          <UserSearchCombobox
+            users={usersList as any}
+            value={selectedUser}
+            onChange={setSelectedUser}
+          />
+        </div>
       </div>
 
       {isLoading ? (

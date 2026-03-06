@@ -11,6 +11,7 @@ import {
   Settings,
   Construction,
   Ship,
+  IdCard,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -112,6 +113,10 @@ export default function Home() {
                   <DropdownMenuItem onClick={() => setLocation("/my-vessels")}>
                     <Ship className="h-4 w-4 mr-2" />
                     {t.nav.vessels}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation("/my-card")}>
+                    <IdCard className="h-4 w-4 mr-2" />
+                    Moj karton
                   </DropdownMenuItem>
                   {user.role === "admin" || user.role === "operator" ? (
                     <>

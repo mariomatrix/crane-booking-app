@@ -32,6 +32,8 @@ import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { UserSearchCombobox } from "@/components/UserSearchCombobox";
+import { useSearch } from "wouter";
 import { CalendarIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -45,11 +47,15 @@ const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
 export default function AdminCalendar() {
     const { lang } = useLang();
+    const searchString = useSearch();
     // State
     const [viewMode, setViewMode] = useState<'master' | 'timeGridWeek' | 'dayGridMonth'>('master');
     const [viewDate, setViewDate] = useState<Date>(startOfDay(new Date()));
     const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved"]);
-    const [selectedUser, setSelectedUser] = useState<string>("all");
+    const [selectedUser, setSelectedUser] = useState<string>(() => {
+        const params = new URLSearchParams(searchString);
+        return params.get("userId") || "all";
+    });
     const [selectedCrane, setSelectedCrane] = useState<string>("all");
     const [isMaintOpen, setIsMaintOpen] = useState(false);
 
@@ -651,18 +657,11 @@ export default function AdminCalendar() {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-muted-foreground mr-1" />
-                        <Select value={selectedUser} onValueChange={setSelectedUser}>
-                            <SelectTrigger className="w-[180px] h-9 bg-background"><SelectValue placeholder="Korisnik" /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Svi korisnici</SelectItem>
-                                {usersList.map((u: any) => (
-                                    <SelectItem key={u.id} value={String(u.id)}>{u.name || u.email}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    <UserSearchCombobox
+                        users={usersList as any}
+                        value={selectedUser}
+                        onChange={setSelectedUser}
+                    />
 
                     <div className="flex items-center gap-2">
                         <Anchor className="h-4 w-4 text-muted-foreground mr-1" />

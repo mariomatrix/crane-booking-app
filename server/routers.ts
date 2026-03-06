@@ -92,7 +92,7 @@ import {
   holidays,
   seasons,
 } from "../drizzle/schema";
-import { and, eq, gte, isNull, or, lte, desc } from "drizzle-orm";
+import { and, eq, gte, isNull, or, lte, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
@@ -661,6 +661,76 @@ export const appRouter = router({
           reservations: userReservations,
           waitingList: userWaitingList,
           exportedAt: new Date().toISOString(),
+        };
+      }),
+
+    getCard: protectedProcedure
+      .input(z.object({ userId: z.string().uuid().optional() }).optional())
+      .query(async ({ input, ctx }) => {
+        const isStaff = ctx.user.role === "admin" || ctx.user.role === "operator";
+        const targetId = (isStaff && input?.userId) ? input.userId : ctx.user.id;
+
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        // Get user profile
+        const [userRecord] = await db.select().from(users).where(eq(users.id, targetId));
+        if (!userRecord) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
+
+        // Get reservations with crane info
+        const userReservations = await db
+          .select({
+            id: reservations.id,
+            reservationNumber: reservations.reservationNumber,
+            status: reservations.status,
+            requestedDate: reservations.requestedDate,
+            requestedTimeSlot: reservations.requestedTimeSlot,
+            scheduledStart: reservations.scheduledStart,
+            scheduledEnd: reservations.scheduledEnd,
+            durationMin: reservations.durationMin,
+            vesselName: reservations.vesselName,
+            vesselType: reservations.vesselType,
+            vesselWeightKg: reservations.vesselWeightKg,
+            userNote: reservations.userNote,
+            adminNote: reservations.adminNote,
+            craneId: reservations.craneId,
+            createdAt: reservations.createdAt,
+            craneName: cranes.name,
+            craneLocation: cranes.location,
+          })
+          .from(reservations)
+          .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .where(eq(reservations.userId, targetId))
+          .orderBy(sql`${reservations.createdAt} desc`);
+
+        // Get vessels
+        const userVessels = await listVesselsByUser(targetId);
+
+        // Calculate stats
+        const stats = {
+          total: userReservations.length,
+          pending: userReservations.filter(r => r.status === "pending").length,
+          approved: userReservations.filter(r => r.status === "approved").length,
+          completed: userReservations.filter(r => r.status === "completed").length,
+          rejected: userReservations.filter(r => r.status === "rejected").length,
+          cancelled: userReservations.filter(r => r.status === "cancelled").length,
+        };
+
+        return {
+          user: {
+            id: userRecord.id,
+            name: userRecord.name,
+            firstName: userRecord.firstName,
+            lastName: userRecord.lastName,
+            email: userRecord.email,
+            phone: userRecord.phone,
+            role: userRecord.role,
+            createdAt: userRecord.createdAt,
+            lastSignedIn: userRecord.lastSignedIn,
+          },
+          stats,
+          reservations: userReservations,
+          vessels: userVessels,
         };
       }),
   }),
