@@ -40,9 +40,11 @@ export default function AdminUserCard() {
         { enabled: !!id }
     );
 
+    const utils = trpc.useUtils();
+
     const completeMutation = trpc.reservation.complete.useMutation({
         onSuccess: () => {
-            trpc.useUtils().user.getCard.invalidate();
+            utils.user.getCard.invalidate();
         },
     });
 
