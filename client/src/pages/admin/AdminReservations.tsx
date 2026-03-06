@@ -234,7 +234,7 @@ export default function AdminReservations() {
                       <div className="text-sm text-muted-foreground">
                         <span className="font-medium">Plovilo:</span>{" "}
                         {reservation.vesselName} ({reservation.vesselType})
-                        {reservation.vesselWeightKg ? ` — ${reservation.vesselWeightKg}kg` : ""}
+                        {reservation.vesselWeightKg ? ` — ${(Number(reservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}
                       </div>
                     )}
 
@@ -260,7 +260,7 @@ export default function AdminReservations() {
 
                     {reservation.approver && (
                       <div className="text-xs text-muted-foreground mt-2 bg-slate-50 border rounded py-1.5 px-2 inline-block shadow-sm">
-                        <span className="font-medium">Zadnje operater:</span> {reservation.approver.name}
+                        <span className="font-medium">Obradio:</span> {reservation.approver.name}
                       </div>
                     )}
                   </div>
@@ -333,7 +333,7 @@ export default function AdminReservations() {
           {selectedReservation && (
             <div className="rounded-md bg-muted p-3 text-sm space-y-1 mb-2">
               {selectedReservation.vesselName && (
-                <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselName} ({selectedReservation.vesselType}){selectedReservation.vesselWeightKg ? ` — ${selectedReservation.vesselWeightKg}kg` : ""}</div>
+                <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselName} ({selectedReservation.vesselType}){selectedReservation.vesselWeightKg ? ` — ${(Number(selectedReservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}</div>
               )}
               {selectedReservation.requestedDate && (
                 <div>

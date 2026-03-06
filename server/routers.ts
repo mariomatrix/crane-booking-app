@@ -857,11 +857,13 @@ export const appRouter = router({
         return Promise.all(items.map(async (r) => {
           const crane = r.craneId ? await getCraneById(r.craneId) : null;
           const user = await getUserById(r.userId);
+          const approver = r.approvedBy ? await getUserById(r.approvedBy) : null;
           const unreadCount = await getUnreadCountForReservation(r.id, ctx.user.id, ctx.user.role);
           return {
             ...r,
             crane: crane ?? null,
             user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null,
+            approver: approver ? { id: approver.id, name: approver.name } : null,
             unreadCount
           };
         }));
