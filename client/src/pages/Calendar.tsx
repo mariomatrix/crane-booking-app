@@ -55,6 +55,7 @@ export default function Calendar() {
   const [initialFormData, setInitialFormData] = useState<any>(null);
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
+  const { data: holidays = [] } = trpc.holiday.list.useQuery();
   const { data: events = [], isLoading, refetch } = trpc.calendar.events.useQuery(
     { craneId: craneIdFilter !== "all" ? craneIdFilter : undefined },
     { refetchInterval: 30000 }
@@ -72,13 +73,17 @@ export default function Calendar() {
   }, [cranesList]);
 
   const calendarEvents = useMemo(
-    () =>
-      events.map((event: any) => ({
+    () => {
+      const resEvents = events.map((event: any) => ({
         id: String(event.id),
-        title: `${event.craneName}${event.vesselType ? ` (${event.vesselType})` : ""}${event.status === "pending" ? " (ČEKANJE)" : ""}`,
+        title: event.isMaintenance
+          ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
+          : (event.vesselType === "Zauzeto"
+            ? (lang === 'hr' ? "Zauzeto" : "Occupied")
+            : `${event.craneName}${event.vesselType ? ` (${event.vesselType})` : ""}${event.status === "pending" ? (lang === 'hr' ? " (ČEKANJE)" : " (PENDING)") : ""}`),
         start: new Date(String(event.scheduledStart)),
         end: new Date(String(event.scheduledEnd)),
-        backgroundColor: craneColorMap[event.craneId] ?? CRANE_COLORS[0],
+        backgroundColor: event.isMaintenance ? "#f97316" : (craneColorMap[event.craneId] ?? CRANE_COLORS[0]),
         borderColor: event.status === "pending" ? "#94a3b8" : "transparent",
         className: event.status === "pending" ? "event-pending" : "",
         extendedProps: {
@@ -86,9 +91,24 @@ export default function Calendar() {
           craneName: event.craneName,
           liftPurpose: event.liftPurpose,
           status: event.status,
+          isOwner: event.isOwner,
+          isMaintenance: event.isMaintenance,
         },
-      })),
-    [events, craneColorMap]
+      }));
+
+      const holidayEvents = holidays.map((h: any) => ({
+        id: `holiday-${h.id}`,
+        title: h.name,
+        start: h.date,
+        allDay: true,
+        display: 'background',
+        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+        extendedProps: { isHoliday: true }
+      }));
+
+      return [...resEvents, ...holidayEvents];
+    },
+    [events, holidays, craneColorMap, lang]
   );
 
   const handleDateClick = (arg: { view: { type: string }, dateStr: string, date: Date }) => {
@@ -108,7 +128,7 @@ export default function Calendar() {
 
     let formData: any = { date: dateStr };
 
-    if (view === "timeGridDay") {
+    if (view === "timeGridDay" || view === "timeGridWeek") {
       if (craneIdFilter !== "all") {
         formData.craneId = craneIdFilter;
       }
@@ -128,8 +148,17 @@ export default function Calendar() {
     }
 
     const props = info.event.extendedProps;
+    if (props.isHoliday) return;
 
-    // Open booking modal for waiting list
+    if (props.isOwner) {
+      // User clicked their own event
+      toast.info(lang === 'hr'
+        ? `Vaša rezervacija: ${info.event.title}. Za izmjene kontaktirajte administratora.`
+        : `Your reservation: ${info.event.title}. Contact admin for changes.`);
+      return;
+    }
+
+    // Open booking modal for waiting list (current behavior for busy slots)
     setInitialFormData({
       date: info.event.start?.toISOString().split("T")[0],
       craneId: props.craneId,

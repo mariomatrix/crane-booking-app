@@ -46,6 +46,7 @@ const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 export default function AdminCalendar() {
     const { lang } = useLang();
     // State
+    const [viewMode, setViewMode] = useState<'master' | 'timeGridWeek' | 'dayGridMonth'>('master');
     const [viewDate, setViewDate] = useState<Date>(startOfDay(new Date()));
     const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved"]);
     const [selectedUser, setSelectedUser] = useState<string>("all");
@@ -54,10 +55,12 @@ export default function AdminCalendar() {
 
     // Refs
     const draggableRef = useRef<HTMLDivElement>(null);
+    const calendarRef = useRef<FullCalendar>(null);
 
     // Filters and Data
     const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
     const { data: usersList = [] } = trpc.user.list.useQuery();
+    const { data: holidays = [] } = trpc.holiday.list.useQuery();
     const { data: allReservations = [], isLoading: isResLoading } = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
         userId: selectedUser !== "all" ? selectedUser : undefined,
@@ -210,7 +213,7 @@ export default function AdminCalendar() {
 
     const handleEventClick = (info: any) => {
         const p = info.event.extendedProps;
-        if (p.isMaintenance) return;
+        if (p.isMaintenance || p.isHoliday) return;
 
         const res = allReservations.find((r: any) => r.id === p.reservationId);
         if (res) {
@@ -251,25 +254,32 @@ export default function AdminCalendar() {
     );
 
     const calendarEvents = useMemo(() => {
-        return allReservations.map((r: any) => {
+        const resEvents = allReservations.map((r: any) => {
             const craneIdx = activeCranes.findIndex(c => c.id === r.craneId);
             if (craneIdx === -1) return null;
 
-            // Offset the date by crane index to show in correct column
-            const start = new Date(r.startDate);
-            const end = new Date(r.endDate);
-            const offsetStart = addDays(viewDate, craneIdx);
-            offsetStart.setHours(start.getHours(), start.getMinutes(), 0);
-            const offsetEnd = addDays(viewDate, craneIdx);
-            offsetEnd.setHours(end.getHours(), end.getMinutes(), 0);
+            let start = new Date(r.scheduledStart);
+            let end = new Date(r.scheduledEnd);
+
+            if (viewMode === 'master') {
+                // Offset the date by crane index to show in correct column
+                const originalStart = new Date(r.scheduledStart);
+                const originalEnd = new Date(r.scheduledEnd);
+
+                start = addDays(viewDate, craneIdx);
+                start.setHours(originalStart.getHours(), originalStart.getMinutes(), 0);
+
+                end = addDays(viewDate, craneIdx);
+                end.setHours(originalEnd.getHours(), originalEnd.getMinutes(), 0);
+            }
 
             return {
                 id: String(r.id),
                 title: r.isMaintenance
                     ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselName || "Plovilo"} - ${r.vesselWeight}t`,
-                start: offsetStart,
-                end: offsetEnd,
+                    : `${r.vesselName || "Plovilo"} - ${r.vesselWeightKg}kg`,
+                start,
+                end,
                 backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
                 borderColor: "transparent",
                 editable: !r.isMaintenance,
@@ -284,9 +294,48 @@ export default function AdminCalendar() {
                 },
             };
         }).filter(Boolean);
-    }, [allReservations, activeCranes, viewDate, lang]);
+
+        const holidayEvents = holidays.map((h: any) => {
+            if (viewMode === 'master') {
+                // In master view, holidays apply to all columns (cranes)
+                return activeCranes.map((_, idx) => ({
+                    id: `holiday-${h.id}-${idx}`,
+                    title: h.name,
+                    start: addDays(viewDate, idx),
+                    allDay: true,
+                    display: 'background',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                }));
+            }
+            return [{
+                id: `holiday-${h.id}`,
+                title: h.name,
+                start: h.date,
+                allDay: true,
+                display: 'background',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+            }];
+        }).flat();
+
+        return [...resEvents, ...holidayEvents];
+    }, [allReservations, activeCranes, viewDate, lang, viewMode, holidays]);
 
     const handleEventDrop = (info: EventDropArg) => {
+        if (viewMode !== 'master') {
+            // Standard move (only if not maintenance)
+            if (info.event.extendedProps.isMaintenance) {
+                info.revert();
+                return;
+            }
+            rescheduleMutation.mutate({
+                id: info.event.id,
+                scheduledStart: info.event.start!,
+                scheduledEnd: info.event.end!,
+                craneId: info.event.extendedProps.craneId
+            });
+            return;
+        }
+
         const id = String(info.event.extendedProps.reservationId);
 
         // Calculate new date and time
@@ -325,10 +374,36 @@ export default function AdminCalendar() {
             {/* Header & Main Actions */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold tracking-tight">Administratorski Master Kalendar</h1>
-                    <p className="text-muted-foreground">Pregled svih dizalica i upravljanje terminima na jednom mjestu.</p>
+                    <h1 className="text-2xl font-bold tracking-tight">Administratorski Kalendar</h1>
+                    <p className="text-muted-foreground">Upravljanje svim dizalicama i terminima.</p>
                 </div>
                 <div className="flex items-center gap-2">
+                    <div className="flex bg-muted p-1 rounded-md mr-2">
+                        <Button
+                            variant={viewMode === 'master' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => setViewMode('master')}
+                            className="h-8 text-xs"
+                        >
+                            Dnevi (Master)
+                        </Button>
+                        <Button
+                            variant={viewMode === 'timeGridWeek' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => setViewMode('timeGridWeek')}
+                            className="h-8 text-xs"
+                        >
+                            Tjedni
+                        </Button>
+                        <Button
+                            variant={viewMode === 'dayGridMonth' ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => setViewMode('dayGridMonth')}
+                            className="h-8 text-xs"
+                        >
+                            Mjesečni
+                        </Button>
+                    </div>
                     <Dialog open={isMaintOpen} onOpenChange={setIsMaintOpen}>
                         <DialogTrigger asChild>
                             <Button variant="outline" className="gap-2">
@@ -517,7 +592,7 @@ export default function AdminCalendar() {
                     </Dialog>
                     <Button variant="secondary" onClick={() => window.print()} className="gap-2">
                         <Printer className="h-4 w-4" />
-                        <span className="hidden sm:inline">Ispiši dnevni plan</span>
+                        <span className="hidden sm:inline">Ispiši plan</span>
                     </Button>
                 </div>
             </div>
@@ -574,13 +649,21 @@ export default function AdminCalendar() {
                     </div>
 
                     <div className="ml-auto flex items-center bg-background border rounded-md p-1 overflow-hidden shadow-sm">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => addDays(d, -1))}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => {
+                            if (viewMode === 'master') return addDays(d, -1);
+                            if (viewMode === 'timeGridWeek') return addDays(d, -7);
+                            return addDays(d, -30);
+                        })}>
                             <ChevronLeft className="h-4 w-4" />
                         </Button>
                         <div className="px-3 text-sm font-semibold tabular-nums min-w-[140px] text-center">
-                            {formatAppDate(viewDate, lang as any)}
+                            {viewMode === 'master' ? formatAppDate(viewDate, lang as any) : format(viewDate, "MMMM yyyy", { locale: lang === 'hr' ? hr : enUS })}
                         </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => addDays(d, 1))}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => {
+                            if (viewMode === 'master') return addDays(d, 1);
+                            if (viewMode === 'timeGridWeek') return addDays(d, 7);
+                            return addDays(d, 30);
+                        })}>
                             <ChevronRight className="h-4 w-4" />
                         </Button>
                     </div>
@@ -607,14 +690,15 @@ export default function AdminCalendar() {
                         .fc-v-event .fc-event-main { padding: 4px; }
                     `}} />
                     <FullCalendar
-                        plugins={[timeGridPlugin, interactionPlugin]}
-                        initialView="timeGrid"
-                        visibleRange={{
+                        ref={calendarRef}
+                        plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
+                        initialView={viewMode === 'master' ? 'timeGrid' : viewMode}
+                        visibleRange={viewMode === 'master' ? {
                             start: viewDate,
                             end: addDays(viewDate, activeCranes.length || 1)
-                        }}
+                        } : undefined}
                         headerToolbar={false}
-                        allDaySlot={false}
+                        allDaySlot={viewMode !== 'master'}
                         slotMinTime={workStart + ":00"}
                         slotMaxTime={workEnd + ":00"}
                         height="100%"
@@ -625,16 +709,20 @@ export default function AdminCalendar() {
                             if (p.isFromWaitingList) {
                                 // Calculate crane and time
                                 const dropDate = info.event.start!;
-                                const diffDays = Math.round((dropDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
 
-                                if (diffDays < 0 || diffDays >= activeCranes.length) {
-                                    info.revert();
-                                    return;
+                                let targetCrane = activeCranes[0];
+                                let startDate = dropDate;
+
+                                if (viewMode === 'master') {
+                                    const diffDays = Math.round((dropDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+                                    if (diffDays < 0 || diffDays >= activeCranes.length) {
+                                        info.revert();
+                                        return;
+                                    }
+                                    targetCrane = activeCranes[diffDays];
+                                    startDate = new Date(viewDate);
+                                    startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0);
                                 }
-
-                                const targetCrane = activeCranes[diffDays];
-                                const startDate = new Date(viewDate);
-                                startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0);
 
                                 const durationHours = info.event.end ? (info.event.end.getTime() - dropDate.getTime()) / 3600000 : 1;
                                 const endDate = new Date(startDate.getTime() + durationHours * 3600000);
@@ -653,6 +741,7 @@ export default function AdminCalendar() {
                         eventClick={handleEventClick}
                         events={calendarEvents as any}
                         dayHeaderContent={(arg: any) => {
+                            if (viewMode !== 'master') return undefined;
                             const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
                             const crane = activeCranes[diff];
                             return crane ? (
@@ -666,6 +755,9 @@ export default function AdminCalendar() {
                         }}
                         eventContent={(arg: any) => {
                             const p = arg.event.extendedProps;
+                            if (p.isHoliday) {
+                                return <div className="text-[10px] font-bold p-1 text-red-700/50">{arg.event.title}</div>
+                            }
                             return (
                                 <div className="flex flex-col h-full overflow-hidden p-1">
                                     <div className="flex items-center justify-between mb-1">

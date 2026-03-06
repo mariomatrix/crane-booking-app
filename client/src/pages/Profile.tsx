@@ -44,6 +44,32 @@ export default function Profile() {
         });
     };
 
+    const [oldPassword, setOldPassword] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+
+    const changePasswordMutation = trpc.user.changePassword.useMutation({
+        onSuccess: () => {
+            toast.success(t.profile.passwordSuccess);
+            setOldPassword("");
+            setNewPassword("");
+            setConfirmPassword("");
+        },
+        onError: (err: any) => toast.error(t.profile.passwordError + ": " + err.message),
+    });
+
+    const handleChangePassword = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (newPassword !== confirmPassword) {
+            toast.error(t.profile.passwordsDontMatch);
+            return;
+        }
+        changePasswordMutation.mutate({
+            oldPassword,
+            newPassword,
+        });
+    };
+
     const { refetch: fetchExportData, isFetching: isExporting } = trpc.user.exportData.useQuery(undefined, { enabled: false });
 
     const handleExportData = async () => {
@@ -132,6 +158,59 @@ export default function Profile() {
                                     <Save className="h-4 w-4 mr-2" />
                                 )}
                                 {t.profile.save}
+                            </Button>
+                        </div>
+                    </form>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-lg">{t.profile.changePassword}</CardTitle>
+                    <CardDescription>
+                        Redovita promjena lozinke povećava sigurnost vašeg računa.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <form onSubmit={handleChangePassword} className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="oldPassword">{t.profile.oldPassword}</Label>
+                            <Input
+                                id="oldPassword"
+                                type="password"
+                                value={oldPassword}
+                                onChange={(e) => setOldPassword(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="newPassword">{t.profile.newPassword}</Label>
+                                <Input
+                                    id="newPassword"
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    required
+                                    minLength={8}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="confirmPassword">{t.profile.confirmPassword}</Label>
+                                <Input
+                                    id="confirmPassword"
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    required
+                                    minLength={8}
+                                />
+                            </div>
+                        </div>
+                        <div className="pt-2 flex justify-end">
+                            <Button type="submit" variant="secondary" disabled={changePasswordMutation.isPending}>
+                                {changePasswordMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                {t.profile.changePassword}
                             </Button>
                         </div>
                     </form>

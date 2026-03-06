@@ -43,6 +43,7 @@ export const users = pgTable("users", {
     userStatus: userStatusEnum("user_status").default("active").notNull(),
     emailVerifiedAt: timestamp("email_verified_at"),
     anonymizedAt: timestamp("anonymized_at"),
+    mustChangePassword: boolean("must_change_password").default(false).notNull(),
     loginMethod: varchar("login_method", { length: 64 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

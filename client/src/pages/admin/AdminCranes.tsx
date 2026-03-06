@@ -34,6 +34,7 @@ import {
 import { Construction, Loader2, MapPin, Pencil, Plus, Trash2, Weight } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useLang } from "@/contexts/LangContext";
 
 type CraneForm = {
   name: string;
@@ -52,6 +53,7 @@ const emptyForm: CraneForm = {
 };
 
 export default function AdminCranes() {
+  const { t } = useLang();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CraneForm>(emptyForm);
@@ -61,7 +63,7 @@ export default function AdminCranes() {
 
   const createMutation = trpc.crane.create.useMutation({
     onSuccess: () => {
-      toast.success("Crane added successfully.");
+      toast.success("Dizalica je uspješno dodana.");
       utils.crane.list.invalidate();
       setDialogOpen(false);
     },
@@ -70,7 +72,7 @@ export default function AdminCranes() {
 
   const updateMutation = trpc.crane.update.useMutation({
     onSuccess: () => {
-      toast.success("Crane updated successfully.");
+      toast.success("Dizalica je uspješno ažurirana.");
       utils.crane.list.invalidate();
       setDialogOpen(false);
     },
@@ -79,7 +81,7 @@ export default function AdminCranes() {
 
   const deleteMutation = trpc.crane.delete.useMutation({
     onSuccess: () => {
-      toast.success("Crane deactivated.");
+      toast.success("Dizalica je deaktivirana.");
       utils.crane.list.invalidate();
     },
     onError: (error) => toast.error(error.message),
@@ -135,14 +137,14 @@ export default function AdminCranes() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold">Crane Fleet</h2>
+          <h2 className="text-xl font-semibold">{t.admin.craneFleet}</h2>
           <p className="text-sm text-muted-foreground">
-            Manage your crane inventory.
+            {t.admin.manageCranes}
           </p>
         </div>
         <Button onClick={openCreate}>
           <Plus className="h-4 w-4 mr-2" />
-          Add Crane
+          {t.admin.addCrane}
         </Button>
       </div>
 
@@ -154,13 +156,13 @@ export default function AdminCranes() {
         <Card>
           <CardContent className="py-12 text-center">
             <Construction className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-            <h3 className="text-lg font-medium mb-2">No cranes yet</h3>
+            <h3 className="text-lg font-medium mb-2">{t.admin.noCranesYet}</h3>
             <p className="text-muted-foreground mb-4">
-              Add your first crane to get started.
+              {t.admin.addFirstCrane}
             </p>
             <Button onClick={openCreate}>
               <Plus className="h-4 w-4 mr-2" />
-              Add Crane
+              {t.admin.addCrane}
             </Button>
           </CardContent>
         </Card>
@@ -175,7 +177,7 @@ export default function AdminCranes() {
                       <span className="font-medium">{crane.name}</span>
                       {!crane.craneStatus || crane.craneStatus !== "active" ? (
                         <Badge variant="outline" className="text-xs text-muted-foreground">
-                          Inactive
+                          {t.admin.inactive}
                         </Badge>
                       ) : null}
                     </div>
@@ -201,30 +203,30 @@ export default function AdminCranes() {
                   <div className="flex gap-2 shrink-0">
                     <Button variant="outline" size="sm" onClick={() => openEdit(crane)}>
                       <Pencil className="h-3.5 w-3.5 mr-1" />
-                      Edit
+                      {t.admin.save === "Spremi" ? "Uredi" : "Edit"}
                     </Button>
                     {crane.craneStatus === "active" && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="outline" size="sm" className="text-destructive">
                             <Trash2 className="h-3.5 w-3.5 mr-1" />
-                            Deactivate
+                            Deaktiviraj
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Deactivate Crane?</AlertDialogTitle>
+                            <AlertDialogTitle>{t.admin.deactivateCraneTitle}</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This crane will be hidden from the booking system. Existing reservations will not be affected.
+                              {t.admin.deactivateCraneDesc}
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogCancel>{t.admin.cancel}</AlertDialogCancel>
                             <AlertDialogAction
                               onClick={() => deleteMutation.mutate({ id: crane.id })}
                               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             >
-                              Deactivate
+                              {t.admin.deactivate}
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
@@ -242,11 +244,11 @@ export default function AdminCranes() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Crane" : "Add New Crane"}</DialogTitle>
+            <DialogTitle>{editingId ? t.admin.editCrane : t.admin.addCrane}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Naziv dizalice *</Label>
+              <Label>{t.admin.craneName} *</Label>
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -256,7 +258,7 @@ export default function AdminCranes() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Kapacitet (kg) *</Label>
+                <Label>{t.admin.craneCapacity} (kg) *</Label>
                 <Input
                   type="number"
                   step="0.5"
@@ -267,7 +269,7 @@ export default function AdminCranes() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Širina bazena (m)</Label>
+                <Label>{t.admin.cranePoolWidth}</Label>
                 <Input
                   type="number"
                   step="0.1"
@@ -278,7 +280,7 @@ export default function AdminCranes() {
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Lokacija/Bazen</Label>
+              <Label>{t.admin.craneLocation}</Label>
               <Input
                 value={form.location}
                 onChange={(e) => setForm({ ...form, location: e.target.value })}
@@ -286,7 +288,7 @@ export default function AdminCranes() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Opis</Label>
+              <Label>{t.admin.craneDescription}</Label>
               <Textarea
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -296,11 +298,11 @@ export default function AdminCranes() {
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
-                Cancel
+                {t.admin.cancel}
               </Button>
               <Button type="submit" disabled={isPending}>
                 {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {editingId ? "Save Changes" : "Add Crane"}
+                {editingId ? t.admin.saveChanges : t.admin.addCrane}
               </Button>
             </DialogFooter>
           </form>

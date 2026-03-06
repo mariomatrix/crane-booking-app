@@ -131,14 +131,14 @@ function DashboardLayoutContent({
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
-    { icon: Layers, label: "Tipovi operacija", path: "/admin/service-types" },
-    { icon: Sun, label: "Sezone", path: "/admin/seasons", adminOnly: true },
-    { icon: CalendarOff, label: "Praznici", path: "/admin/holidays", adminOnly: true },
+    { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types" },
+    { icon: Sun, label: t.nav.seasons, path: "/admin/seasons" },
+    { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays" },
     { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
-    { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics", adminOnly: true },
-    { icon: History, label: "Povijest radnji", path: "/admin/audit-log", adminOnly: true },
+    { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
+    { icon: History, label: t.nav.auditLog, path: "/admin/audit-log", adminOnly: true },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
-    { icon: Globe, label: "Nazad na web", path: "/" },
+    { icon: Globe, label: t.nav.backToWeb, path: "/" },
   ];
 
   const isOperator = user?.role === "operator";

@@ -41,6 +41,7 @@ export async function createLocalUser(data: {
   lastName: string;
   username?: string;
   phone?: string;
+  mustChangePassword?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
@@ -52,6 +53,7 @@ export async function createLocalUser(data: {
     lastName: data.lastName,
     name,
     phone: data.phone,
+    mustChangePassword: data.mustChangePassword ?? false,
     loginMethod: "email",
     lastSignedIn: new Date(),
   }).returning({ id: users.id });

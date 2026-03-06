@@ -418,7 +418,7 @@ export const appRouter = router({
 
   // ─── User Management (Admin) ──────────────────────────────────────────
   user: router({
-    list: adminProcedure.query(async () => {
+    list: operatorProcedure.query(async () => {
       return listAllUsers();
     }),
 
@@ -446,6 +446,7 @@ export const appRouter = router({
           firstName: input.firstName,
           lastName: input.lastName,
           phone: input.phone,
+          mustChangePassword: true,
         });
 
         if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
@@ -582,6 +583,44 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    changePassword: protectedProcedure
+      .input(z.object({
+        oldPassword: z.string().min(8),
+        newPassword: z.string().min(8),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const user = await db.select().from(users).where(eq(users.id, ctx.user.id)).limit(1);
+        if (!user[0] || !user[0].passwordHash) {
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Korisnik nije pronađen ili nema lozinku." });
+        }
+
+        const isValid = await bcrypt.compare(input.oldPassword, user[0].passwordHash);
+        if (!isValid) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Trenutna lozinka nije ispravna." });
+        }
+
+        const passwordHash = await bcrypt.hash(input.newPassword, 12);
+        await db.update(users)
+          .set({
+            passwordHash,
+            mustChangePassword: false,
+            updatedAt: new Date()
+          })
+          .where(eq(users.id, ctx.user.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "password_changed",
+          entityType: "user",
+          entityId: ctx.user.id,
+        });
+
+        return { success: true };
+      }),
+
     anonymize: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
@@ -636,7 +675,7 @@ export const appRouter = router({
         return crane;
       }),
 
-    create: adminProcedure
+    create: operatorProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
         type: z.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
@@ -651,7 +690,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    update: adminProcedure
+    update: operatorProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
@@ -669,7 +708,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: adminProcedure
+    delete: operatorProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteCrane(input.id);
@@ -925,7 +964,7 @@ export const appRouter = router({
         }));
       }),
 
-    approve: adminProcedure
+    approve: operatorProcedure
       .input(z.object({
         id: z.string().uuid(),
         craneId: z.string().uuid(),
@@ -1007,7 +1046,7 @@ export const appRouter = router({
       }),
 
 
-    reject: adminProcedure
+    reject: operatorProcedure
       .input(z.object({ id: z.string().uuid(), adminNote: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
@@ -1046,7 +1085,7 @@ export const appRouter = router({
       }),
 
     // Admin: move/reschedule a reservation (drag-and-drop)
-    reschedule: adminProcedure
+    reschedule: operatorProcedure
       .input(z.object({
         id: z.string().uuid(),
         scheduledStart: z.date(),
@@ -1206,7 +1245,7 @@ export const appRouter = router({
     listAll: adminProcedure
       .query(async () => listServiceTypes(false)),
 
-    create: adminProcedure
+    create: operatorProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
         description: z.string().optional(),
@@ -1220,7 +1259,7 @@ export const appRouter = router({
         return item;
       }),
 
-    update: adminProcedure
+    update: operatorProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
@@ -1236,7 +1275,7 @@ export const appRouter = router({
         return item;
       }),
 
-    delete: adminProcedure
+    delete: operatorProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteServiceType(input.id);
@@ -1244,7 +1283,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    seed: adminProcedure
+    seed: operatorProcedure
       .mutation(async () => {
         await seedServiceTypes();
         return { success: true };
@@ -1259,10 +1298,15 @@ export const appRouter = router({
         scheduledEnd: z.date().optional(),
         craneId: z.string().uuid().optional(),
       }).optional())
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const items = await getReservationsForCalendar(input?.scheduledStart, input?.scheduledEnd, true);
         const enriched = await Promise.all(items.map(async (r) => {
           const crane = r.craneId ? await getCraneById(r.craneId) : null;
+
+          const isAdminOrOperator = ctx.user?.role === 'admin' || ctx.user?.role === 'operator';
+          const isOwner = ctx.user?.id === r.userId;
+          const showDetails = isAdminOrOperator || isOwner;
+
           return {
             id: r.id,
             craneId: r.craneId,
@@ -1270,15 +1314,21 @@ export const appRouter = router({
             craneLocation: crane?.location ?? "",
             scheduledStart: r.scheduledStart,
             scheduledEnd: r.scheduledEnd,
-            vesselType: r.vesselType,
-            liftPurpose: r.liftPurpose,
+            // Mask sensitive data for non-owners/non-admins
+            vesselType: showDetails ? r.vesselType : (r.isMaintenance ? "Održavanje" : "Zauzeto"),
+            liftPurpose: showDetails ? r.liftPurpose : undefined,
             status: r.status,
+            userId: r.userId,
+            isMaintenance: r.isMaintenance,
+            isOwner,
           };
         }));
-        if (input?.craneId) {
-          return enriched.filter((e) => e.craneId === input.craneId);
-        }
-        return enriched;
+
+        const result = input?.craneId
+          ? enriched.filter((e) => e.craneId === input.craneId)
+          : enriched;
+
+        return result;
       }),
 
     availableSlots: publicProcedure
@@ -1457,7 +1507,7 @@ export const appRouter = router({
   season: router({
     list: publicProcedure.query(async () => listSeasons()),
 
-    create: adminProcedure
+    create: operatorProcedure
       .input(z.object({
         name: z.string().min(1).max(100),
         startDate: z.string(), // YYYY-MM-DD
@@ -1470,7 +1520,7 @@ export const appRouter = router({
         return season;
       }),
 
-    update: adminProcedure
+    update: operatorProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(100).optional(),
@@ -1486,7 +1536,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: adminProcedure
+    delete: operatorProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteSeason(input.id);
@@ -1499,7 +1549,7 @@ export const appRouter = router({
   holiday: router({
     list: publicProcedure.query(async () => listHolidays()),
 
-    create: adminProcedure
+    create: operatorProcedure
       .input(z.object({
         date: z.string(), // YYYY-MM-DD
         name: z.string().min(1).max(255),
@@ -1511,7 +1561,7 @@ export const appRouter = router({
         return holiday;
       }),
 
-    delete: adminProcedure
+    delete: operatorProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteHoliday(input.id);
@@ -1519,7 +1569,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    seed: adminProcedure
+    seed: operatorProcedure
       .mutation(async ({ ctx }) => {
         await seedCroatianHolidays();
         await createAuditEntry({ actorId: ctx.user.id, action: "holidays_seeded", entityType: "holiday" });
@@ -1572,7 +1622,7 @@ export const appRouter = router({
 
   // ─── Maintenance (Admin Only) ──────────────────────────────────────────
   maintenance: router({
-    create: adminProcedure
+    create: operatorProcedure
       .input(z.object({
         craneId: z.string().uuid(),
         scheduledStart: z.date(),
@@ -1612,7 +1662,7 @@ export const appRouter = router({
 
   // ─── Analytics (Admin Only) ──────────────────────────────────────────
   analytics: router({
-    dashboard: adminProcedure
+    dashboard: operatorProcedure
       .input(z.object({
         range: z.enum(["7d", "30d", "90d", "365d", "all"]).optional().default("30d")
       }))

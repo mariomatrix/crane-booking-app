@@ -171,20 +171,20 @@ export default function AdminUsers() {
         <div className="space-y-6">
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle>Upravljanje Korisnicima</CardTitle>
+                    <CardTitle>{t.admin.users}</CardTitle>
                     <Button onClick={() => setShowCreateDialog(true)} className="flex items-center gap-2">
                         <UserPlus className="h-4 w-4" />
-                        Novi Korisnik
+                        {t.admin.addUser || "Novi Korisnik"}
                     </Button>
                 </CardHeader>
                 <CardContent>
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Ime</TableHead>
-                                <TableHead>Email</TableHead>
-                                <TableHead>Telefon</TableHead>
-                                <TableHead>Uloga</TableHead>
+                                <TableHead>{t.admin.userName}</TableHead>
+                                <TableHead>{t.admin.userEmail}</TableHead>
+                                <TableHead>{t.admin.userPhone}</TableHead>
+                                <TableHead>{t.admin.userRole}</TableHead>
                                 <TableHead>Posljednja Prijava</TableHead>
                                 <TableHead className="text-right">Akcije</TableHead>
                             </TableRow>
@@ -216,9 +216,9 @@ export default function AdminUsers() {
                                                 </div>
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="user">Korisnik</SelectItem>
-                                                <SelectItem value="operator">Operater</SelectItem>
-                                                <SelectItem value="admin">Administrator</SelectItem>
+                                                <SelectItem value="user">{t.admin.roleUser}</SelectItem>
+                                                <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
+                                                <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
                                             </SelectContent>
                                         </Select>
                                     </TableCell>
@@ -231,15 +231,15 @@ export default function AdminUsers() {
                                                 variant="outline"
                                                 size="sm"
                                                 onClick={() => openEdit(user)}
-                                                title="Uredi korisnika"
+                                                title={t.admin.editUser}
                                             >
                                                 <Edit2 className="h-4 w-4" />
                                             </Button>
                                             <Button
                                                 variant="outline"
                                                 size="sm"
-                                                onClick={() => setResetUser({ id: user.id, name: user.name || user.email || "Korisnik" })}
-                                                title="Reset lozinke"
+                                                onClick={() => setResetUser({ id: user.id, name: user.name || user.email || t.admin.roleUser })}
+                                                title={t.admin.resetPassword}
                                             >
                                                 <Key className="h-4 w-4" />
                                             </Button>
@@ -247,8 +247,8 @@ export default function AdminUsers() {
                                                 variant="outline"
                                                 size="sm"
                                                 className="text-amber-500 hover:text-amber-600 hover:bg-amber-50"
-                                                onClick={() => setAnonymizeUser({ id: user.id, name: user.name || user.email || "Korisnik" })}
-                                                title="Anonimiziraj (GDPR)"
+                                                onClick={() => setAnonymizeUser({ id: user.id, name: user.name || user.email || t.admin.roleUser })}
+                                                title={t.admin.anonymizeUser}
                                             >
                                                 <UserX className="h-4 w-4" />
                                             </Button>
@@ -256,8 +256,8 @@ export default function AdminUsers() {
                                                 variant="outline"
                                                 size="sm"
                                                 className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                                                onClick={() => setDeleteUser({ id: user.id, name: user.name || user.email || "Korisnik" })}
-                                                title="Obriši korisnika"
+                                                onClick={() => setDeleteUser({ id: user.id, name: user.name || user.email || t.admin.roleUser })}
+                                                title={t.admin.deleteUserTitle}
                                             >
                                                 <Trash2 className="h-4 w-4" />
                                             </Button>
@@ -281,30 +281,30 @@ export default function AdminUsers() {
             <Dialog open={!!resetUser} onOpenChange={(open: boolean) => !open && setResetUser(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Reset lozinke za: {resetUser?.name}</DialogTitle>
+                        <DialogTitle>{t.admin.resetPasswordFor}: {resetUser?.name}</DialogTitle>
                         <DialogDescription>
-                            Unesite novu lozinku za korisnika. Korisnik će se moći prijaviti novom lozinkom odmah.
+                            {t.admin.enterNewPassword}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-4 space-y-4">
                         <div className="space-y-2">
-                            <Label htmlFor="password">Nova lozinka</Label>
+                            <Label htmlFor="password">{t.profile.newPassword}</Label>
                             <Input
                                 id="password"
                                 type="password"
                                 value={newPassword}
                                 onChange={(e) => setNewPassword(e.target.value)}
-                                placeholder="Min. 8 znakova"
+                                placeholder={t.admin.newPasswordPlaceholder}
                             />
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setResetUser(null)}>Odustani</Button>
+                        <Button variant="outline" onClick={() => setResetUser(null)}>{t.admin.cancel}</Button>
                         <Button
                             disabled={!newPassword || newPassword.length < 8 || adminResetPassword.isPending}
                             onClick={() => adminResetPassword.mutate({ id: resetUser!.id, password: newPassword })}
                         >
-                            {adminResetPassword.isPending ? "Spremanje..." : "Postavi lozinku"}
+                            {adminResetPassword.isPending ? t.admin.saving : t.admin.setPassword}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -316,7 +316,7 @@ export default function AdminUsers() {
                     <DialogHeader>
                         <DialogTitle>{t.admin.editUser}: {editUser?.email}</DialogTitle>
                         <DialogDescription>
-                            Ažurirajte podatke za ovog korisnika.
+                            {t.profile.subtitle}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-4 space-y-4">
@@ -356,20 +356,20 @@ export default function AdminUsers() {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="user">Korisnik</SelectItem>
-                                    <SelectItem value="operator">Operater</SelectItem>
-                                    <SelectItem value="admin">Administrator</SelectItem>
+                                    <SelectItem value="user">{t.admin.roleUser}</SelectItem>
+                                    <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
+                                    <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setEditUser(null)}>Odustani</Button>
+                        <Button variant="outline" onClick={() => setEditUser(null)}>{t.admin.cancel}</Button>
                         <Button
                             disabled={adminUpdateUser.isPending}
                             onClick={handleUpdate}
                         >
-                            {adminUpdateUser.isPending ? "Spremanje..." : "Spremi promjene"}
+                            {adminUpdateUser.isPending ? t.admin.saving : t.admin.saveChanges}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -379,19 +379,19 @@ export default function AdminUsers() {
             <Dialog open={!!deleteUser} onOpenChange={(open: boolean) => !open && setDeleteUser(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Obriši korisnika: {deleteUser?.name}</DialogTitle>
+                        <DialogTitle>{t.admin.deleteUserTitle}: {deleteUser?.name}</DialogTitle>
                         <DialogDescription className="text-red-500">
-                            Pažnja: Ovom akcijom ćete obrisati korisnički račun.
+                            {t.admin.deleteUserDesc}
                         </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setDeleteUser(null)}>Odustani</Button>
+                        <Button variant="outline" onClick={() => setDeleteUser(null)}>{t.admin.cancel}</Button>
                         <Button
                             variant="destructive"
                             disabled={adminDeleteUser.isPending}
                             onClick={() => adminDeleteUser.mutate({ id: deleteUser!.id })}
                         >
-                            {adminDeleteUser.isPending ? t.vessels.delete : "Potvrdi Brisanje"}
+                            {adminDeleteUser.isPending ? t.admin.saving : t.admin.confirmDeletion}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -401,24 +401,24 @@ export default function AdminUsers() {
             <Dialog open={!!anonymizeUser} onOpenChange={(open: boolean) => !open && setAnonymizeUser(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Anonimiziraj korisnika: {anonymizeUser?.name}</DialogTitle>
+                        <DialogTitle>{t.admin.anonymizeUser}: {anonymizeUser?.name}</DialogTitle>
                         <DialogDescription className="text-amber-600 font-medium pb-2">
-                            Pažnja: Ovom akcijom ćete trajno anonimizirati osobne podatke korisnika prema GDPR-u.
+                            {t.admin.anonymizeDesc}
                         </DialogDescription>
                         <div className="text-sm text-muted-foreground space-y-1">
-                            <p>Korisnik se više neće moći prijaviti, email, ime i kontakt će biti izbrisani, ali će se njegove povijesne rezervacije zadržati u obliku anonimne statistike za analitiku.</p>
-                            <p className="font-bold underline pt-2">Ova akcija je nepovratna.</p>
+                            <p>{t.admin.anonymizeLongDesc}</p>
+                            <p className="font-bold underline pt-2">{t.admin.irreversibleAction}</p>
                         </div>
                     </DialogHeader>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setAnonymizeUser(null)}>Odustani</Button>
+                        <Button variant="outline" onClick={() => setAnonymizeUser(null)}>{t.admin.cancel}</Button>
                         <Button
                             variant="destructive"
                             className="bg-amber-600 hover:bg-amber-700"
                             disabled={adminAnonymizeUser.isPending}
                             onClick={() => adminAnonymizeUser.mutate({ id: anonymizeUser!.id })}
                         >
-                            {adminAnonymizeUser.isPending ? "Anonimiziranje..." : "Potvrdi Anonimizaciju"}
+                            {adminAnonymizeUser.isPending ? t.admin.anonymizing : t.admin.confirmAnonymization}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -428,14 +428,14 @@ export default function AdminUsers() {
             <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Dodaj novog korisnika</DialogTitle>
+                        <DialogTitle>{t.admin.addNewUser}</DialogTitle>
                         <DialogDescription>
-                            Unesite podatke za novog korisnika. Korisnik će primiti email s privremenom lozinkom.
+                            {t.admin.newUserDesc}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-4 space-y-4">
                         <div className="space-y-2">
-                            <Label htmlFor="newEmail">Email</Label>
+                            <Label htmlFor="newEmail">{t.auth.email}</Label>
                             <Input
                                 id="newEmail"
                                 type="email"
@@ -480,20 +480,20 @@ export default function AdminUsers() {
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="user">Korisnik</SelectItem>
-                                    <SelectItem value="operator">Operater</SelectItem>
-                                    <SelectItem value="admin">Administrator</SelectItem>
+                                    <SelectItem value="user">{t.admin.roleUser}</SelectItem>
+                                    <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
+                                    <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Odustani</Button>
+                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>{t.admin.cancel}</Button>
                         <Button
                             disabled={!newEmail || !newFirstName || !newLastName || adminCreateUser.isPending}
                             onClick={handleCreate}
                         >
-                            {adminCreateUser.isPending ? "Kreiranje..." : "Kreiraj korisnika"}
+                            {adminCreateUser.isPending ? t.admin.creating : t.admin.addUser}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
@@ -503,22 +503,22 @@ export default function AdminUsers() {
             <Dialog open={!!createdTempPassword} onOpenChange={(open) => !open && setCreatedTempPassword(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Korisnik uspješno kreiran!</DialogTitle>
+                        <DialogTitle>{t.admin.userCreatedTitle}</DialogTitle>
                         <DialogDescription>
-                            Korisnik je kreiran i poslan mu je email s podacima za prijavu.
+                            {t.admin.userCreatedDesc}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="py-6 text-center space-y-4">
-                        <p className="text-sm text-muted-foreground">Privremena lozinka korisnika je:</p>
+                        <p className="text-sm text-muted-foreground">{t.admin.tempPasswordLabel}</p>
                         <div className="bg-muted p-4 rounded-lg font-mono text-xl tracking-wider select-all">
                             {createdTempPassword}
                         </div>
                         <p className="text-xs text-amber-600 font-medium">
-                            Zabilježite ovu lozinku jer je više nećete moći vidjeti.
+                            {t.admin.recordPasswordWarning}
                         </p>
                     </div>
                     <DialogFooter>
-                        <Button onClick={() => setCreatedTempPassword(null)}>Zatvori</Button>
+                        <Button onClick={() => setCreatedTempPassword(null)}>{t.admin.cancel === "Odustani" ? "Zatvori" : "Close"}</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
