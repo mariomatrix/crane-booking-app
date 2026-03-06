@@ -12,10 +12,12 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Send } from "lucide-react";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { DatePicker } from "@/components/ui/date-picker";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { useAuth } from "@/_core/hooks/useAuth";
+import { Loader2, Send } from "lucide-react";
 
 interface ReservationFormProps {
     onSuccess?: () => void;
@@ -33,7 +35,9 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
 
     // ── Form state ───────────────────────────────────────────────────────
     const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
-    const [requestedDate, setRequestedDate] = useState(initialData?.date || "");
+    const [requestedDate, setRequestedDate] = useState<Date | undefined>(
+        initialData?.date ? new Date(initialData.date) : undefined
+    );
     const [requestedTimeSlot, setRequestedTimeSlot] = useState(initialData?.requestedTimeSlot || "po_dogovoru");
     const [userNote, setUserNote] = useState("");
     const [contactPhone, setContactPhone] = useState(user?.phone || "");
@@ -68,7 +72,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
     // Update date if initialData changes (e.g. user clicks different day on calendar)
     useEffect(() => {
         if (initialData?.date) {
-            setRequestedDate(initialData.date);
+            setRequestedDate(new Date(initialData.date));
         }
         if (initialData?.serviceTypeId) {
             setServiceTypeId(initialData.serviceTypeId);
@@ -130,7 +134,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         }
         createMutation.mutate({
             serviceTypeId,
-            requestedDate,
+            requestedDate: formatToSqlDate(requestedDate),
             requestedTimeSlot: requestedTimeSlot as "jutro" | "poslijepodne" | "po_dogovoru",
             userNote: userNote || undefined,
             vesselId: vesselId && vesselId !== "new" ? vesselId : undefined,
@@ -187,12 +191,10 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                         </h3>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Okvirni datum" : "Preferred date"} *</Label>
-                            <Input
-                                type="date"
-                                value={requestedDate}
-                                min={new Date().toISOString().split("T")[0]}
-                                onChange={(e) => setRequestedDate(e.target.value)}
-                                required
+                            <DatePicker
+                                date={requestedDate}
+                                onChange={setRequestedDate}
+                                placeholder={lang === "hr" ? "Odaberite datum" : "Select date"}
                             />
                         </div>
                         <div className="space-y-2">

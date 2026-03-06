@@ -25,25 +25,18 @@ import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
 
-function formatDate(date: Date | string | null | undefined) {
-  if (!date) return "—";
-  return new Date(date).toLocaleDateString("hr-HR", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { useLang } from "@/contexts/LangContext";
+import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 
 export default function AdminReservations() {
+  const { lang } = useLang();
   const [statusFilter, setStatusFilter] = useState("pending");
 
   // Approve dialog state
   const [approveOpen, setApproveOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [approveCraneId, setApproveCraneId] = useState("");
-  const [approveDate, setApproveDate] = useState("");
+  const [approveDate, setApproveDate] = useState<Date | undefined>(undefined);
   const [approveTime, setApproveTime] = useState("");
   const [approveDuration, setApproveDuration] = useState("60");
   const [adminNote, setAdminNote] = useState("");
@@ -99,7 +92,7 @@ export default function AdminReservations() {
   const resetApproveState = () => {
     setSelectedId(null);
     setApproveCraneId("");
-    setApproveDate("");
+    setApproveDate(undefined);
     setApproveTime("");
     setApproveDuration("60");
     setAdminNote("");
@@ -109,9 +102,9 @@ export default function AdminReservations() {
     setSelectedId(id);
     const reservation = (reservationsList as any[]).find((r: any) => r.id === id);
     if (reservation && reservation.requestedDate) {
-      setApproveDate(reservation.requestedDate);
+      setApproveDate(new Date(reservation.requestedDate));
     } else {
-      setApproveDate("");
+      setApproveDate(undefined);
     }
     setApproveOpen(true);
   };
@@ -127,7 +120,10 @@ export default function AdminReservations() {
       toast.error("Molimo popunite sve obavezne podatke.");
       return;
     }
-    const scheduledStart = new Date(`${approveDate}T${approveTime}:00`);
+    const [hours, minutes] = approveTime.split(":").map(Number);
+    const scheduledStart = new Date(approveDate);
+    scheduledStart.setHours(hours, minutes, 0, 0);
+
     approveMutation.mutate({
       id: selectedId,
       craneId: approveCraneId,
@@ -228,9 +224,9 @@ export default function AdminReservations() {
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                       <CalendarDays className="h-3.5 w-3.5" />
                       {reservation.scheduledStart
-                        ? formatDate(reservation.scheduledStart)
+                        ? formatAppDate(reservation.scheduledStart, lang as any, true)
                         : reservation.requestedDate
-                          ? `Okvirno: ${reservation.requestedDate} (${reservation.requestedTimeSlot ?? "po dogovoru"})`
+                          ? `Okvirno: ${formatAppDate(reservation.requestedDate, lang as any)} (${reservation.requestedTimeSlot ?? "po dogovoru"})`
                           : "Termin nije dodijeljen"}
                     </div>
 
@@ -368,11 +364,10 @@ export default function AdminReservations() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Datum *</Label>
-                <Input
-                  type="date"
-                  value={approveDate}
-                  min={new Date().toISOString().split("T")[0]}
-                  onChange={(e) => setApproveDate(e.target.value)}
+                <DatePicker
+                  date={approveDate}
+                  onChange={setApproveDate}
+                  placeholder="Odaberi datum"
                 />
               </div>
               <div className="space-y-2">
@@ -485,3 +480,4 @@ export default function AdminReservations() {
     </div>
   );
 }
+import { DatePicker } from "@/components/ui/date-picker";

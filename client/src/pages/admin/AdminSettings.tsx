@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
+import { formatAppDate } from "@/lib/date-utils";
 import { Loader2, Save, Settings2, Key, Plus, Trash2, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -170,6 +171,7 @@ export default function AdminSettings() {
 
 function ApiKeysSection() {
     const utils = trpc.useUtils();
+    const { lang } = useLang();
     const { data: keys, isLoading } = trpc.apiKey.list.useQuery();
 
     const [isAddOpen, setIsAddOpen] = useState(false);
@@ -251,9 +253,9 @@ function ApiKeysSection() {
                                                 {k.isActive ? "Aktivno" : "Opozvano"}
                                             </Badge>
                                         </TableCell>
-                                        <TableCell className="text-muted-foreground">{format(new Date(k.createdAt), "dd.MM.yyyy HH:mm")}</TableCell>
+                                        <TableCell className="text-muted-foreground">{formatAppDate(k.createdAt, lang as any, true)}</TableCell>
                                         <TableCell className="text-muted-foreground">
-                                            {k.lastUsedAt ? format(new Date(k.lastUsedAt), "dd.MM.yyyy HH:mm") : "-"}
+                                            {k.lastUsedAt ? formatAppDate(k.lastUsedAt, lang as any, true) : "-"}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <Button

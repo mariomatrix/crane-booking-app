@@ -34,15 +34,20 @@ const DEFAULT_HOURS: Record<string, { from: string; to: string }> = {
     sun: { from: "", to: "" },
 };
 
+import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { useLang } from "@/contexts/LangContext";
+import { DatePicker } from "@/components/ui/date-picker";
+
 export default function AdminSeasons() {
+    const { lang } = useLang();
     const { data: seasons = [], isLoading } = trpc.season.list.useQuery();
     const utils = trpc.useUtils();
 
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [name, setName] = useState("");
-    const [startDate, setStartDate] = useState("");
-    const [endDate, setEndDate] = useState("");
+    const [startDate, setStartDate] = useState<Date | undefined>(undefined);
+    const [endDate, setEndDate] = useState<Date | undefined>(undefined);
     const [workingHours, setWorkingHours] = useState<Record<string, { from: string; to: string }>>(DEFAULT_HOURS);
 
     const createMutation = trpc.season.create.useMutation({
@@ -69,16 +74,16 @@ export default function AdminSeasons() {
         setDialogOpen(false);
         setEditingId(null);
         setName("");
-        setStartDate("");
-        setEndDate("");
+        setStartDate(undefined);
+        setEndDate(undefined);
         setWorkingHours(DEFAULT_HOURS);
     };
 
     const openEdit = (s: any) => {
         setEditingId(s.id);
         setName(s.name);
-        setStartDate(s.startDate);
-        setEndDate(s.endDate);
+        setStartDate(s.startDate ? new Date(s.startDate) : undefined);
+        setEndDate(s.endDate ? new Date(s.endDate) : undefined);
         setWorkingHours(s.workingHours || DEFAULT_HOURS);
         setDialogOpen(true);
     };
@@ -89,9 +94,20 @@ export default function AdminSeasons() {
             return;
         }
         if (editingId) {
-            updateMutation.mutate({ id: editingId, name, startDate, endDate, workingHours });
+            updateMutation.mutate({
+                id: editingId,
+                name,
+                startDate: formatToSqlDate(startDate!),
+                endDate: formatToSqlDate(endDate!),
+                workingHours
+            });
         } else {
-            createMutation.mutate({ name, startDate, endDate, workingHours });
+            createMutation.mutate({
+                name,
+                startDate: formatToSqlDate(startDate!),
+                endDate: formatToSqlDate(endDate!),
+                workingHours
+            });
         }
     };
 
@@ -145,7 +161,7 @@ export default function AdminSeasons() {
                                         <div>
                                             <CardTitle className="text-base">{s.name}</CardTitle>
                                             <p className="text-sm text-muted-foreground">
-                                                {s.startDate} — {s.endDate}
+                                                {formatAppDate(s.startDate, lang as any)} — {formatAppDate(s.endDate, lang as any)}
                                             </p>
                                         </div>
                                     </div>
@@ -222,11 +238,11 @@ export default function AdminSeasons() {
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>Početak *</Label>
-                                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                                <DatePicker date={startDate} onChange={setStartDate} placeholder="Odaberi datum" />
                             </div>
                             <div className="space-y-2">
                                 <Label>Kraj *</Label>
-                                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+                                <DatePicker date={endDate} onChange={setEndDate} placeholder="Odaberi datum" />
                             </div>
                         </div>
 

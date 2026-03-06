@@ -8,6 +8,7 @@ import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { ReservationChat } from "@/components/ReservationChat";
+import { formatAppDate } from "@/lib/date-utils";
 import {
   Dialog,
   DialogContent,
@@ -20,23 +21,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
 
-function formatDate(date: Date | string) {
-  return new Date(date).toLocaleDateString("hr-HR", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function formatDateTime(date: Date | string) {
-  return new Date(date).toLocaleString("hr-HR", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 export default function MyReservations() {
   const { user, loading: authLoading } = useAuth();
@@ -175,8 +159,8 @@ export default function MyReservations() {
                         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                           <CalendarDays className="h-3.5 w-3.5" />
                           {reservation.scheduledStart
-                            ? `${formatDateTime(reservation.scheduledStart)} — ${reservation.scheduledEnd ? formatDateTime(reservation.scheduledEnd) : ""}`
-                            : `${isHr ? "Traženi datum" : "Requested"}: ${(reservation as any).requestedDate ?? "TBD"}`
+                            ? `${formatAppDate(reservation.scheduledStart, lang as any, true)} — ${reservation.scheduledEnd ? formatAppDate(reservation.scheduledEnd, lang as any, true) : ""}`
+                            : `${isHr ? "Traženi datum" : "Requested"}: ${formatAppDate((reservation as any).requestedDate, lang as any)}`
                           }
                         </div>
 
@@ -195,7 +179,7 @@ export default function MyReservations() {
                         {/* Completed date */}
                         {reservation.status === "completed" && (reservation as any).completedAt && (
                           <div className="text-xs text-emerald-600 dark:text-emerald-400">
-                            {isHr ? "Završeno" : "Completed"}: {formatDate((reservation as any).completedAt)}
+                            {isHr ? "Završeno" : "Completed"}: {formatAppDate((reservation as any).completedAt, lang as any)}
                           </div>
                         )}
 

@@ -13,13 +13,18 @@ import { Loader2, Plus, Trash2, CalendarOff, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { useLang } from "@/contexts/LangContext";
+import { DatePicker } from "@/components/ui/date-picker";
+
 export default function AdminHolidays() {
+    const { lang } = useLang();
     const { data: holidays = [], isLoading } = trpc.holiday.list.useQuery();
     const utils = trpc.useUtils();
 
     const [dialogOpen, setDialogOpen] = useState(false);
     const [name, setName] = useState("");
-    const [date, setDate] = useState("");
+    const [date, setDate] = useState<Date | undefined>(undefined);
     const [isRecurring, setIsRecurring] = useState(true);
 
     const createMutation = trpc.holiday.create.useMutation({
@@ -27,7 +32,7 @@ export default function AdminHolidays() {
             toast.success("Praznik dodan.");
             setDialogOpen(false);
             setName("");
-            setDate("");
+            setDate(undefined);
             utils.holiday.list.invalidate();
         },
         onError: (e) => toast.error(e.message),
@@ -102,7 +107,7 @@ export default function AdminHolidays() {
                             <TableBody>
                                 {(holidays as any[]).map((h: any) => (
                                     <TableRow key={h.id}>
-                                        <TableCell className="font-mono">{h.date}</TableCell>
+                                        <TableCell className="font-mono">{formatAppDate(h.date, lang as any)}</TableCell>
                                         <TableCell className="font-medium">{h.name}</TableCell>
                                         <TableCell>
                                             {h.isRecurring ? (
@@ -142,7 +147,7 @@ export default function AdminHolidays() {
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <Label>Datum *</Label>
-                            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                            <DatePicker date={date} onChange={setDate} placeholder="Odaberi datum" />
                         </div>
                         <div className="space-y-2">
                             <Label>Naziv *</Label>
@@ -166,7 +171,7 @@ export default function AdminHolidays() {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setDialogOpen(false)}>Odustani</Button>
                         <Button
-                            onClick={() => createMutation.mutate({ date, name, isRecurring })}
+                            onClick={() => createMutation.mutate({ date: formatToSqlDate(date!), name, isRecurring })}
                             disabled={!date || !name || createMutation.isPending}
                         >
                             {createMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}

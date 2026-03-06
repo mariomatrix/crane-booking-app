@@ -2,9 +2,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Loader2, History } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-import { format } from "date-fns";
+import { formatAppDate } from "@/lib/date-utils";
+import { useLang } from "@/contexts/LangContext";
+
 
 export default function AdminAuditLog() {
+    const { lang } = useLang();
     const { data: logs, isLoading } = trpc.system.auditLogs.useQuery({ limit: 100 });
 
     if (isLoading) {
@@ -55,7 +58,7 @@ export default function AdminAuditLog() {
                                     {(logs || []).map((log: any) => (
                                         <TableRow key={log.id}>
                                             <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                                                {format(new Date(log.createdAt), "dd.MM.yyyy. HH:mm")}
+                                                {formatAppDate(log.createdAt, lang as any, true)}
                                             </TableCell>
                                             <TableCell className="font-medium text-sm">
                                                 {log.actor?.name || log.actor?.email || "Sustav (Nepoznato)"}

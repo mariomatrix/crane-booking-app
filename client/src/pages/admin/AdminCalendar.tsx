@@ -28,6 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { addDays, startOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
+import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -365,7 +366,7 @@ export default function AdminCalendar() {
                                                     )}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {maintDateObj ? format(maintDateObj, "PPP", { locale: lang === 'hr' ? hr : enUS }) : <span>Odaberi datum</span>}
+                                                    {maintDateObj ? formatAppDate(maintDateObj, lang as any) : <span>Odaberi datum</span>}
                                                 </Button>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-auto p-0" align="start">
@@ -375,7 +376,7 @@ export default function AdminCalendar() {
                                                     onSelect={(d) => {
                                                         if (d) {
                                                             setMaintDateObj(d);
-                                                            setMaintDate(format(d, "yyyy-MM-dd"));
+                                                            setMaintDate(formatToSqlDate(d));
                                                         }
                                                     }}
                                                     initialFocus
@@ -429,7 +430,7 @@ export default function AdminCalendar() {
                                                     )}
                                                 >
                                                     <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {editDate ? format(editDate, "PPP", { locale: lang === 'hr' ? hr : enUS }) : <span>Odaberi datum</span>}
+                                                    {editDate ? formatAppDate(editDate, lang as any) : <span>Odaberi datum</span>}
                                                 </Button>
                                             </PopoverTrigger>
                                             <PopoverContent className="w-auto p-0" align="start">
@@ -577,7 +578,7 @@ export default function AdminCalendar() {
                             <ChevronLeft className="h-4 w-4" />
                         </Button>
                         <div className="px-3 text-sm font-semibold tabular-nums min-w-[140px] text-center">
-                            {format(viewDate, "dd.MM.yyyy.")}
+                            {formatAppDate(viewDate, lang as any)}
                         </div>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => addDays(d, 1))}>
                             <ChevronRight className="h-4 w-4" />
@@ -658,7 +659,7 @@ export default function AdminCalendar() {
                                 <div className="flex flex-col items-center">
                                     <span className="text-xs font-bold">{crane.name}</span>
                                     <span className="text-[10px] opacity-60 font-normal normal-case">
-                                        {format(arg.date, "eee dd.MM.")}
+                                        {format(arg.date, "eee dd.MM.", { locale: lang === 'hr' ? hr : enUS })}
                                     </span>
                                 </div>
                             ) : "";
@@ -734,7 +735,7 @@ export default function AdminCalendar() {
                                             >
                                                 <div className="flex items-center justify-between mb-2">
                                                     <span className="text-[10px] font-bold text-muted-foreground uppercase">{w.crane?.name}</span>
-                                                    <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{format(parseISO(w.requestedDate), "dd.MM.")}</span>
+                                                    <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{formatAppDate(parseISO(w.requestedDate), lang as any)}</span>
                                                 </div>
                                                 <div className="font-semibold text-sm mb-1">{w.user?.name || "Korisnik"}</div>
                                                 <div className="text-xs text-muted-foreground flex items-center gap-1 mb-3">

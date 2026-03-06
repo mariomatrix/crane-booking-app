@@ -1,13 +1,14 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { BarChart3, CalendarDays, CheckCircle, Clock, Construction, Users, XCircle } from "lucide-react";
+import { BarChart3, Clock, CheckCircle, XCircle, Users } from "lucide-react";
 import { useLang } from "@/contexts/LangContext";
 import { useMemo } from "react";
 import { useLocation } from "wouter";
+import { formatAppDate } from "@/lib/date-utils";
 
 export default function AdminDashboard() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [, setLocation] = useLocation();
   const { data: allReservations = [] } = trpc.reservation.listAll.useQuery({});
   const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
@@ -108,7 +109,7 @@ export default function AdminDashboard() {
                         {r.crane?.name ?? `Crane #${r.craneId}`}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {r.user?.name ?? "Unknown"} — {r.scheduledStart ? new Date(r.scheduledStart).toLocaleDateString() : r.requestedDate ?? "TBD"}
+                        {r.user?.name ?? "Unknown"} — {r.scheduledStart ? formatAppDate(r.scheduledStart, lang as any) : formatAppDate(r.requestedDate, lang as any)}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 text-xs text-amber-600">
