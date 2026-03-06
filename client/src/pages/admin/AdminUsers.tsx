@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays } from "lucide-react";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 
@@ -527,8 +527,25 @@ export default function AdminUsers() {
                     </DialogHeader>
                     <div className="py-6 text-center space-y-4">
                         <p className="text-sm text-muted-foreground">{t.admin.tempPasswordLabel}</p>
-                        <div className="bg-muted p-4 rounded-lg font-mono text-xl tracking-wider select-all">
-                            {createdTempPassword}
+                        <div className="relative">
+                            <div className="bg-muted p-4 rounded-lg font-mono text-xl tracking-wider select-all pr-12">
+                                {createdTempPassword}
+                            </div>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
+                                type="button"
+                                onClick={() => {
+                                    if (createdTempPassword) {
+                                        navigator.clipboard.writeText(createdTempPassword);
+                                        toast.success("Lozinka kopirana u međuspremnik.");
+                                    }
+                                }}
+                                title="Kopiraj lozinku"
+                            >
+                                <Copy className="h-4 w-4" />
+                            </Button>
                         </div>
                         <p className="text-xs text-amber-600 font-medium">
                             {t.admin.recordPasswordWarning}
