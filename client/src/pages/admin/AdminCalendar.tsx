@@ -788,13 +788,25 @@ export default function AdminCalendar() {
                             if (p.isHoliday) {
                                 return <div className="text-[10px] font-bold p-1 text-red-700/50">{arg.event.title}</div>
                             }
+                            const STATUS_LABELS: Record<string, string> = {
+                                pending: "Na čekanju",
+                                approved: "Odobreno",
+                                completed: "Izvršeno",
+                                rejected: "Odbijeno",
+                                cancelled: "Otkazano",
+                            };
                             return (
                                 <div className="flex flex-col h-full overflow-hidden p-1">
-                                    <div className="flex items-center justify-between mb-1">
+                                    <div className="flex items-center justify-between mb-0.5">
                                         <span className="text-[10px] font-black uppercase opacity-90 truncate">{arg.event.title}</span>
                                         {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse" />}
                                     </div>
                                     <div className="text-[10px] font-bold opacity-80 leading-tight truncate">{p.user}</div>
+                                    <div className="mt-0.5">
+                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-black/20 text-white leading-none">
+                                            {STATUS_LABELS[p.status] || p.status}
+                                        </span>
+                                    </div>
                                     {p.status === 'cancelled' && p.cancelReason && (
                                         <div className="text-[9px] italic opacity-90 leading-tight mt-1 border-t border-white/20 pt-1">
                                             Razlog: {p.cancelReason}
