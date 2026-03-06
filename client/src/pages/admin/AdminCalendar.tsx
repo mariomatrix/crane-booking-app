@@ -46,6 +46,14 @@ const STATUS_COLORS: Record<string, string> = {
 
 const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
+const STATUS_LABELS: Record<string, string> = {
+    pending: "Na čekanju",
+    approved: "Odobreno",
+    completed: "Izvršeno",
+    rejected: "Odbijeno",
+    cancelled: "Otkazano",
+};
+
 export default function AdminCalendar() {
     const { lang } = useLang();
     const searchString = useSearch();
@@ -520,69 +528,81 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-                        <DialogContent className="max-w-md">
+                        <DialogContent className="max-w-md overflow-hidden p-0">
                             <form onSubmit={handleUpdateRes}>
-                                <DialogHeader>
-                                    <DialogTitle>Uredi rezervaciju</DialogTitle>
-                                    <DialogDescription>
-                                        ID #{editingRes?.id} - {editingRes?.vesselName} ({editingRes?.user?.name})
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div className="grid gap-5 py-6">
-                                    <div className="grid gap-2">
-                                        <Label>Datum</Label>
-                                        <Popover>
-                                            <PopoverTrigger asChild>
-                                                <Button
-                                                    variant={"outline"}
-                                                    className={cn(
-                                                        "w-full justify-start text-left font-normal",
-                                                        !editDate && "text-muted-foreground"
-                                                    )}
-                                                >
-                                                    <CalendarIcon className="mr-2 h-4 w-4" />
-                                                    {editDate ? formatAppDate(editDate, lang as any) : <span>Odaberi datum</span>}
-                                                </Button>
-                                            </PopoverTrigger>
-                                            <PopoverContent className="w-auto p-0" align="start">
-                                                <Calendar
-                                                    mode="single"
-                                                    selected={editDate}
-                                                    onSelect={setEditDate}
-                                                    initialFocus
-                                                />
-                                            </PopoverContent>
-                                        </Popover>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="grid gap-2">
-                                            <Label>Vrijeme početka</Label>
-                                            <Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} required />
-                                        </div>
-                                        <div className="grid gap-2">
-                                            <Label>Vrijeme završetka</Label>
-                                            <Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} required />
-                                        </div>
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Dizalica</Label>
-                                        <Select value={editCraneId} onValueChange={setEditCraneId} required>
-                                            <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
-                                            <SelectContent>
-                                                {cranesList.map((c: any) => (
-                                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
+                                <div
+                                    className="px-6 py-4 text-white"
+                                    style={{ backgroundColor: editingRes ? (STATUS_COLORS[editingRes.status] ?? '#6b7280') : '#6b7280' }}
+                                >
+                                    <DialogHeader className="text-white">
+                                        <DialogTitle className="text-white flex items-center gap-2">
+                                            Uredi rezervaciju
+                                            <span className="inline-block text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-white/25 leading-none">
+                                                {editingRes ? (STATUS_LABELS[editingRes.status] || editingRes.status) : ''}
+                                            </span>
+                                        </DialogTitle>
+                                        <DialogDescription className="text-white/80">
+                                            {editingRes?.reservationNumber || `#${editingRes?.id?.slice(0, 8)}`} — {editingRes?.vesselName} ({editingRes?.user?.name})
+                                        </DialogDescription>
+                                    </DialogHeader>
                                 </div>
-                                <DialogFooter>
-                                    <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
-                                    <Button type="submit" disabled={rescheduleMutation.isPending}>
-                                        {rescheduleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        Spremi promjene
-                                    </Button>
-                                </DialogFooter>
+                                <div className="px-6 pb-6">
+                                    <div className="grid gap-5 py-6">
+                                        <div className="grid gap-2">
+                                            <Label>Datum</Label>
+                                            <Popover>
+                                                <PopoverTrigger asChild>
+                                                    <Button
+                                                        variant={"outline"}
+                                                        className={cn(
+                                                            "w-full justify-start text-left font-normal",
+                                                            !editDate && "text-muted-foreground"
+                                                        )}
+                                                    >
+                                                        <CalendarIcon className="mr-2 h-4 w-4" />
+                                                        {editDate ? formatAppDate(editDate, lang as any) : <span>Odaberi datum</span>}
+                                                    </Button>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-auto p-0" align="start">
+                                                    <Calendar
+                                                        mode="single"
+                                                        selected={editDate}
+                                                        onSelect={setEditDate}
+                                                        initialFocus
+                                                    />
+                                                </PopoverContent>
+                                            </Popover>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid gap-2">
+                                                <Label>Vrijeme početka</Label>
+                                                <Input type="time" value={editStart} onChange={(e) => setEditStart(e.target.value)} required />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label>Vrijeme završetka</Label>
+                                                <Input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} required />
+                                            </div>
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label>Dizalica</Label>
+                                            <Select value={editCraneId} onValueChange={setEditCraneId} required>
+                                                <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
+                                                <SelectContent>
+                                                    {cranesList.map((c: any) => (
+                                                        <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <DialogFooter className="px-6 pb-6">
+                                        <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
+                                        <Button type="submit" disabled={rescheduleMutation.isPending}>
+                                            {rescheduleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            Spremi promjene
+                                        </Button>
+                                    </DialogFooter>
+                                </div>
                             </form>
                         </DialogContent>
                     </Dialog>
@@ -788,22 +808,19 @@ export default function AdminCalendar() {
                             if (p.isHoliday) {
                                 return <div className="text-[10px] font-bold p-1 text-red-700/50">{arg.event.title}</div>
                             }
-                            const STATUS_LABELS: Record<string, string> = {
-                                pending: "Na čekanju",
-                                approved: "Odobreno",
-                                completed: "Izvršeno",
-                                rejected: "Odbijeno",
-                                cancelled: "Otkazano",
-                            };
+                            const statusColor = STATUS_COLORS[p.status] ?? '#6b7280';
                             return (
-                                <div className="flex flex-col h-full overflow-hidden p-1">
+                                <div
+                                    className="flex flex-col h-full overflow-hidden p-1 rounded-sm text-white"
+                                    style={{ backgroundColor: statusColor }}
+                                >
                                     <div className="flex items-center justify-between mb-0.5">
-                                        <span className="text-[10px] font-black uppercase opacity-90 truncate">{arg.event.title}</span>
+                                        <span className="text-[10px] font-black uppercase opacity-95 truncate">{arg.event.title}</span>
                                         {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse" />}
                                     </div>
-                                    <div className="text-[10px] font-bold opacity-80 leading-tight truncate">{p.user}</div>
+                                    <div className="text-[10px] font-bold opacity-85 leading-tight truncate">{p.user}</div>
                                     <div className="mt-0.5">
-                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/30 text-white shadow-sm backdrop-blur-[2px] leading-none">
+                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/25 text-white leading-none">
                                             {STATUS_LABELS[p.status] || p.status}
                                         </span>
                                     </div>

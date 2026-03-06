@@ -24,11 +24,19 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useLang } from "@/contexts/LangContext";
 import { Users } from "lucide-react";
 import { LanguageSelector } from "@/components/LanguageSelector";
+import { useEffect } from "react";
 
 export default function Home() {
   const { t } = useLang();
   const { user, loading, logout } = useAuth();
   const [, setLocation] = useLocation();
+
+  // Redirect admin/operator to their dashboard by default
+  useEffect(() => {
+    if (!loading && user && (user.role === "admin" || user.role === "operator")) {
+      setLocation("/admin");
+    }
+  }, [loading, user, setLocation]);
 
   return (
     <div className="min-h-screen bg-background">
