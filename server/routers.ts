@@ -460,12 +460,16 @@ export const appRouter = router({
         const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
         const loginUrl = `${baseUrl}/auth/login`;
 
-        sendUserInvitation({
+        const emailSent = await sendUserInvitation({
           to: input.email,
           userName: input.firstName,
           tempPassword,
           loginUrl,
-        }).catch(console.warn);
+        });
+
+        if (!emailSent) {
+          console.warn(`[Email] Failed to send invitation to ${input.email}`);
+        }
 
         await createAuditEntry({
           actorId: ctx.user.id,

@@ -18,7 +18,7 @@ async function testEmail(port: number) {
     try {
         const info = await transporter.sendMail({
             from: `"Test" <${process.env.SMTP_FROM}>`,
-            to: process.env.SMTP_FROM,
+            to: "lipovac.mario@gmail.com",
             subject: `Test Email (Port ${port})`,
             text: "Test body",
         });
