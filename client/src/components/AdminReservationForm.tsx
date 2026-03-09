@@ -170,7 +170,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                 <Select value={craneId} onValueChange={setCraneId}>
                                     <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
                                     <SelectContent>
-                                        {(cranes as any[]).filter((c: any) => c.status === "active").map((c: any) => (
+                                        {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
                                             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                                         ))}
                                     </SelectContent>
