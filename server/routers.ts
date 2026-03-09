@@ -795,6 +795,7 @@ export const appRouter = router({
   reservation: router({
     create: protectedProcedure
       .input(z.object({
+        userId: z.string().uuid().optional(), // For admins creating on behalf of a user
         // Service type — required in v2.0
         serviceTypeId: z.string().uuid(),
         // Requested time — user preference (no crane assignment at this stage)
@@ -804,7 +805,7 @@ export const appRouter = router({
         // Vessel data
         vesselId: z.string().uuid().optional(),
         vesselType: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
-        vesselName: z.string().optional(),
+        vesselRegistration: z.string().optional(),
         vesselLengthM: z.number().positive().optional(),
         vesselBeamM: z.number().positive().optional(),
         vesselDraftM: z.number().positive().optional(),
@@ -857,7 +858,7 @@ export const appRouter = router({
         // 3. Build vessel snapshot
         let vesselSnapshot: Record<string, any> = {
           vesselType: input.vesselType,
-          vesselName: input.vesselName,
+          vesselRegistration: input.vesselRegistration,
           vesselLengthM: input.vesselLengthM ? String(input.vesselLengthM) : undefined,
           vesselBeamM: input.vesselBeamM ? String(input.vesselBeamM) : undefined,
           vesselDraftM: input.vesselDraftM ? String(input.vesselDraftM) : undefined,
@@ -872,7 +873,7 @@ export const appRouter = router({
           if (vessel) {
             vesselSnapshot = {
               vesselType: vessel.type,
-              vesselName: vessel.name,
+              vesselRegistration: vessel.registration,
               vesselLengthM: vessel.lengthM ?? undefined,
               vesselBeamM: vessel.beamM ?? undefined,
               vesselDraftM: vessel.draftM ?? undefined,
@@ -892,9 +893,13 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
 
+        const targetUserId = (ctx.user.role === 'admin' || ctx.user.role === 'operator') && input.userId
+          ? input.userId
+          : ctx.user.id;
+
         const { reservations: resTable } = await import("../drizzle/schema");
         const created = await db.insert(resTable).values({
-          userId: ctx.user.id,
+          userId: targetUserId,
           vesselId: input.vesselId,
           serviceTypeId: input.serviceTypeId,
           requestedDate: input.requestedDate,
@@ -902,7 +907,7 @@ export const appRouter = router({
           status: "pending",
           reservationNumber,
           vesselType: vesselSnapshot.vesselType,
-          vesselName: vesselSnapshot.vesselName,
+          vesselRegistration: vesselSnapshot.vesselRegistration,
           vesselLengthM: vesselSnapshot.vesselLengthM,
           vesselBeamM: vesselSnapshot.vesselBeamM,
           vesselDraftM: vesselSnapshot.vesselDraftM,
@@ -929,7 +934,7 @@ export const appRouter = router({
           userName: ctx.user.name || ctx.user.firstName || ctx.user.email,
           reservationNumber,
           requestedDate: input.requestedDate,
-          vesselName: vesselSnapshot.vesselName || undefined,
+          vesselName: vesselSnapshot.vesselRegistration || undefined,
           vesselType: vesselSnapshot.vesselType || undefined,
           vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
           contactPhone: input.contactPhone,

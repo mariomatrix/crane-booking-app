@@ -1,4 +1,3 @@
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,38 +11,30 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
-import { useAuth } from "@/_core/hooks/useAuth";
-import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { formatToSqlDate } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Send } from "lucide-react";
+import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 
-interface ReservationFormProps {
+interface AdminReservationFormProps {
     onSuccess?: () => void;
     onCancel?: () => void;
-    initialData?: {
-        date?: string;
-        serviceTypeId?: string;
-        requestedTimeSlot?: string;
-    };
 }
 
-export function ReservationForm({ onSuccess, onCancel, initialData }: ReservationFormProps) {
-    const { user } = useAuth();
+export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFormProps) {
     const { t, lang } = useLang();
 
     // ── Form state ───────────────────────────────────────────────────────
-    const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
-    const [requestedDate, setRequestedDate] = useState<Date | undefined>(
-        initialData?.date ? new Date(initialData.date) : undefined
-    );
-    const [requestedTimeSlot, setRequestedTimeSlot] = useState(initialData?.requestedTimeSlot || "po_dogovoru");
+    const [userId, setUserId] = useState("");
+    const [serviceTypeId, setServiceTypeId] = useState("");
+    const [requestedDate, setRequestedDate] = useState<Date | undefined>(undefined);
+    const [requestedTimeSlot, setRequestedTimeSlot] = useState("po_dogovoru");
     const [userNote, setUserNote] = useState("");
-    const [contactPhone, setContactPhone] = useState(user?.phone || "");
+    const [contactPhone, setContactPhone] = useState("");
 
     // Vessel state
-    const [vesselId, setVesselId] = useState("");
     const [vesselType, setVesselType] = useState("");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
@@ -51,93 +42,33 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
     const [vesselWeight, setVesselWeight] = useState("");
     const [vesselRegistration, setVesselRegistration] = useState("");
 
-    const [hasAttemptedVesselAutoFill, setHasAttemptedVesselAutoFill] = useState(false);
-    const [hasSyncedProfile, setHasSyncedProfile] = useState(false);
-
     // ── Queries ──────────────────────────────────────────────────────────
     const { data: serviceTypes = [], isLoading: serviceTypesLoading } =
         trpc.serviceType.list.useQuery({ onlyActive: true });
 
-    const { data: myVessels = [], isLoading: vesselsLoading } =
-        trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
-
-    // ── Effects ──────────────────────────────────────────────────────────
-    useEffect(() => {
-        // Sync phone from user profile if not already set by user or initialData
-        if (user?.phone && !contactPhone) {
-            setContactPhone(user.phone);
-        }
-    }, [user?.phone, contactPhone]);
-
-    // Update date if initialData changes (e.g. user clicks different day on calendar)
-    useEffect(() => {
-        if (initialData?.date) {
-            setRequestedDate(new Date(initialData.date));
-        }
-        if (initialData?.serviceTypeId) {
-            setServiceTypeId(initialData.serviceTypeId);
-        }
-        if (initialData?.requestedTimeSlot) {
-            setRequestedTimeSlot(initialData.requestedTimeSlot);
-        }
-    }, [initialData]);
-
-    // Auto-select first vessel
-    useEffect(() => {
-        if (!vesselsLoading && myVessels.length > 0 && !vesselId && !hasAttemptedVesselAutoFill) {
-            const first = myVessels[0] as any;
-            setVesselId(String(first.id));
-            setVesselType(first.type);
-            setVesselLength(first.lengthM ? String(first.lengthM) : "");
-            setVesselWidth(first.beamM ? String(first.beamM) : "");
-            setVesselDraft(first.draftM ? String(first.draftM) : "");
-            setVesselWeight(first.weightKg ? String(first.weightKg) : "");
-            setVesselRegistration(first.registration || "");
-            setHasAttemptedVesselAutoFill(true);
-        }
-    }, [myVessels, vesselsLoading, vesselId, hasAttemptedVesselAutoFill]);
+    const { data: usersList = [] } = trpc.user.list.useQuery();
 
     // ── Mutation ─────────────────────────────────────────────────────────
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
-            toast.success(t.form.successMessage);
+            toast.success("Rezervacija uspješno kreirana.");
             onSuccess?.();
         },
         onError: (error: any) => toast.error(error.message),
     });
 
-    // ── Handlers ─────────────────────────────────────────────────────────
-    const handleVesselSelect = (id: string) => {
-        if (id === "new") {
-            setVesselId("new");
-            setVesselType(""); setVesselLength("");
-            setVesselWidth(""); setVesselDraft(""); setVesselWeight(""); setVesselRegistration("");
-            return;
-        }
-        setVesselId(id);
-        const vessel = (myVessels as any[]).find(v => String(v.id) === id);
-        if (vessel) {
-            setVesselType(vessel.type);
-            setVesselLength(vessel.lengthM ? String(vessel.lengthM) : "");
-            setVesselWidth(vessel.beamM ? String(vessel.beamM) : "");
-            setVesselDraft(vessel.draftM ? String(vessel.draftM) : "");
-            setVesselWeight(vessel.weightKg ? String(vessel.weightKg) : "");
-            setVesselRegistration(vessel.registration || "");
-        }
-    };
-
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!serviceTypeId || !requestedDate || !vesselType || !contactPhone) {
-            toast.error(t.form.errors.required);
+        if (!userId || !serviceTypeId || !requestedDate || !vesselType || !contactPhone) {
+            toast.error("Molimo popunite sva obavezna polja.");
             return;
         }
         createMutation.mutate({
+            userId,
             serviceTypeId,
             requestedDate: formatToSqlDate(requestedDate),
             requestedTimeSlot: requestedTimeSlot as "jutro" | "poslijepodne" | "po_dogovoru",
             userNote: userNote || undefined,
-            vesselId: vesselId && vesselId !== "new" ? vesselId : undefined,
             vesselType: vesselType as any,
             vesselRegistration: vesselRegistration || undefined,
             vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
@@ -156,12 +87,24 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="space-y-4">
+                <div className="space-y-2">
+                    <Label>Korisnik (Vlasnik rezervacije) *</Label>
+                    <UserSearchCombobox
+                        users={usersList as any}
+                        value={userId}
+                        onChange={setUserId}
+                        placeholder="Odaberite korisnika..."
+                    />
+                </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Left Column: Service + Time Preference */}
                 <div className="space-y-6">
                     <div className="space-y-4">
                         <h3 className="font-medium text-sm border-b pb-2">
-                            {lang === "hr" ? "Tip operacije" : "Service Type"}
+                            {lang === "hr" ? "Tip operacije i termin" : "Service Type & Time"}
                         </h3>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Tip operacije" : "Service type"} *</Label>
@@ -183,12 +126,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 </SelectContent>
                             </Select>
                         </div>
-                    </div>
 
-                    <div className="space-y-4">
-                        <h3 className="font-medium text-sm border-b pb-2">
-                            {lang === "hr" ? "Željeni termin" : "Preferred Date & Time"}
-                        </h3>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Okvirni datum" : "Preferred date"} *</Label>
                             <DatePicker
@@ -216,7 +154,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 placeholder={lang === "hr"
                                     ? "Opišite zahvat, posebne zahtjeve i sl..."
                                     : "Describe the operation, special requirements..."}
-                                rows={3}
+                                rows={2}
                             />
                         </div>
                     </div>
@@ -227,30 +165,10 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                     <div className="space-y-4">
                         <h3 className="font-medium text-sm border-b pb-2">{t.form.vesselSection}</h3>
 
-                        {(myVessels as any[]).length > 0 && (
-                            <div className="space-y-2">
-                                <Label>{t.nav.vessels}</Label>
-                                <Select value={vesselId} onValueChange={handleVesselSelect}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder={lang === "hr" ? "Odaberite plovilo" : "Select a vessel"} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="new">— {t.vessels.addVessel} —</SelectItem>
-                                        {(myVessels as any[]).map((v: any) => (
-                                            <SelectItem key={v.id} value={String(v.id)}>
-                                                {v.name} ({v.type})
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        )}
-
-
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>{t.form.vesselType} *</Label>
-                                <Select value={vesselType} onValueChange={setVesselType} disabled={!!vesselId && vesselId !== "new"}>
+                                <Select value={vesselType} onValueChange={setVesselType}>
                                     <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
@@ -266,41 +184,37 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                     type="number"
                                     value={vesselWeight}
                                     onChange={(e) => setVesselWeight(e.target.value)}
-                                    disabled={!!vesselId && vesselId !== "new"}
                                 />
                             </div>
                         </div>
 
                         <div className="space-y-2">
-                            <Label>{lang === "hr" ? "Registarska oznaka plovila" : "Vessel Registration"}</Label>
+                            <Label>{lang === "hr" ? "Registracija plovila" : "Vessel Registration"} *</Label>
                             <Input
                                 value={vesselRegistration}
                                 onChange={(e) => setVesselRegistration(e.target.value)}
                                 placeholder={lang === "hr" ? "npr. ST-1234" : "e.g. ST-1234"}
-                                disabled={!!vesselId && vesselId !== "new"}
+                                required
                             />
                         </div>
 
                         <div className="grid grid-cols-3 gap-2">
                             <div className="space-y-1">
                                 <Label className="text-xs">{t.form.vesselLength} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                                <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} />
                             </div>
                             <div className="space-y-1">
                                 <Label className="text-xs">{t.form.vesselWidth} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                                <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} />
                             </div>
                             <div className="space-y-1">
                                 <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} />
                             </div>
                         </div>
                     </div>
 
                     <div className="space-y-4">
-                        <h3 className="font-medium text-sm border-b pb-2">
-                            {lang === "hr" ? "Kontakt" : "Contact"}
-                        </h3>
                         <div className="space-y-2">
                             <Label>{t.form.contactPhone} *</Label>
                             <Input
@@ -321,13 +235,13 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType || !contactPhone}
+                    disabled={createMutation.isPending || !userId || !serviceTypeId || !requestedDate || !vesselType || !contactPhone || !vesselRegistration}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (
                         <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.form.submitting}</>
                     ) : (
-                        <><Send className="h-4 w-4 mr-2" />{t.form.submitButton}</>
+                        <><Send className="h-4 w-4 mr-2" />Kreiraj</>
                     )}
                 </Button>
             </div>

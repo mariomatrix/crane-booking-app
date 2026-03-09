@@ -299,7 +299,7 @@ export default function AdminCalendar() {
                 id: String(r.id),
                 title: r.isMaintenance
                     ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselName || "Plovilo"} - ${r.vesselWeightKg} t`,
+                    : `${r.vesselRegistration || "Plovilo"} - ${r.vesselWeightKg} t`,
                 start,
                 end,
                 backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
@@ -542,7 +542,7 @@ export default function AdminCalendar() {
                                             </span>
                                         </DialogTitle>
                                         <DialogDescription className="text-white/80">
-                                            {editingRes?.reservationNumber || `#${editingRes?.id?.slice(0, 8)}`} — {editingRes?.vesselName} ({editingRes?.user?.name})
+                                            {editingRes?.reservationNumber || `#${editingRes?.id?.slice(0, 8)}`} — {editingRes?.vesselRegistration} ({editingRes?.user?.name})
                                         </DialogDescription>
                                     </DialogHeader>
                                 </div>

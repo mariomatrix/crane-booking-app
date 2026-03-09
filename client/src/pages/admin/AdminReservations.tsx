@@ -24,6 +24,8 @@ import { CalendarDays, Check, CheckCircle2, Loader2, User, X, MessageSquare } fr
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
+import { Plus } from "lucide-react";
 
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
@@ -33,6 +35,9 @@ export default function AdminReservations() {
   const { lang } = useLang();
   const [statusFilter, setStatusFilter] = useState("pending");
   const [selectedUser, setSelectedUser] = useState("all");
+
+  // Create dialog state
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Approve dialog state
   const [approveOpen, setApproveOpen] = useState(false);
@@ -187,6 +192,10 @@ export default function AdminReservations() {
             value={selectedUser}
             onChange={setSelectedUser}
           />
+          <Button onClick={() => setCreateOpen(true)} className="ml-2">
+            <Plus className="h-4 w-4 mr-1" />
+            Nova rezervacija
+          </Button>
         </div>
       </div>
 
@@ -215,7 +224,7 @@ export default function AdminReservations() {
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium">
-                        {reservation.serviceType?.name ?? reservation.vesselName ?? `Rezervacija #${reservation.reservationNumber}`}
+                        {reservation.serviceType?.name ?? reservation.vesselRegistration ?? `Rezervacija #${reservation.reservationNumber}`}
                       </span>
                       <StatusBadge status={reservation.status} />
                       {reservation.reservationNumber && (
@@ -243,10 +252,10 @@ export default function AdminReservations() {
                           : "Termin nije dodijeljen"}
                     </div>
 
-                    {reservation.vesselName && (
+                    {reservation.vesselRegistration && (
                       <div className="text-sm text-muted-foreground">
                         <span className="font-medium">Plovilo:</span>{" "}
-                        {reservation.vesselName} ({reservation.vesselType})
+                        {reservation.vesselRegistration} ({reservation.vesselType})
                         {reservation.vesselWeightKg ? ` — ${(Number(reservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}
                       </div>
                     )}
@@ -333,6 +342,25 @@ export default function AdminReservations() {
         </div>
       )}
 
+      {/* Create Dialog */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Nova rezervacija</DialogTitle>
+            <DialogDescription>
+              Kreirajte novu rezervaciju za postojećeg korisnika.
+            </DialogDescription>
+          </DialogHeader>
+          <AdminReservationForm
+            onSuccess={() => {
+              setCreateOpen(false);
+              utils.reservation.listAll.invalidate();
+            }}
+            onCancel={() => setCreateOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
       {/* Approve Dialog */}
       <Dialog open={approveOpen} onOpenChange={(v) => { if (!v) resetApproveState(); setApproveOpen(v); }}>
         <DialogContent className="sm:max-w-[520px]">
@@ -345,8 +373,8 @@ export default function AdminReservations() {
 
           {selectedReservation && (
             <div className="rounded-md bg-muted p-3 text-sm space-y-1 mb-2">
-              {selectedReservation.vesselName && (
-                <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselName} ({selectedReservation.vesselType}){selectedReservation.vesselWeightKg ? ` — ${(Number(selectedReservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}</div>
+              {selectedReservation.vesselRegistration && (
+                <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselRegistration} ({selectedReservation.vesselType}){selectedReservation.vesselWeightKg ? ` — ${(Number(selectedReservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}</div>
               )}
               {selectedReservation.requestedDate && (
                 <div>

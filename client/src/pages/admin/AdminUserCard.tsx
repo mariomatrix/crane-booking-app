@@ -152,7 +152,7 @@ export default function AdminUserCard() {
                                                     ? formatAppDate(r.requestedDate, lang as any)
                                                     : "—"}
                                         </TableCell>
-                                        <TableCell>{r.vesselName || "—"}</TableCell>
+                                        <TableCell>{r.vesselRegistration || "—"}</TableCell>
                                         <TableCell>{r.craneName || "—"}</TableCell>
                                         <TableCell><StatusBadge status={r.status} /></TableCell>
                                         <TableCell className="text-right">

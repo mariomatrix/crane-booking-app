@@ -44,7 +44,7 @@ export async function sendReservationConfirmation(opts: {
     endDate: Date;
     craneLocation: string;
     adminNotes?: string;
-    vesselName?: string;
+    vesselRegistration?: string;
     vesselType?: string;
     vesselWeightKg?: number | string;
     userNote?: string;
@@ -71,7 +71,7 @@ export async function sendReservationConfirmation(opts: {
       <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Lokacija" : "Location"}:</td><td><strong>${opts.craneLocation}</strong></td></tr>
       
       <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
-      ${opts.vesselName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo" : "Vessel"}:</td><td>${opts.vesselName}</td></tr>` : ""}
+      ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
       ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
       ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${opts.vesselWeightKg}kg</td></tr>` : ""}
       
@@ -178,7 +178,7 @@ export async function sendReservationReceived(opts: {
     craneName?: string;
     requestedDate: string;
     lang?: "hr" | "en";
-    vesselName?: string;
+    vesselRegistration?: string;
     vesselType?: string;
     vesselWeightKg?: number | string;
     userNote?: string;
@@ -202,7 +202,7 @@ export async function sendReservationReceived(opts: {
       ${opts.craneName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>` : ""}
       
       <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
-      ${opts.vesselName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo" : "Vessel"}:</td><td>${opts.vesselName}</td></tr>` : ""}
+      ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
       ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
       ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${opts.vesselWeightKg}kg</td></tr>` : ""}
       

@@ -120,6 +120,7 @@ export const reservations = pgTable("reservations", {
     vesselBeamM: decimal("vessel_beam_m", { precision: 6, scale: 2 }),
     vesselDraftM: decimal("vessel_draft_m", { precision: 5, scale: 2 }),
     vesselWeightKg: integer("vessel_weight_kg"),
+    vesselRegistration: varchar("vessel_registration", { length: 100 }),
 
     // Notes
     userNote: text("user_note"),
