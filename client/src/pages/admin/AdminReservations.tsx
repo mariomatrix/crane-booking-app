@@ -100,6 +100,14 @@ export default function AdminReservations() {
     onError: (error) => toast.error(error.message),
   });
 
+  const revertMutation = trpc.reservation.revertToPending.useMutation({
+    onSuccess: () => {
+      toast.success("Rezervacija je vraćena u obradu.");
+      utils.reservation.listAll.invalidate();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const resetApproveState = () => {
     setSelectedId(null);
     setApproveCraneId("");
@@ -308,15 +316,37 @@ export default function AdminReservations() {
                       </>
                     )}
                     {reservation.status === "approved" && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => completeMutation.mutate({ id: reservation.id })}
+                          disabled={completeMutation.isPending}
+                          className="text-green-700 border-green-300 hover:bg-green-50"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                          Završeno
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => revertMutation.mutate({ id: reservation.id })}
+                          disabled={revertMutation.isPending}
+                          className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                        >
+                          Vrati u obradu
+                        </Button>
+                      </>
+                    )}
+                    {(reservation.status === "cancelled" || reservation.status === "rejected") && (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => completeMutation.mutate({ id: reservation.id })}
-                        disabled={completeMutation.isPending}
-                        className="text-green-700 border-green-300 hover:bg-green-50"
+                        onClick={() => revertMutation.mutate({ id: reservation.id })}
+                        disabled={revertMutation.isPending}
+                        className="text-amber-700 border-amber-300 hover:bg-amber-50"
                       >
-                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                        Završeno
+                        Vrati u obradu
                       </Button>
                     )}
                     <div className="relative">

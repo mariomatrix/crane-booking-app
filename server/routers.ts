@@ -1301,6 +1301,43 @@ export const appRouter = router({
         });
         return { success: true };
       }),
+
+    // Revert reservation to pending
+    revertToPending: operatorProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+        if (reservation.status !== "approved" && reservation.status !== "cancelled" && reservation.status !== "rejected") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Samo odobrene ili otkazane/odbijene rezervacije se mogu vratiti na obradu." });
+        }
+
+        const db = await getDb();
+        if (db) {
+          const { reservations: resTable } = await import("../drizzle/schema");
+          await db.update(resTable).set({
+            status: "pending",
+            craneId: null, // Clear crane assignment so it can be re-assigned
+            scheduledStart: null,
+            scheduledEnd: null,
+            approvedBy: null,
+            approvedAt: null,
+            updatedAt: new Date(),
+          }).where(eq(resTable.id, input.id));
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_reverted_to_pending",
+          entityType: "reservation",
+          entityId: input.id,
+        });
+
+        const { notifyStatusChange } = await import("./services/notifications");
+        notifyStatusChange(input.id).catch(console.error);
+
+        return { success: true };
+      }),
   }),
 
   // ─── Messages ───────────────────────────────────────────────────────────
