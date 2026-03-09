@@ -796,6 +796,10 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({
         userId: z.string().uuid().optional(), // For admins creating on behalf of a user
+        isAutoApprove: z.boolean().optional(),
+        craneId: z.string().uuid().optional(),
+        scheduledStart: z.date().optional(),
+        durationMin: z.number().int().positive().optional(),
         // Service type — required in v2.0
         serviceTypeId: z.string().uuid(),
         // Requested time — user preference (no crane assignment at this stage)
@@ -897,6 +901,47 @@ export const appRouter = router({
           ? input.userId
           : ctx.user.id;
 
+        const targetUser = await getUserById(targetUserId);
+        if (!targetUser) throw new TRPCError({ code: "BAD_REQUEST", message: "Korisnik nije pronađen." });
+
+        let finalStatus = "pending";
+        let finalCraneId = undefined;
+        let finalScheduledStart = undefined;
+        let finalScheduledEnd = undefined;
+        let finalDurationMin = undefined;
+        let finalApprovedBy = undefined;
+        let finalApprovedAt = undefined;
+        let autoApproveCrane = null;
+
+        if (input.isAutoApprove && (ctx.user.role === 'admin' || ctx.user.role === 'operator')) {
+          if (!input.craneId || !input.scheduledStart || !input.durationMin) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Nedostaju podaci za automatsko odobrenje." });
+          }
+          autoApproveCrane = await getCraneById(input.craneId);
+          if (!autoApproveCrane || autoApproveCrane.craneStatus !== "active") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+          }
+
+          finalScheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
+
+          if (vesselSnapshot.vesselWeightKg && Number(vesselSnapshot.vesselWeightKg) > autoApproveCrane.maxCapacityKg) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Težina plovila (${vesselSnapshot.vesselWeightKg}kg) prelazi kapacitet dizalice (${autoApproveCrane.maxCapacityKg}kg).`,
+            });
+          }
+
+          const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, finalScheduledEnd);
+          if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+
+          finalStatus = "approved";
+          finalCraneId = input.craneId;
+          finalScheduledStart = input.scheduledStart;
+          finalDurationMin = input.durationMin;
+          finalApprovedBy = ctx.user.id;
+          finalApprovedAt = new Date();
+        }
+
         const { reservations: resTable } = await import("../drizzle/schema");
         const created = await db.insert(resTable).values({
           userId: targetUserId,
@@ -904,8 +949,14 @@ export const appRouter = router({
           serviceTypeId: input.serviceTypeId,
           requestedDate: input.requestedDate,
           requestedTimeSlot: input.requestedTimeSlot,
-          status: "pending",
+          status: finalStatus as any,
           reservationNumber,
+          craneId: finalCraneId,
+          scheduledStart: finalScheduledStart,
+          scheduledEnd: finalScheduledEnd,
+          durationMin: finalDurationMin,
+          approvedBy: finalApprovedBy,
+          approvedAt: finalApprovedAt,
           vesselType: vesselSnapshot.vesselType,
           vesselRegistration: vesselSnapshot.vesselRegistration,
           vesselLengthM: vesselSnapshot.vesselLengthM,
@@ -928,19 +979,35 @@ export const appRouter = router({
         });
 
         // Send confirmation email to user
-        const { sendReservationReceived } = await import("./_core/email");
-        sendReservationReceived({
-          to: ctx.user.email,
-          userName: ctx.user.name || ctx.user.firstName || ctx.user.email,
-          reservationNumber,
-          requestedDate: input.requestedDate,
-          vesselName: vesselSnapshot.vesselRegistration || undefined,
-          vesselType: vesselSnapshot.vesselType || undefined,
-          vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
-          contactPhone: input.contactPhone,
-          userNote: input.userNote || undefined,
-          lang: "hr"
-        }).catch(console.warn);
+        const { sendReservationReceived, sendReservationConfirmation } = await import("./_core/email");
+
+        if (finalStatus === "approved" && autoApproveCrane && finalScheduledStart && finalScheduledEnd) {
+          sendReservationConfirmation({
+            to: targetUser.email,
+            userName: targetUser.name || targetUser.firstName || targetUser.email,
+            craneName: autoApproveCrane.name,
+            startDate: finalScheduledStart,
+            endDate: finalScheduledEnd,
+            craneLocation: autoApproveCrane.location || autoApproveCrane.name,
+            vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
+            vesselType: vesselSnapshot.vesselType || undefined,
+            vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
+            userNote: input.userNote || undefined,
+          }).catch(console.warn);
+        } else {
+          sendReservationReceived({
+            to: targetUser.email,
+            userName: targetUser.name || targetUser.firstName || targetUser.email,
+            reservationNumber,
+            requestedDate: input.requestedDate,
+            vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
+            vesselType: vesselSnapshot.vesselType || undefined,
+            vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
+            contactPhone: input.contactPhone,
+            userNote: input.userNote || undefined,
+            lang: "hr"
+          }).catch(console.warn);
+        }
 
         return { id: resId, reservationNumber };
       }),
@@ -1106,7 +1173,7 @@ export const appRouter = router({
             endDate: scheduledEnd,
             craneLocation: crane.location || crane.name,
             adminNotes: input.adminNote,
-            vesselName: reservation.vesselName || undefined,
+            vesselRegistration: reservation.vesselRegistration || undefined,
             vesselType: reservation.vesselType || undefined,
             vesselWeightKg: reservation.vesselWeightKg || undefined,
             userNote: reservation.userNote || undefined,

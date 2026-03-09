@@ -30,7 +30,9 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [userId, setUserId] = useState("");
     const [serviceTypeId, setServiceTypeId] = useState("");
     const [requestedDate, setRequestedDate] = useState<Date | undefined>(undefined);
-    const [requestedTimeSlot, setRequestedTimeSlot] = useState("po_dogovoru");
+    const [scheduledTime, setScheduledTime] = useState("08:00");
+    const [durationMin, setDurationMin] = useState<string>("");
+    const [craneId, setCraneId] = useState("");
     const [userNote, setUserNote] = useState("");
     const [contactPhone, setContactPhone] = useState("");
 
@@ -47,6 +49,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         trpc.serviceType.list.useQuery({ onlyActive: true });
 
     const { data: usersList = [] } = trpc.user.list.useQuery();
+    const { data: cranes = [] } = trpc.crane.list.useQuery();
 
     // ── Mutation ─────────────────────────────────────────────────────────
     const createMutation = trpc.reservation.create.useMutation({
@@ -59,15 +62,24 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userId || !serviceTypeId || !requestedDate || !vesselType || !contactPhone) {
-            toast.error("Molimo popunite sva obavezna polja.");
+        if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType || !contactPhone) {
+            toast.error("Molimo popunite sva obavezna polja (uključujući vrijeme, dizalicu i trajanje).");
             return;
         }
+
+        const [hours, minutes] = scheduledTime.split(":").map(Number);
+        const scheduledStartDate = new Date(requestedDate);
+        scheduledStartDate.setHours(hours, minutes, 0, 0);
+
         createMutation.mutate({
             userId,
+            isAutoApprove: true,
+            craneId,
+            scheduledStart: scheduledStartDate,
+            durationMin: Number(durationMin),
             serviceTypeId,
             requestedDate: formatToSqlDate(requestedDate),
-            requestedTimeSlot: requestedTimeSlot as "jutro" | "poslijepodne" | "po_dogovoru",
+            requestedTimeSlot: "po_dogovoru",
             userNote: userNote || undefined,
             vesselType: vesselType as any,
             vesselRegistration: vesselRegistration || undefined,
@@ -108,7 +120,13 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                         </h3>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Tip operacije" : "Service type"} *</Label>
-                            <Select value={serviceTypeId} onValueChange={setServiceTypeId}>
+                            <Select value={serviceTypeId} onValueChange={(val) => {
+                                setServiceTypeId(val);
+                                const st = (serviceTypes as any[]).find((s: any) => s.id === val);
+                                if (st?.defaultDurationMin) {
+                                    setDurationMin(String(st.defaultDurationMin));
+                                }
+                            }}>
                                 <SelectTrigger>
                                     <SelectValue placeholder={
                                         serviceTypesLoading
@@ -127,24 +145,46 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                             </Select>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label>{lang === "hr" ? "Okvirni datum" : "Preferred date"} *</Label>
-                            <DatePicker
-                                date={requestedDate}
-                                onChange={setRequestedDate}
-                                placeholder={lang === "hr" ? "Odaberite datum" : "Select date"}
-                            />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Datum odobrenja" : "Approved Date"} *</Label>
+                                <DatePicker
+                                    date={requestedDate}
+                                    onChange={setRequestedDate}
+                                    placeholder={lang === "hr" ? "Datum" : "Date"}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Točno vrijeme" : "Exact Time"} *</Label>
+                                <Input
+                                    type="time"
+                                    value={scheduledTime}
+                                    onChange={(e) => setScheduledTime(e.target.value)}
+                                    required
+                                />
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <Label>{lang === "hr" ? "Dio dana" : "Time of day"}</Label>
-                            <Select value={requestedTimeSlot} onValueChange={setRequestedTimeSlot}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    {timeSlotOptions.map((opt) => (
-                                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Dizalica" : "Crane"} *</Label>
+                                <Select value={craneId} onValueChange={setCraneId}>
+                                    <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
+                                    <SelectContent>
+                                        {(cranes as any[]).filter((c: any) => c.status === "active").map((c: any) => (
+                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
+                                <Input
+                                    type="number"
+                                    value={durationMin}
+                                    onChange={(e) => setDurationMin(e.target.value)}
+                                    required
+                                />
+                            </div>
                         </div>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Napomena" : "Note"}</Label>
@@ -235,7 +275,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !userId || !serviceTypeId || !requestedDate || !vesselType || !contactPhone || !vesselRegistration}
+                    disabled={createMutation.isPending || !userId || !serviceTypeId || !requestedDate || !craneId || !scheduledTime || !durationMin || !vesselType || !contactPhone || !vesselRegistration}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (
