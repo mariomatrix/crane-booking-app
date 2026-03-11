@@ -25,6 +25,7 @@ import { useLang } from "@/contexts/LangContext";
 import { Users } from "lucide-react";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { useEffect } from "react";
+import { Footer } from "@/components/Footer";
 
 export default function Home() {
   const { t } = useLang();
@@ -168,6 +169,7 @@ export default function Home() {
 
       {/* Calendar Content */}
       <Calendar />
+      <Footer />
     </div>
   );
 }

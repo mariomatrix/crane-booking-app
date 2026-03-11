@@ -75,6 +75,7 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   sendUserInvitation,
+  sendNewMessageNotification,
 } from "./_core/email";
 import { notifyStatusChange, notifyWaitingList } from "./services/notifications";
 import { notifyOwner } from "./_core/notification";
@@ -1369,15 +1370,12 @@ export const appRouter = router({
             // Staff sent message → notify user
             const owner = await getUserById(reservation.userId);
             if (owner?.email) {
-              const { sendEmail } = await import("./_core/email");
-              await (sendEmail as any)({
+              const { sendNewMessageNotification } = await import("./_core/email");
+              await sendNewMessageNotification({
                 to: owner.email,
-                subject: `Nova poruka u vezi rezervacije — Marina Crane Booking`,
-                html: `<h2>Pozdrav, ${owner.name || owner.firstName || "Korisnik"}!</h2>
-                  <p>Imate novu poruku od osoblja marine u vezi vaše rezervacije <strong>${reservation.reservationNumber || ""}</strong>.</p>
-                  <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;">${input.body}</blockquote>
-                  <p>Prijavite se na platformu za odgovor.</p>
-                  <p style="color:#888;font-size:12px">Marina Crane Booking System</p>`,
+                userName: owner.name || owner.firstName || "Korisnik",
+                reservationNumber: reservation.reservationNumber || "",
+                messageBody: input.body,
               });
             }
           }

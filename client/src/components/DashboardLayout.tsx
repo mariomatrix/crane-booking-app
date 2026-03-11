@@ -44,6 +44,7 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
 import { Button } from "./ui/button";
+import { Footer } from "./Footer";
 import { LanguageSelector } from "./LanguageSelector";
 
 // menuItems moved inside component to support translations
@@ -315,7 +316,12 @@ function DashboardLayoutContent({
             </div>
           </div>
         )}
-        <main className="flex-1 p-4 lg:p-6">{children}</main>
+        <main className="flex-1 p-4 lg:p-6">
+          {children}
+          <div className="mt-8">
+            <Footer />
+          </div>
+        </main>
       </SidebarInset>
     </>
   );

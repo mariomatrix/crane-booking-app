@@ -36,6 +36,19 @@ export async function sendEmail(payload: EmailPayload) {
     }
 }
 
+const EMAIL_FOOTER = `<p style="color:#888;font-size:12px;margin-top:24px;">PŠD Špinut Crane Booking App</p>`;
+
+const CONTACT_BLOCK = `
+<div style="margin-top:24px;color:#555;font-size:14px;line-height:1.5;">
+  <strong>Pomorsko športsko društvo “Špinut”</strong><br/>
+  Lučica 7,  Split<br/>
+  Tel.: 021/ 386 813<br/>
+  Fax.: 021/ 323 002<br/>
+  mob. kapetan: 091/ 505 59 86<br/>
+  e-mail: <a href="mailto:lucica@psd-spinut.hr" style="color:#2563eb;text-decoration:none;">lucica@psd-spinut.hr</a>
+</div>
+`;
+
 export async function sendReservationConfirmation(opts: {
     to: string;
     userName: string;
@@ -81,14 +94,8 @@ export async function sendReservationConfirmation(opts: {
     </table>
     <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
     <p style="margin-top:24px">${isHr ? "Vidimo se!" : "See you there!"}</p>
-    <div style="margin-top:24px;color:#555;font-size:14px;line-height:1.5;">
-      <strong>Pomorsko športsko društvo “Špinut”</strong><br/>
-      Lučica 7, Split<br/>
-      Tel.: 021/ 386 813<br/>
-      mob. kapetan: 091/ 505 59 86<br/>
-      E-mail: psd-spinut@st.t-com.hr
-    </div>
-    <p style="color:#888;font-size:12px;margin-top:24px;">PŠD Špinut Crane Booking System</p>
+    ${CONTACT_BLOCK}
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -117,7 +124,8 @@ export async function sendReservationRejection(opts: {
       ${opts.reason ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Razlog" : "Reason"}:</td><td>${opts.reason}</td></tr>` : ""}
     </table>
     <p style="margin-top:16px">${isHr ? "Pokušajte s drugim terminom." : "Please try another time slot."}</p>
-    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
+    ${CONTACT_BLOCK}
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -141,7 +149,7 @@ export async function sendWaitingListNotification(opts: {
             : `A slot you were waiting for on <strong>${opts.craneName}</strong> on <strong>${opts.date}</strong> is now available.`
         }</p>
     <p>${isHr ? "Prijavite se i rezervirajte termin dok je dostupan." : "Log in and book the slot while it's available."}</p>
-    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -174,7 +182,7 @@ export async function sendPasswordResetEmail(opts: {
       </a>
     </div>
     <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 60 minuta." : "This link is valid for 60 minutes."}</p>
-    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -220,14 +228,8 @@ export async function sendReservationReceived(opts: {
     </table>
     <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
     <p style="margin-top:16px">${isHr ? "Obavijestit ćemo vas čim status vaše rezervacije bude promijenjen." : "We will notify you as soon as the status of your reservation is changed."}</p>
-    <div style="margin-top:24px;color:#555;font-size:14px;line-height:1.5;">
-      <strong>Pomorsko športsko društvo “Špinut”</strong><br/>
-      Lučica 7, Split<br/>
-      Tel.: 021/ 386 813<br/>
-      mob. kapetan: 091/ 505 59 86<br/>
-      E-mail: psd-spinut@st.t-com.hr
-    </div>
-    <p style="color:#888;font-size:12px;margin-top:24px;">PŠD Špinut Crane Booking System</p>
+    ${CONTACT_BLOCK}
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -256,7 +258,7 @@ export async function sendEmailVerification(opts: {
       </a>
     </div>
     <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 24 sata." : "This link is valid for 24 hours."}</p>
-    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -297,7 +299,35 @@ export async function sendUserInvitation(opts: {
         ${isHr ? "Prijavi se" : "Log In"}
       </a>
     </div>
-    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
+    ${EMAIL_FOOTER}
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
+
+export async function sendNewMessageNotification(opts: {
+    to: string;
+    userName: string;
+    reservationNumber: string;
+    messageBody: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? `Nova poruka u vezi rezervacije — Marina Crane Booking`
+        : `New message regarding reservation — Marina Crane Booking`;
+
+    const html = `
+        <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+        <p>${isHr
+            ? `Imate novu poruku od osoblja marine u vezi vaše rezervacije <strong>${opts.reservationNumber}</strong>.`
+            : `You have a new message from the marina staff regarding your reservation <strong>${opts.reservationNumber}</strong>.`
+        }</p>
+        <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;background-color:#f9fafb;">${opts.messageBody}</blockquote>
+        <p>${isHr ? "Prijavite se na platformu za odgovor." : "Please log in to the platform to respond."}</p>
+        ${CONTACT_BLOCK}
+        ${EMAIL_FOOTER}
+    `;
+    return sendEmail({ to: opts.to, subject, html });
+}
+
