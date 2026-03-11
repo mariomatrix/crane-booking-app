@@ -211,9 +211,9 @@ function DashboardLayoutContent({
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
               {!isCollapsed ? (
-                <div className="flex items-center gap-2 min-w-0 shrink">
-                  <img src="/logo.png" alt="Logo" className="h-6 w-auto object-contain max-w-[100px]" />
-                  <span className="font-semibold tracking-tight truncate hidden lg:inline">
+                <div className="flex flex-col min-w-0 shrink justify-center">
+                  <img src="/logo.png" alt="Logo" className="h-8 w-auto object-contain max-w-[120px]" />
+                  <span className="font-semibold text-xs text-muted-foreground tracking-tight truncate mt-1">
                     {t.nav.adminPanel}
                   </span>
                 </div>
