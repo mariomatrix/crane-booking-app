@@ -48,7 +48,7 @@ export default function Home() {
             className="flex items-center gap-2 cursor-pointer"
             onClick={() => setLocation("/")}
           >
-            <Construction className="h-6 w-6 text-primary" />
+            <img src="/logo.png" alt="PŠD Špinut Logo" className="h-8 w-auto object-contain max-w-[150px]" />
             <span className="font-semibold text-lg tracking-tight hidden sm:inline">
               Crane Booking
             </span>

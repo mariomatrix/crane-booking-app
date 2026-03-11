@@ -105,9 +105,7 @@ export default function AuthPage() {
             <Card className="w-full max-w-md">
                 <CardHeader className="text-center space-y-2">
                     <div className="flex items-center justify-center mb-2">
-                        <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                            <Anchor className="h-6 w-6 text-primary" />
-                        </div>
+                        <img src="/logo.png" alt="PŠD Špinut Logo" className="h-12 w-auto object-contain max-w-[200px]" />
                     </div>
                     <CardTitle>{getTitle()}</CardTitle>
                     <CardDescription>
