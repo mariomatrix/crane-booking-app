@@ -264,6 +264,8 @@ export default function AdminReservations() {
                       <div className="text-sm text-muted-foreground">
                         <span className="font-medium">Plovilo:</span>{" "}
                         {reservation.vesselRegistration} ({reservation.vesselType})
+                        {reservation.vesselLengthM ? ` — D: ${reservation.vesselLengthM} m` : ""}
+                        {reservation.vesselBeamM ? ` — Š: ${reservation.vesselBeamM} m` : ""}
                         {reservation.vesselWeightKg ? ` — ${(Number(reservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}
                       </div>
                     )}
@@ -404,7 +406,7 @@ export default function AdminReservations() {
           {selectedReservation && (
             <div className="rounded-md bg-muted p-3 text-sm space-y-1 mb-2">
               {selectedReservation.vesselRegistration && (
-                <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselRegistration} ({selectedReservation.vesselType}){selectedReservation.vesselWeightKg ? ` — ${(Number(selectedReservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}</div>
+                <div><span className="font-medium">Plovilo:</span> {selectedReservation.vesselRegistration} ({selectedReservation.vesselType}){selectedReservation.vesselLengthM ? ` — D: ${selectedReservation.vesselLengthM} m` : ""}{selectedReservation.vesselBeamM ? ` — Š: ${selectedReservation.vesselBeamM} m` : ""}{selectedReservation.vesselWeightKg ? ` — ${(Number(selectedReservation.vesselWeightKg) / 1000).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t` : ""}</div>
               )}
               {selectedReservation.requestedDate && (
                 <div>

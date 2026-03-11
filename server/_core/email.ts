@@ -73,14 +73,22 @@ export async function sendReservationConfirmation(opts: {
       <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
       ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
       ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
-      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${opts.vesselWeightKg}kg</td></tr>` : ""}
+      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${(Number(opts.vesselWeightKg) / 1000).toLocaleString(isHr ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
       
       ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Vaša napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
       
       ${opts.adminNotes ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Napomena administratora" : "Admin Note"}</td></tr><tr><td colspan="2" style="padding:4px 0;color:#2563eb">${opts.adminNotes}</td></tr>` : ""}
     </table>
+    <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
     <p style="margin-top:24px">${isHr ? "Vidimo se!" : "See you there!"}</p>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <div style="margin-top:24px;color:#555;font-size:14px;line-height:1.5;">
+      <strong>Pomorsko športsko društvo “Špinut”</strong><br/>
+      Lučica 7, Split<br/>
+      Tel.: 021/ 386 813<br/>
+      mob. kapetan: 091/ 505 59 86<br/>
+      E-mail: psd-spinut@st.t-com.hr
+    </div>
+    <p style="color:#888;font-size:12px;margin-top:24px;">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -109,7 +117,7 @@ export async function sendReservationRejection(opts: {
       ${opts.reason ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Razlog" : "Reason"}:</td><td>${opts.reason}</td></tr>` : ""}
     </table>
     <p style="margin-top:16px">${isHr ? "Pokušajte s drugim terminom." : "Please try another time slot."}</p>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -133,7 +141,7 @@ export async function sendWaitingListNotification(opts: {
             : `A slot you were waiting for on <strong>${opts.craneName}</strong> on <strong>${opts.date}</strong> is now available.`
         }</p>
     <p>${isHr ? "Prijavite se i rezervirajte termin dok je dostupan." : "Log in and book the slot while it's available."}</p>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -166,7 +174,7 @@ export async function sendPasswordResetEmail(opts: {
       </a>
     </div>
     <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 60 minuta." : "This link is valid for 60 minutes."}</p>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -204,14 +212,22 @@ export async function sendReservationReceived(opts: {
       <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
       ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
       ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
-      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${opts.vesselWeightKg}kg</td></tr>` : ""}
+      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${(Number(opts.vesselWeightKg) / 1000).toLocaleString(isHr ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
       
       ${opts.contactPhone ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Kontakt telefon" : "Contact Phone"}:</td><td>${opts.contactPhone}</td></tr>` : ""}
       
       ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Vaša napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
     </table>
+    <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
     <p style="margin-top:16px">${isHr ? "Obavijestit ćemo vas čim status vaše rezervacije bude promijenjen." : "We will notify you as soon as the status of your reservation is changed."}</p>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <div style="margin-top:24px;color:#555;font-size:14px;line-height:1.5;">
+      <strong>Pomorsko športsko društvo “Špinut”</strong><br/>
+      Lučica 7, Split<br/>
+      Tel.: 021/ 386 813<br/>
+      mob. kapetan: 091/ 505 59 86<br/>
+      E-mail: psd-spinut@st.t-com.hr
+    </div>
+    <p style="color:#888;font-size:12px;margin-top:24px;">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -240,7 +256,7 @@ export async function sendEmailVerification(opts: {
       </a>
     </div>
     <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 24 sata." : "This link is valid for 24 hours."}</p>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
@@ -281,7 +297,7 @@ export async function sendUserInvitation(opts: {
         ${isHr ? "Prijavi se" : "Log In"}
       </a>
     </div>
-    <p style="color:#888;font-size:12px">Marina Crane Booking System</p>
+    <p style="color:#888;font-size:12px">PŠD Špinut Crane Booking System</p>
   `;
     return sendEmail({ to: opts.to, subject, html });
 }
