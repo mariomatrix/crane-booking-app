@@ -211,7 +211,7 @@ export const appRouter = router({
         // Send verification email
         const verifyToken = await createEmailVerificationToken(String(userId));
         const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
-        const verifyUrl = `${baseUrl}/auth/verify-email?token=${verifyToken}`;
+        const verifyUrl = `${baseUrl}/auth?verifyToken=${verifyToken}`;
         sendEmailVerification({
           to: input.email,
           userName: input.firstName,
@@ -292,7 +292,7 @@ export const appRouter = router({
           expiresAt,
         });
 
-        const resetUrl = `${process.env.PUBLIC_URL || "http://localhost:5173"}/auth/reset-password?token=${token}`;
+        const resetUrl = `${process.env.PUBLIC_URL || "http://localhost:5173"}/auth?token=${token}`;
         await sendPasswordResetEmail({
           to: user.email!,
           userName: user.name || user.firstName || "Korisnik",
@@ -345,7 +345,7 @@ export const appRouter = router({
         }
         const verifyToken = await createEmailVerificationToken(ctx.user.id);
         const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
-        const verifyUrl = `${baseUrl}/auth/verify-email?token=${verifyToken}`;
+        const verifyUrl = `${baseUrl}/auth?verifyToken=${verifyToken}`;
         await sendEmailVerification({
           to: ctx.user.email,
           userName: ctx.user.name || ctx.user.firstName || "Korisnik",
@@ -459,7 +459,7 @@ export const appRouter = router({
 
         // Send invitation email
         const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
-        const loginUrl = `${baseUrl}/auth/login`;
+        const loginUrl = `${baseUrl}/auth`;
 
         const emailSent = await sendUserInvitation({
           to: input.email,

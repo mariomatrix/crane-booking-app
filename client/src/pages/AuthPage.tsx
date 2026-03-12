@@ -9,7 +9,7 @@ import { Anchor, Loader2, ArrowLeft } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 
-type AuthMode = "login" | "register" | "forgotPassword" | "resetPassword";
+type AuthMode = "login" | "register" | "forgotPassword" | "resetPassword" | "verifyEmail";
 
 export default function AuthPage() {
     const { t } = useLang();
@@ -24,16 +24,32 @@ export default function AuthPage() {
     const [username, setUsername] = useState("");
     const [phone, setPhone] = useState("");
     const [token, setToken] = useState("");
+    const [verifyToken, setVerifyToken] = useState("");
     const [privacyAccepted, setPrivacyAccepted] = useState(false);
+
+    const verifyEmailMutation = trpc.auth.verifyEmail.useMutation({
+        onSuccess: () => {
+            toast.success("Email je uspješno potvrđen. Sada se možete prijaviti.");
+            setMode("login");
+            window.history.replaceState({}, document.title, window.location.pathname);
+        },
+        onError: (err) => toast.error(err.message),
+    });
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const tkn = params.get("token");
+        const vTkn = params.get("verifyToken");
+
         if (tkn) {
             setToken(tkn);
             setMode("resetPassword");
+        } else if (vTkn) {
+            setVerifyToken(vTkn);
+            setMode("verifyEmail");
+            verifyEmailMutation.mutate({ token: vTkn });
         }
-    }, []);
+    }, [verifyEmailMutation.mutate]);
 
     const loginMutation = trpc.auth.login.useMutation({
         onSuccess: () => { window.location.href = "/"; },
@@ -41,7 +57,10 @@ export default function AuthPage() {
     });
 
     const registerMutation = trpc.auth.register.useMutation({
-        onSuccess: () => { window.location.href = "/"; },
+        onSuccess: () => {
+            toast.success("Registracija uspješna. Molimo potvrdite email.");
+            window.location.href = "/";
+        },
         onError: (err) => toast.error(err.message),
     });
 
@@ -63,7 +82,7 @@ export default function AuthPage() {
         onError: (err) => toast.error(err.message),
     });
 
-    const isPending = loginMutation.isPending || registerMutation.isPending || forgotPasswordMutation.isPending || resetPasswordMutation.isPending;
+    const isPending = loginMutation.isPending || registerMutation.isPending || forgotPasswordMutation.isPending || resetPasswordMutation.isPending || verifyEmailMutation.isPending;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -97,6 +116,7 @@ export default function AuthPage() {
         if (mode === "login") return t.auth.login;
         if (mode === "register") return t.auth.register;
         if (mode === "forgotPassword") return (t.auth as any).forgotPasswordTitle;
+        if (mode === "verifyEmail") return "Potvrda email adrese";
         return (t.auth as any).resetPasswordTitle;
     };
 
@@ -111,97 +131,112 @@ export default function AuthPage() {
                     <CardDescription>
                         {mode === "forgotPassword"
                             ? (t.auth as any).forgotPasswordSubtitle
-                            : "Marina Crane Booking"}
+                            : mode === "verifyEmail"
+                                ? "Molimo pričekajte dok potvrdimo vašu email adresu..."
+                                : "Marina Crane Booking"}
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        {mode === "register" && (
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>{t.auth.firstName} *</Label>
-                                    <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+                    {mode === "verifyEmail" ? (
+                        <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                            {verifyEmailMutation.isPending ? (
+                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            ) : verifyEmailMutation.isError ? (
+                                <div className="text-destructive text-center">
+                                    <p>Došlo je do pogreške prilikom potvrde emaila.</p>
+                                    <Button variant="link" onClick={() => setMode("login")}>Povratak na prijavu</Button>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>{t.auth.lastName} *</Label>
-                                    <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+                            ) : null}
+                        </div>
+                    ) : (
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {mode === "register" && (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.firstName} *</Label>
+                                        <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.lastName} *</Label>
+                                        <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+                                    </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
 
-                        {(mode === "login" || mode === "register" || mode === "forgotPassword") && (
-                            <div className="space-y-2">
-                                <Label>{t.auth.email} *</Label>
-                                <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
-                            </div>
-                        )}
-
-                        {(mode === "login" || mode === "register" || mode === "resetPassword") && (
-                            <div className="space-y-2">
-                                <Label>{mode === "resetPassword" ? "Nova lozinka" : t.auth.password + " *"}</Label>
-                                <Input
-                                    type="password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    required
-                                    minLength={8}
-                                    autoComplete={mode === "login" ? "current-password" : "new-password"}
-                                />
-                            </div>
-                        )}
-
-                        {mode === "resetPassword" && (
-                            <div className="space-y-2">
-                                <Label>Potvrdi novu lozinku *</Label>
-                                <Input
-                                    type="password"
-                                    value={confirmPassword}
-                                    onChange={(e) => setConfirmPassword(e.target.value)}
-                                    required
-                                    minLength={8}
-                                />
-                            </div>
-                        )}
-
-                        {mode === "register" && (
-                            <>
+                            {(mode === "login" || mode === "register" || mode === "forgotPassword") && (
                                 <div className="space-y-2">
-                                    <Label>{t.auth.username}</Label>
-                                    <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="npr. mario123" />
+                                    <Label>{t.auth.email} *</Label>
+                                    <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
                                 </div>
+                            )}
+
+                            {(mode === "login" || mode === "register" || mode === "resetPassword") && (
                                 <div className="space-y-2">
-                                    <Label>{t.auth.phone} *</Label>
-                                    <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
-                                </div>
-                                <div className="flex items-center space-x-2 mt-4 text-sm">
+                                    <Label>{mode === "resetPassword" ? "Nova lozinka" : t.auth.password + " *"}</Label>
                                     <Input
-                                        type="checkbox"
-                                        id="privacy-policy"
-                                        className="w-4 h-4 cursor-pointer"
-                                        checked={privacyAccepted}
-                                        onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
                                         required
+                                        minLength={8}
+                                        autoComplete={mode === "login" ? "current-password" : "new-password"}
                                     />
-                                    <Label htmlFor="privacy-policy" className="cursor-pointer text-muted-foreground font-normal">
-                                        {(t.auth as any).privacyLabel}
-                                        <a href="/privacy" target="_blank" className="text-primary hover:underline">
-                                            {(t.auth as any).privacyLink}
-                                        </a> *
-                                    </Label>
                                 </div>
-                            </>
-                        )}
+                            )}
 
-                        <Button type="submit" className="w-full" disabled={isPending}>
-                            {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                            {mode === "login" && t.auth.loginButton}
-                            {mode === "register" && t.auth.registerButton}
-                            {mode === "forgotPassword" && (t.auth as any).sendResetLink}
-                            {mode === "resetPassword" && (t.auth as any).setNewPassword}
-                        </Button>
-                    </form>
+                            {mode === "resetPassword" && (
+                                <div className="space-y-2">
+                                    <Label>Potvrdi novu lozinku *</Label>
+                                    <Input
+                                        type="password"
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        required
+                                        minLength={8}
+                                    />
+                                </div>
+                            )}
 
-                    {(mode === "login" || mode === "register") && (
+                            {mode === "register" && (
+                                <>
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.username}</Label>
+                                        <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="npr. mario123" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.phone} *</Label>
+                                        <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
+                                    </div>
+                                    <div className="flex items-center space-x-2 mt-4 text-sm">
+                                        <Input
+                                            type="checkbox"
+                                            id="privacy-policy"
+                                            className="w-4 h-4 cursor-pointer"
+                                            checked={privacyAccepted}
+                                            onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                                            required
+                                        />
+                                        <Label htmlFor="privacy-policy" className="cursor-pointer text-muted-foreground font-normal">
+                                            {(t.auth as any).privacyLabel}
+                                            <a href="/privacy" target="_blank" className="text-primary hover:underline">
+                                                {(t.auth as any).privacyLink}
+                                            </a> *
+                                        </Label>
+                                    </div>
+                                </>
+                            )}
+
+                            <Button type="submit" className="w-full" disabled={isPending}>
+                                {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                {mode === "login" && t.auth.loginButton}
+                                {mode === "register" && t.auth.registerButton}
+                                {mode === "forgotPassword" && (t.auth as any).sendResetLink}
+                                {mode === "resetPassword" && (t.auth as any).setNewPassword}
+                            </Button>
+                        </form>
+                    )}
+
+                    {mode !== "verifyEmail" && (mode === "login" || mode === "register") && (
                         <>
                             <div className="relative my-4">
                                 <div className="absolute inset-0 flex items-center">
@@ -227,38 +262,40 @@ export default function AuthPage() {
                         </>
                     )}
 
-                    <div className="mt-4 flex flex-col items-center gap-2">
-                        {mode === "login" && (
+                    {mode !== "verifyEmail" && (
+                        <div className="mt-4 flex flex-col items-center gap-2">
+                            {mode === "login" && (
+                                <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="px-0 h-auto"
+                                    onClick={() => setMode("forgotPassword")}
+                                >
+                                    {(t.auth as any).forgotPassword}
+                                </Button>
+                            )}
+
+                            {mode === "forgotPassword" && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="flex items-center gap-2"
+                                    onClick={() => setMode("login")}
+                                >
+                                    <ArrowLeft className="h-4 w-4" />
+                                    {(t.auth as any).backToLogin}
+                                </Button>
+                            )}
+
                             <Button
                                 variant="link"
-                                size="sm"
-                                className="px-0 h-auto"
-                                onClick={() => setMode("forgotPassword")}
+                                className="text-sm"
+                                onClick={() => setMode(mode === "login" ? "register" : "login")}
                             >
-                                {(t.auth as any).forgotPassword}
+                                {mode === "login" ? t.auth.switchToRegister : t.auth.switchToLogin}
                             </Button>
-                        )}
-
-                        {mode === "forgotPassword" && (
-                            <Button
-                                variant="ghost"
-                                size="sm"
-                                className="flex items-center gap-2"
-                                onClick={() => setMode("login")}
-                            >
-                                <ArrowLeft className="h-4 w-4" />
-                                {(t.auth as any).backToLogin}
-                            </Button>
-                        )}
-
-                        <Button
-                            variant="link"
-                            className="text-sm"
-                            onClick={() => setMode(mode === "login" ? "register" : "login")}
-                        >
-                            {mode === "login" ? t.auth.switchToRegister : t.auth.switchToLogin}
-                        </Button>
-                    </div>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
         </div>

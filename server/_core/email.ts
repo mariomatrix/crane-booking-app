@@ -36,10 +36,13 @@ export async function sendEmail(payload: EmailPayload) {
     }
 }
 
+const BASE_URL = process.env.PUBLIC_URL || "http://localhost:5173";
+const LOGO_URL = `${BASE_URL}/logo.png`;
+
 const EMAIL_FOOTER = `<p style="color:#888;font-size:12px;margin-top:24px;">PŠD Špinut Crane Booking App</p>`;
 
 const CONTACT_BLOCK = `
-<div style="margin-top:24px;color:#555;font-size:14px;line-height:1.5;">
+<div style="margin-top:24px;border-top:1px solid #eee;padding-top:16px;color:#555;font-size:14px;line-height:1.5;">
   <strong>Pomorsko športsko društvo “Špinut”</strong><br/>
   Lučica 7,  Split<br/>
   Tel.: 021/ 386 813<br/>
@@ -48,6 +51,39 @@ const CONTACT_BLOCK = `
   e-mail: <a href="mailto:lucica@psd-spinut.hr" style="color:#2563eb;text-decoration:none;">lucica@psd-spinut.hr</a>
 </div>
 `;
+
+function getHtmlWrapper(content: string) {
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: sans-serif; line-height: 1.5; color: #333; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { text-align: center; margin-bottom: 30px; }
+    .logo { max-width: 150px; height: auto; }
+    .content { background: #fff; }
+    .footer { margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="${LOGO_URL}" alt="PŠD Špinut Logo" class="logo">
+    </div>
+    <div class="content">
+      ${content}
+    </div>
+    <div class="footer">
+      ${CONTACT_BLOCK}
+      ${EMAIL_FOOTER}
+    </div>
+  </div>
+</body>
+</html>
+`;
+}
 
 export async function sendReservationConfirmation(opts: {
     to: string;
@@ -71,7 +107,7 @@ export async function sendReservationConfirmation(opts: {
     const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
     const endStr = opts.endDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
 
-    const html = `
+    const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
     <p>${isHr
             ? "Vaša rezervacija je potvrđena. Molimo Vas da se pojavite u lučici na vrijeme."
@@ -92,12 +128,9 @@ export async function sendReservationConfirmation(opts: {
       
       ${opts.adminNotes ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Napomena administratora" : "Admin Note"}</td></tr><tr><td colspan="2" style="padding:4px 0;color:#2563eb">${opts.adminNotes}</td></tr>` : ""}
     </table>
-    <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
     <p style="margin-top:24px">${isHr ? "Vidimo se!" : "See you there!"}</p>
-    ${CONTACT_BLOCK}
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendReservationRejection(opts: {
@@ -115,7 +148,7 @@ export async function sendReservationRejection(opts: {
         : `Reservation Rejected — ${opts.craneName}`;
     const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
 
-    const html = `
+    const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
     <p>${isHr ? "Nažalost, vaša rezervacija je odbijena." : "Unfortunately, your reservation has been rejected."}</p>
     <table style="border-collapse:collapse;font-family:sans-serif">
@@ -124,10 +157,8 @@ export async function sendReservationRejection(opts: {
       ${opts.reason ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Razlog" : "Reason"}:</td><td>${opts.reason}</td></tr>` : ""}
     </table>
     <p style="margin-top:16px">${isHr ? "Pokušajte s drugim terminom." : "Please try another time slot."}</p>
-    ${CONTACT_BLOCK}
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendWaitingListNotification(opts: {
@@ -142,16 +173,15 @@ export async function sendWaitingListNotification(opts: {
     const subject = isHr
         ? `Termin dostupan — ${opts.craneName}`
         : `Slot Available — ${opts.craneName}`;
-    const html = `
+    const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
     <p>${isHr
             ? `Termin koji ste čekali za <strong>${opts.craneName}</strong> na dan <strong>${opts.date}</strong> je sada dostupan.`
             : `A slot you were waiting for on <strong>${opts.craneName}</strong> on <strong>${opts.date}</strong> is now available.`
         }</p>
     <p>${isHr ? "Prijavite se i rezervirajte termin dok je dostupan." : "Log in and book the slot while it's available."}</p>
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendPasswordResetEmail(opts: {
@@ -166,7 +196,7 @@ export async function sendPasswordResetEmail(opts: {
         ? "Resetiranje lozinke — Marina Crane Booking"
         : "Reset your password — Marina Crane Booking";
 
-    const html = `
+    const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
     <p>${isHr
             ? "Primili smo zahtjev za resetiranje vaše lozinke. Ako niste zatražili ovu promjenu, možete slobodno ignorirati ovaj email."
@@ -182,9 +212,8 @@ export async function sendPasswordResetEmail(opts: {
       </a>
     </div>
     <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 60 minuta." : "This link is valid for 60 minutes."}</p>
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendReservationReceived(opts: {
@@ -206,7 +235,7 @@ export async function sendReservationReceived(opts: {
         ? `Zahtjev zaprimljen — ${opts.reservationNumber}`
         : `Request Received — ${opts.reservationNumber}`;
 
-    const html = `
+    const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
     <p>${isHr
             ? "Vaš zahtjev za rezervaciju je uspješno zaprimljen i trenutno čeka na odobrenje administratora."
@@ -228,10 +257,8 @@ export async function sendReservationReceived(opts: {
     </table>
     <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
     <p style="margin-top:16px">${isHr ? "Obavijestit ćemo vas čim status vaše rezervacije bude promijenjen." : "We will notify you as soon as the status of your reservation is changed."}</p>
-    ${CONTACT_BLOCK}
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendEmailVerification(opts: {
@@ -246,7 +273,7 @@ export async function sendEmailVerification(opts: {
         ? "Potvrdite email adresu — Marina Crane Booking"
         : "Verify your email — Marina Crane Booking";
 
-    const html = `
+    const content = `
     <h2>${isHr ? "Dobrodošli" : "Welcome"}, ${opts.userName}!</h2>
     <p>${isHr
             ? "Hvala na registraciji. Molimo potvrdite svoju email adresu klikom na gumb ispod:"
@@ -258,9 +285,8 @@ export async function sendEmailVerification(opts: {
       </a>
     </div>
     <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 24 sata." : "This link is valid for 24 hours."}</p>
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendUserInvitation(opts: {
@@ -276,7 +302,7 @@ export async function sendUserInvitation(opts: {
         ? "Vaš korisnički račun je kreiran — Marina Crane Booking"
         : "Your account has been created — Marina Crane Booking";
 
-    const html = `
+    const content = `
     <h2>${isHr ? "Dobrodošli" : "Welcome"}, ${opts.userName}!</h2>
     <p>${isHr
             ? "Administrator je kreirao vaš korisnički račun za sustav rezervacije dizalice."
@@ -299,9 +325,8 @@ export async function sendUserInvitation(opts: {
         ${isHr ? "Prijavi se" : "Log In"}
       </a>
     </div>
-    ${EMAIL_FOOTER}
   `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
 export async function sendNewMessageNotification(opts: {
@@ -317,7 +342,7 @@ export async function sendNewMessageNotification(opts: {
         ? `Nova poruka u vezi rezervacije — Marina Crane Booking`
         : `New message regarding reservation — Marina Crane Booking`;
 
-    const html = `
+    const content = `
         <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
         <p>${isHr
             ? `Imate novu poruku od osoblja marine u vezi vaše rezervacije <strong>${opts.reservationNumber}</strong>.`
@@ -325,9 +350,7 @@ export async function sendNewMessageNotification(opts: {
         }</p>
         <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;background-color:#f9fafb;">${opts.messageBody}</blockquote>
         <p>${isHr ? "Prijavite se na platformu za odgovor." : "Please log in to the platform to respond."}</p>
-        ${CONTACT_BLOCK}
-        ${EMAIL_FOOTER}
     `;
-    return sendEmail({ to: opts.to, subject, html });
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
