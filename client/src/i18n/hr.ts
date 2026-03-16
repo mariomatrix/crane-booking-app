@@ -72,7 +72,7 @@ export const hr = {
         noSlotsAvailable: "Nema slobodnih termina za odabrani datum i trajanje.",
         errors: {
             required: "Ovo polje je obavezno.",
-            weightExceeded: "Težina plovila premašuje kapacitet dizalice.",
+            weightExceeded: "Težina plovila premašuje kapacitet dizalice (kN).",
             widthExceeded: "Širina plovila premašuje širinu bazena.",
             pastDate: "Datum mora biti u budućnosti.",
             workingHours: "Termin mora biti unutar radnog vremena.",
@@ -140,7 +140,7 @@ export const hr = {
         addCrane: "Dodaj dizalicu",
         editCrane: "Uredi dizalicu",
         craneName: "Naziv dizalice",
-        craneCapacity: "Kapacitet (t)",
+        craneCapacity: "Kapacitet (kN)",
         cranePoolWidth: "Širina bazena (m)",
         craneLocation: "Lokacija/Bazen",
         craneDescription: "Opis",

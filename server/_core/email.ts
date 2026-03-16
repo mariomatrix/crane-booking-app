@@ -95,7 +95,7 @@ export async function sendReservationConfirmation(opts: {
     adminNotes?: string;
     vesselRegistration?: string;
     vesselType?: string;
-    vesselWeightKg?: number | string;
+    vesselWeightTons?: number | string;
     userNote?: string;
     lang?: "hr" | "en";
 }) {
@@ -122,7 +122,7 @@ export async function sendReservationConfirmation(opts: {
       <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
       ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
       ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
-      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${(Number(opts.vesselWeightKg) / 1000).toLocaleString(isHr ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
+      ${opts.vesselWeightTons ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${(Number(opts.vesselWeightTons) ).toLocaleString(isHr ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
       
       ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Vaša napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
       
@@ -225,7 +225,7 @@ export async function sendReservationReceived(opts: {
     lang?: "hr" | "en";
     vesselRegistration?: string;
     vesselType?: string;
-    vesselWeightKg?: number | string;
+    vesselWeightTons?: number | string;
     userNote?: string;
     contactPhone?: string;
 }) {
@@ -249,7 +249,7 @@ export async function sendReservationReceived(opts: {
       <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
       ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
       ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
-      ${opts.vesselWeightKg ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${(Number(opts.vesselWeightKg) / 1000).toLocaleString(isHr ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
+      ${opts.vesselWeightTons ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Težina" : "Weight"}:</td><td>${(Number(opts.vesselWeightTons) ).toLocaleString(isHr ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
       
       ${opts.contactPhone ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Kontakt telefon" : "Contact Phone"}:</td><td>${opts.contactPhone}</td></tr>` : ""}
       

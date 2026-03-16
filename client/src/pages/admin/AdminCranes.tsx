@@ -38,7 +38,7 @@ import { useLang } from "@/contexts/LangContext";
 
 type CraneForm = {
   name: string;
-  maxCapacityKg: string;
+  maxCapacityKN: string;
   maxPoolWidth: string;
   description: string;
   location: string;
@@ -46,7 +46,7 @@ type CraneForm = {
 
 const emptyForm: CraneForm = {
   name: "",
-  maxCapacityKg: "",
+  maxCapacityKN: "",
   maxPoolWidth: "",
   description: "",
   location: "",
@@ -97,7 +97,7 @@ export default function AdminCranes() {
     setEditingId(crane.id);
     setForm({
       name: crane.name,
-      maxCapacityKg: String(crane.maxCapacityKg),
+      maxCapacityKN: String(crane.maxCapacityKN),
       maxPoolWidth: crane.maxPoolWidth ?? "",
       description: crane.description ?? "",
       location: crane.location ?? "",
@@ -107,7 +107,7 @@ export default function AdminCranes() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.name || !form.maxCapacityKg) {
+    if (!form.name || !form.maxCapacityKN) {
       toast.error("Naziv i kapacitet su obavezni.");
       return;
     }
@@ -115,7 +115,7 @@ export default function AdminCranes() {
       updateMutation.mutate({
         id: editingId,
         name: form.name,
-        maxCapacityKg: Number(form.maxCapacityKg),
+        maxCapacityKN: Number(form.maxCapacityKN),
         maxPoolWidth: form.maxPoolWidth || undefined,
         description: form.description || undefined,
         location: form.location || undefined,
@@ -123,7 +123,7 @@ export default function AdminCranes() {
     } else {
       createMutation.mutate({
         name: form.name,
-        maxCapacityKg: Number(form.maxCapacityKg),
+        maxCapacityKN: Number(form.maxCapacityKN),
         maxPoolWidth: form.maxPoolWidth || undefined,
         description: form.description || undefined,
         location: form.location || undefined,
@@ -182,8 +182,7 @@ export default function AdminCranes() {
                       ) : null}
                     </div>
                     <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                      <Weight className="h-3.5 w-3.5" />
-                      Max {crane.maxCapacityKg} t
+                      Max {crane.maxCapacityKN} kN
                       {crane.maxPoolWidth && (
                         <span className="ml-3">Bazen: {crane.maxPoolWidth} m</span>
                       )}
@@ -252,19 +251,19 @@ export default function AdminCranes() {
               <Input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="npr. Dizalica A - Travel Lift 50t"
+                placeholder="npr. Dizalica A - Travel Lift 500kN"
                 required
               />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>{t.admin.craneCapacity} (t) *</Label>
+                <Label>{t.admin.craneCapacity} *</Label>
                 <Input
                   type="number"
-                  step="0.5"
-                  value={form.maxCapacityKg}
-                  onChange={(e) => setForm({ ...form, maxCapacityKg: e.target.value })}
-                  placeholder="npr. 50000"
+                  step="1"
+                  value={form.maxCapacityKN}
+                  onChange={(e) => setForm({ ...form, maxCapacityKN: e.target.value })}
+                  placeholder="npr. 500"
                   required
                 />
               </div>

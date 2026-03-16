@@ -378,7 +378,7 @@ export const appRouter = router({
         lengthM: z.number().positive().optional(),
         beamM: z.number().positive().optional(),
         draftM: z.number().positive().optional(),
-        weightKg: z.number().positive().optional(),
+        weightTons: z.number().positive().optional(),
         registration: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }: any) => {
@@ -398,7 +398,7 @@ export const appRouter = router({
         lengthM: z.number().positive().optional(),
         beamM: z.number().positive().optional(),
         draftM: z.number().positive().optional(),
-        weightKg: z.number().positive().optional(),
+        weightTons: z.number().positive().optional(),
         registration: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }: any) => {
@@ -691,7 +691,7 @@ export const appRouter = router({
             durationMin: reservations.durationMin,
             vesselName: reservations.vesselName,
             vesselType: reservations.vesselType,
-            vesselWeightKg: reservations.vesselWeightKg,
+            vesselWeightTons: reservations.vesselWeightTons,
             userNote: reservations.userNote,
             adminNote: reservations.adminNote,
             craneId: reservations.craneId,
@@ -754,7 +754,7 @@ export const appRouter = router({
       .input(z.object({
         name: z.string().min(1).max(255),
         type: z.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
-        maxCapacityKg: z.number().positive(),
+        maxCapacityKN: z.number().positive(),
         maxPoolWidth: z.string().optional(),
         description: z.string().optional(),
         location: z.string().optional(),
@@ -770,7 +770,7 @@ export const appRouter = router({
         id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
         type: z.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
-        maxCapacityKg: z.number().positive().optional(),
+        maxCapacityKN: z.number().positive().optional(),
         maxPoolWidth: z.string().optional(),
         description: z.string().optional(),
         location: z.string().optional(),
@@ -814,7 +814,7 @@ export const appRouter = router({
         vesselLengthM: z.number().positive().optional(),
         vesselBeamM: z.number().positive().optional(),
         vesselDraftM: z.number().positive().optional(),
-        vesselWeightKg: z.number().nonnegative().optional(),
+        vesselWeightTons: z.number().nonnegative().optional(),
         // Contact
         contactPhone: z.string().min(6),
       }))
@@ -867,7 +867,7 @@ export const appRouter = router({
           vesselLengthM: input.vesselLengthM ? String(input.vesselLengthM) : undefined,
           vesselBeamM: input.vesselBeamM ? String(input.vesselBeamM) : undefined,
           vesselDraftM: input.vesselDraftM ? String(input.vesselDraftM) : undefined,
-          vesselWeightKg: input.vesselWeightKg ?? 0,
+          vesselWeightTons: input.vesselWeightTons ?? 0,
           contactPhone: input.contactPhone,
           liftPurpose: null,  // v2: no liftPurpose, use userNote
         };
@@ -882,7 +882,7 @@ export const appRouter = router({
               vesselLengthM: vessel.lengthM ?? undefined,
               vesselBeamM: vessel.beamM ?? undefined,
               vesselDraftM: vessel.draftM ?? undefined,
-              vesselWeightKg: vessel.weightKg ?? 0,
+              vesselWeightTons: vessel.weightTons ?? 0,
               contactPhone: input.contactPhone,
               liftPurpose: null,
             };
@@ -925,10 +925,10 @@ export const appRouter = router({
 
           finalScheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
 
-          if (vesselSnapshot.vesselWeightKg && Number(vesselSnapshot.vesselWeightKg) > autoApproveCrane.maxCapacityKg) {
+          if (vesselSnapshot.vesselWeightTons && (Number(vesselSnapshot.vesselWeightTons) * 10) > Number(autoApproveCrane.maxCapacityKN)) {
             throw new TRPCError({
               code: "BAD_REQUEST",
-              message: `Težina plovila (${vesselSnapshot.vesselWeightKg}kg) prelazi kapacitet dizalice (${autoApproveCrane.maxCapacityKg}kg).`,
+              message: `Težina plovila (${vesselSnapshot.vesselWeightTons} t) prelazi kapacitet dizalice (${autoApproveCrane.maxCapacityKN} kN).`,
             });
           }
 
@@ -963,7 +963,7 @@ export const appRouter = router({
           vesselLengthM: vesselSnapshot.vesselLengthM,
           vesselBeamM: vesselSnapshot.vesselBeamM,
           vesselDraftM: vesselSnapshot.vesselDraftM,
-          vesselWeightKg: vesselSnapshot.vesselWeightKg,
+          vesselWeightTons: vesselSnapshot.vesselWeightTons,
           contactPhone: input.contactPhone,
           userNote: input.userNote,
         }).returning({ id: resTable.id });
@@ -992,7 +992,7 @@ export const appRouter = router({
             craneLocation: autoApproveCrane.location || autoApproveCrane.name,
             vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
             vesselType: vesselSnapshot.vesselType || undefined,
-            vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
+            vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
             userNote: input.userNote || undefined,
           }).catch(console.warn);
         } else {
@@ -1003,7 +1003,7 @@ export const appRouter = router({
             requestedDate: input.requestedDate,
             vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
             vesselType: vesselSnapshot.vesselType || undefined,
-            vesselWeightKg: vesselSnapshot.vesselWeightKg || undefined,
+            vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
             contactPhone: input.contactPhone,
             userNote: input.userNote || undefined,
             lang: "hr"
@@ -1134,10 +1134,10 @@ export const appRouter = router({
         const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
 
         // Validate weight vs crane capacity
-        if (reservation.vesselWeightKg && Number(reservation.vesselWeightKg) > crane.maxCapacityKg) {
+        if (reservation.vesselWeightTons && (Number(reservation.vesselWeightTons) * 10) > Number(crane.maxCapacityKN)) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Težina plovila (${reservation.vesselWeightKg}kg) prelazi kapacitet dizalice (${crane.maxCapacityKg}kg).`,
+            message: `Težina plovila (${reservation.vesselWeightTons} t) prelazi kapacitet dizalice (${crane.maxCapacityKN} kN).`,
           });
         }
 
@@ -1176,7 +1176,7 @@ export const appRouter = router({
             adminNotes: input.adminNote,
             vesselRegistration: reservation.vesselRegistration || undefined,
             vesselType: reservation.vesselType || undefined,
-            vesselWeightKg: reservation.vesselWeightKg || undefined,
+            vesselWeightTons: reservation.vesselWeightTons || undefined,
             userNote: reservation.userNote || undefined,
           }).catch(console.warn);
         }
@@ -1644,7 +1644,7 @@ export const appRouter = router({
           status: "approved",
           vesselName: vesselData.name || "Brod s liste čekanja",
           vesselType: vesselData.type || "motorni",
-          vesselWeightKg: Number(vesselData.weightKg || 0),
+          vesselWeightTons: String(vesselData.weightTons || 0),
           vesselLengthM: vesselData.lengthM ? String(vesselData.lengthM) : undefined,
           vesselBeamM: vesselData.beamM ? String(vesselData.beamM) : undefined,
           vesselDraftM: vesselData.draftM ? String(vesselData.draftM) : undefined,
@@ -1826,7 +1826,7 @@ export const appRouter = router({
           liftPurpose: input.description || "Održavanje",
           contactPhone: "ADMIN",
           vesselType: "ostalo",
-          vesselWeightKg: 0,
+          vesselWeightTons: "0",
         });
 
         await createAuditEntry({ actorId: ctx.user.id, action: "maintenance_blocked", entityType: "reservation", entityId: id });

@@ -91,7 +91,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
             setVesselLength(first.lengthM ? String(first.lengthM) : "");
             setVesselWidth(first.beamM ? String(first.beamM) : "");
             setVesselDraft(first.draftM ? String(first.draftM) : "");
-            setVesselWeight(first.weightKg ? String(first.weightKg) : "");
+            setVesselWeight(first.weightTons ? String(first.weightTons) : "");
             setVesselRegistration(first.registration || "");
             setHasAttemptedVesselAutoFill(true);
         }
@@ -121,7 +121,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
             setVesselLength(vessel.lengthM ? String(vessel.lengthM) : "");
             setVesselWidth(vessel.beamM ? String(vessel.beamM) : "");
             setVesselDraft(vessel.draftM ? String(vessel.draftM) : "");
-            setVesselWeight(vessel.weightKg ? String(vessel.weightKg) : "");
+            setVesselWeight(vessel.weightTons ? String(vessel.weightTons) : "");
             setVesselRegistration(vessel.registration || "");
         }
     };
@@ -143,7 +143,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
             vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
             vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
             vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
-            vesselWeightKg: vesselWeight ? Number(vesselWeight) : undefined,
+            vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
             contactPhone,
         });
     };
@@ -267,6 +267,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                     value={vesselWeight}
                                     onChange={(e) => setVesselWeight(e.target.value)}
                                     disabled={!!vesselId && vesselId !== "new"}
+                                    placeholder="t"
                                 />
                             </div>
                         </div>

@@ -86,7 +86,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
             vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
             vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
-            vesselWeightKg: vesselWeight ? Number(vesselWeight) : undefined,
+            vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
             contactPhone,
         });
     };
@@ -224,6 +224,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                     type="number"
                                     value={vesselWeight}
                                     onChange={(e) => setVesselWeight(e.target.value)}
+                                    placeholder="t"
                                 />
                             </div>
                         </div>

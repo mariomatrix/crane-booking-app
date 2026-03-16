@@ -158,7 +158,7 @@ export default function MyCard() {
                                     <TableRow key={v.id}>
                                         <TableCell className="font-medium">{v.name}</TableCell>
                                         <TableCell>{v.type}</TableCell>
-                                        <TableCell>{v.weightKg ? `${(v.weightKg / 1000).toFixed(1)} t` : "—"}</TableCell>
+                                        <TableCell>{v.weightTons ? `${v.weightTons} t` : "—"}</TableCell>
                                         <TableCell>{v.registration || "—"}</TableCell>
                                     </TableRow>
                                 ))}

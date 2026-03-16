@@ -67,7 +67,7 @@ export const cranes = pgTable("cranes", {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     name: varchar("name", { length: 255 }).notNull(),
     type: craneTypeEnum("type").default("travelift").notNull(),
-    maxCapacityKg: integer("max_capacity_kg").notNull(),
+    maxCapacityKN: integer("max_capacity_kn").notNull(),
     maxPoolWidth: decimal("max_pool_width", { precision: 6, scale: 2 }),
     location: varchar("location", { length: 255 }),
     craneStatus: craneStatusEnum("crane_status").default("active").notNull(),
@@ -86,7 +86,7 @@ export const vessels = pgTable("vessels", {
     lengthM: decimal("length_m", { precision: 7, scale: 2 }),
     beamM: decimal("beam_m", { precision: 6, scale: 2 }),
     draftM: decimal("draft_m", { precision: 5, scale: 2 }),
-    weightKg: integer("weight_kg"),
+    weightTons: decimal("weight_tons", { precision: 8, scale: 2 }),
     registration: varchar("registration", { length: 100 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -119,7 +119,7 @@ export const reservations = pgTable("reservations", {
     vesselLengthM: decimal("vessel_length_m", { precision: 7, scale: 2 }),
     vesselBeamM: decimal("vessel_beam_m", { precision: 6, scale: 2 }),
     vesselDraftM: decimal("vessel_draft_m", { precision: 5, scale: 2 }),
-    vesselWeightKg: integer("vessel_weight_kg"),
+    vesselWeightTons: decimal("vessel_weight_tons", { precision: 8, scale: 2 }),
     vesselRegistration: varchar("vessel_registration", { length: 100 }),
 
     // Notes

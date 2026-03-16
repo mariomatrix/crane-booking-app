@@ -70,7 +70,7 @@ export const en: Translations = {
         noSlotsAvailable: "No available slots for the selected date and duration.",
         errors: {
             required: "This field is required.",
-            weightExceeded: "Vessel weight exceeds crane capacity.",
+            weightExceeded: "Vessel weight exceeds crane capacity (kN).",
             widthExceeded: "Vessel width exceeds pool width.",
             pastDate: "Date must be in the future.",
             workingHours: "Slot must be within working hours.",
@@ -135,7 +135,7 @@ export const en: Translations = {
         addCrane: "Add Crane",
         editCrane: "Edit Crane",
         craneName: "Crane Name",
-        craneCapacity: "Capacity (t)",
+        craneCapacity: "Capacity (kN)",
         cranePoolWidth: "Pool Width (m)",
         craneLocation: "Location/Basin",
         craneDescription: "Description",

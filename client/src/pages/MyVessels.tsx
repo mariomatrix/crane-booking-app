@@ -75,7 +75,7 @@ export default function MyVessels() {
             lengthM: length ? Number(length) : undefined,
             beamM: width ? Number(width) : undefined,
             draftM: draft ? Number(draft) : undefined,
-            weightKg: weight ? Number(weight) : undefined,
+            weightTons: weight ? Number(weight) : undefined,
         });
     };
 
@@ -159,7 +159,7 @@ export default function MyVessels() {
                                             </div>
                                             <div className="grid gap-2">
                                                 <Label>{t.form.vesselWeight}</Label>
-                                                <Input type="number" step="0.01" value={weight} onChange={(e) => setWeight(e.target.value)} />
+                                                <Input type="number" step="0.01" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="t" />
                                             </div>
                                         </div>
                                     </div>
@@ -228,13 +228,13 @@ export default function MyVessels() {
                                 <CardContent>
                                     <div className="grid grid-cols-2 gap-y-2 text-sm">
                                         <div className="text-muted-foreground">{t.form.vesselLength}</div>
-                                        <div>{vessel.length} m</div>
+                                        <div>{vessel.lengthM} m</div>
                                         <div className="text-muted-foreground">{t.form.vesselWidth}</div>
-                                        <div>{vessel.width} m</div>
+                                        <div>{vessel.beamM} m</div>
                                         <div className="text-muted-foreground">{t.form.vesselDraft}</div>
-                                        <div>{vessel.draft} m</div>
+                                        <div>{vessel.draftM} m</div>
                                         <div className="text-muted-foreground">{t.form.vesselWeight}</div>
-                                        <div className="font-semibold">{vessel.weight} t</div>
+                                        <div className="font-semibold">{vessel.weightTons ? `${vessel.weightTons} t` : "—"}</div>
                                     </div>
                                 </CardContent>
                             </Card>

@@ -287,7 +287,7 @@ router.get("/cranes", async (req, res) => {
         const results = await db.select({
             id: cranes.id,
             name: cranes.name,
-            maxWeightKg: cranes.maxCapacityKg,
+            maxCapacityKN: cranes.maxCapacityKN,
             status: cranes.craneStatus,
         }).from(cranes);
 
