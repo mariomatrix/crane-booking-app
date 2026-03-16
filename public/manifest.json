@@ -1,7 +1,7 @@
 {
-    "name": "Marina Crane Booking",
+    "name": "PSD Spinut Crane Booking",
     "short_name": "CraneBook",
-    "description": "Sustav rezervacija dizalica u marini / Marina crane booking system",
+    "description": "Sustav rezervacija dizalica u PŠD Špinut / Marina crane booking system",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#09090b",
