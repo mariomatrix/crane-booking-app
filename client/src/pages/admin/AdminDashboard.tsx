@@ -10,16 +10,20 @@ import { formatAppDate } from "@/lib/date-utils";
 export default function AdminDashboard() {
   const { t, lang } = useLang();
   const [, setLocation] = useLocation();
-  const { data: allReservations = [] } = trpc.reservation.listAll.useQuery({});
+  const reservationsQuery = trpc.reservation.listAll.useQuery({ pageSize: 100 });
+  const allReservations = reservationsQuery.data?.data || [];
   const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
-  const { data: usersList = [] } = trpc.user.list.useQuery();
+  const usersQuery = trpc.user.list.useQuery({ pageSize: 100 });
+  const usersList = usersQuery.data?.data || [];
+  const totalUsers = usersQuery.data?.total || 0;
+  const totalReservations = reservationsQuery.data?.total || 0;
 
   const stats = useMemo(() => {
     const pending = allReservations.filter((r: any) => r.status === "pending").length;
     const approved = allReservations.filter((r: any) => r.status === "approved").length;
     const rejected = allReservations.filter((r: any) => r.status === "rejected").length;
     const activeCranes = cranesList.filter((c: any) => c.isActive).length;
-    return { pending, approved, rejected, activeCranes, total: allReservations.length };
+    return { pending, approved, rejected, activeCranes, total: totalReservations };
   }, [allReservations, cranesList]);
 
   return (
@@ -83,7 +87,7 @@ export default function AdminDashboard() {
             <Users className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{usersList.length}</div>
+            <div className="text-2xl font-bold">{totalUsers}</div>
             <p className="text-xs text-muted-foreground mt-1">
               Registered accounts
             </p>

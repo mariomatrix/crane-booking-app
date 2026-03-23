@@ -419,9 +419,16 @@ export const appRouter = router({
 
   // ─── User Management (Admin) ──────────────────────────────────────────
   user: router({
-    list: operatorProcedure.query(async () => {
-      return listAllUsers();
-    }),
+    list: operatorProcedure
+      .input(z.object({
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(1000).default(100),
+      }).optional().default({ page: 1, pageSize: 100 }))
+      .query(async ({ input }) => {
+        const { page, pageSize } = input;
+        const offset = (page - 1) * pageSize;
+        return listAllUsers(pageSize, offset);
+      }),
 
     create: adminProcedure
       .input(z.object({
@@ -1075,28 +1082,37 @@ export const appRouter = router({
         vesselId: z.string().uuid().optional(),
         scheduledStart: z.date().optional(),
         scheduledEnd: z.date().optional(),
-      }).optional())
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(200).default(50),
+      }).optional().default({ page: 1, pageSize: 50 }))
       .query(async ({ input, ctx }) => {
+        const { page, pageSize, ...filters } = input;
+        const offset = (page - 1) * pageSize;
         const db = await getDb();
-        if (!db) return [];
+        if (!db) return { data: [], total: 0 };
 
         const conditions = [];
-        if (input?.status && input.status.length > 0) {
-          const statusOrs = input.status.map(s => eq(reservations.status, s as any));
+        if (filters.status && filters.status.length > 0) {
+          const statusOrs = filters.status.map(s => eq(reservations.status, s as any));
           conditions.push(or(...statusOrs));
         }
-        if (input?.userId) conditions.push(eq(reservations.userId, input.userId));
-        if (input?.vesselId) conditions.push(eq(reservations.vesselId, input.vesselId));
-        if (input?.scheduledStart) conditions.push(gte(reservations.scheduledStart, input.scheduledStart));
-        if (input?.scheduledEnd) conditions.push(lte(reservations.scheduledEnd, input.scheduledEnd));
+        if (filters.userId) conditions.push(eq(reservations.userId, filters.userId));
+        if (filters.vesselId) conditions.push(eq(reservations.vesselId, filters.vesselId));
+        if (filters.scheduledStart) conditions.push(gte(reservations.scheduledStart, filters.scheduledStart));
+        if (filters.scheduledEnd) conditions.push(lte(reservations.scheduledEnd, filters.scheduledEnd));
 
-        const query = db.select().from(reservations);
+        const countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
+        const dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(pageSize).offset(offset);
+
         if (conditions.length > 0) {
-          query.where(and(...conditions));
+          countQuery.where(and(...conditions));
+          dataQuery.where(and(...conditions));
         }
-        const items = await query.orderBy(desc(reservations.createdAt));
 
-        return Promise.all(items.map(async (r) => {
+        const [countRow] = await countQuery;
+        const items = await dataQuery;
+
+        const data = await Promise.all(items.map(async (r) => {
           const crane = r.craneId ? await getCraneById(r.craneId) : null;
           const user = await getUserById(r.userId);
           const approver = r.approvedBy ? await getUserById(r.approvedBy) : null;
@@ -1109,6 +1125,8 @@ export const appRouter = router({
             unreadCount
           };
         }));
+
+        return { data, total: Number(countRow.count) };
       }),
 
     approve: operatorProcedure
@@ -1583,14 +1601,22 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    listAll: adminProcedure.query(async () => {
-      const items = await listAllWaiting();
-      return Promise.all(items.map(async (w) => {
-        const user = await getUserById(w.userId);
-        const crane = w.craneId ? await getCraneById(w.craneId) : null;
-        return { ...w, user: user ? { name: user.name, email: user.email, phone: user.phone } : null, crane: crane ? { name: crane.name } : null };
-      }));
-    }),
+    listAll: adminProcedure
+      .input(z.object({
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(200).default(50),
+      }).optional().default({ page: 1, pageSize: 50 }))
+      .query(async ({ input }) => {
+        const { page, pageSize } = input;
+        const offset = (page - 1) * pageSize;
+        const { data: items, total } = await listAllWaiting(pageSize, offset);
+        const data = await Promise.all(items.map(async (w) => {
+          const user = await getUserById(w.userId);
+          const crane = w.craneId ? await getCraneById(w.craneId) : null;
+          return { ...w, user: user ? { name: user.name, email: user.email, phone: user.phone } : null, crane: crane ? { name: crane.name } : null };
+        }));
+        return { data, total };
+      }),
 
     update: adminProcedure
       .input(z.object({
@@ -1851,7 +1877,6 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        const now = new Date();
         let startDate = new Date("2000-01-01"); // "all" fallback
         if (input.range !== "all") {
           startDate = new Date();
@@ -1859,10 +1884,30 @@ export const appRouter = router({
           startDate.setDate(startDate.getDate() - days);
         }
 
-        const allRes = await db.select().from(reservations).where(gte(reservations.scheduledStart, startDate));
+        // ─── Single query: reservations LEFT JOIN users ──────────────────
+        // Eliminates the previous N+1 getUserById loop.
+        // All reservation rows are enriched with userName in one DB round-trip.
+        const allRes = await db
+          .select({
+            id: reservations.id,
+            craneId: reservations.craneId,
+            userId: reservations.userId,
+            userName: sql<string>`COALESCE(${users.name}, ${users.email}, 'Unknown')`,
+            status: reservations.status,
+            isMaintenance: reservations.isMaintenance,
+            scheduledStart: reservations.scheduledStart,
+            scheduledEnd: reservations.scheduledEnd,
+            cancelReason: reservations.cancelReason,
+            serviceTypeId: reservations.serviceTypeId,
+          })
+          .from(reservations)
+          .leftJoin(users, eq(reservations.userId, users.id))
+          .where(gte(reservations.scheduledStart, startDate));
+
         const allCranes = await db.select().from(cranes);
         const allServiceTypes = await db.select().from(serviceTypes);
 
+        // 1. Crane Statistics
         const craneStats = allCranes.map(c => {
           const craneRes = allRes.filter(r => r.craneId === c.id);
           const approved = craneRes.filter(r => r.status === "approved" && !r.isMaintenance);
@@ -1885,17 +1930,16 @@ export const appRouter = router({
             utilization: totalHoursApproved,
             maintenanceHours: totalHoursMaint,
             rejectedCount: rejected.length,
-            cancelledCount: cancelled.length
+            cancelledCount: cancelled.length,
           };
         });
 
-        // 2. User Statistics (Top 5)
+        // 2. User Statistics (Top 5) — built from in-memory joined data, zero extra queries
         const userResCounts: Record<string, { count: number; name: string }> = {};
         for (const r of allRes) {
           if (r.status === "approved" && !r.isMaintenance) {
             if (!userResCounts[r.userId]) {
-              const u = await getUserById(r.userId);
-              userResCounts[r.userId] = { count: 0, name: u?.name || u?.email || "Unknown" };
+              userResCounts[r.userId] = { count: 0, name: r.userName };
             }
             userResCounts[r.userId].count++;
           }

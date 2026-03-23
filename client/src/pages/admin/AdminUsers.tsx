@@ -9,6 +9,13 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import {
+    Pagination,
+    PaginationContent,
+    PaginationItem,
+    PaginationNext,
+    PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
     Select,
     SelectContent,
     SelectItem,
@@ -36,7 +43,12 @@ import { useLocation } from "wouter";
 export default function AdminUsers() {
     const { t } = useLang();
     const [, setLocation] = useLocation();
-    const users = trpc.user.list.useQuery();
+    const [page, setPage] = useState(1);
+    const pageSize = 50;
+    const usersQuery = trpc.user.list.useQuery({ page, pageSize });
+    const users = usersQuery.data?.data || [];
+    const totalUsers = usersQuery.data?.total || 0;
+    const totalPages = Math.ceil(totalUsers / pageSize);
     const utils = trpc.useUtils();
 
     const [resetUser, setResetUser] = useState<{ id: string; name: string } | null>(null);
@@ -160,8 +172,11 @@ export default function AdminUsers() {
             role: newRole,
         });
     };
+    
+    // Reset to page 1 when count changes significantly or on invalidations if needed
+    // But usually standard trpc invalidation is fine.
 
-    if (users.isLoading) {
+    if (usersQuery.isLoading) {
         return (
             <div className="flex justify-center p-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -192,7 +207,7 @@ export default function AdminUsers() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {users.data?.map((user) => (
+                            {users.map((user) => (
                                 <TableRow key={user.id}>
                                     <TableCell className="font-medium">
                                         <button
@@ -282,7 +297,7 @@ export default function AdminUsers() {
                                     </TableCell>
                                 </TableRow>
                             ))}
-                            {users.data?.length === 0 && (
+                            {users.length === 0 && (
                                 <TableRow>
                                     <TableCell colSpan={6} className="text-center py-4">
                                         Nema registriranih korisnika.
@@ -291,6 +306,30 @@ export default function AdminUsers() {
                             )}
                         </TableBody>
                     </Table>
+                    
+                    {totalPages > 1 && (
+                        <div className="flex justify-center py-6 border-t">
+                            <Pagination>
+                                <PaginationContent>
+                                    <PaginationItem>
+                                        <PaginationPrevious 
+                                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                                            className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                        />
+                                    </PaginationItem>
+                                    <div className="flex items-center px-4 text-sm font-medium">
+                                        {page} / {totalPages} ({totalUsers} {t.admin.users.toLowerCase()})
+                                    </div>
+                                    <PaginationItem>
+                                        <PaginationNext 
+                                            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                                            className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                                        />
+                                    </PaginationItem>
+                                </PaginationContent>
+                            </Pagination>
+                        </div>
+                    )}
                 </CardContent>
             </Card>
 

@@ -29,6 +29,10 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+    console.error("❌ CRITICAL: JWT_SECRET or JWT_REFRESH_SECRET is not set in environment.");
+    process.exit(1);
+  }
   const app = express();
   const server = createServer(app);
   // Configure body parser with larger size limit for file uploads
@@ -42,16 +46,16 @@ async function startServer() {
 
   const loginLimiter = createRateLimiter({
     name: "login",
-    maxRequests: 10,
-    windowMs: 900_000, // 10 req / 15 min
-    message: "Previše pokušaja prijave. Pokušajte ponovo za minutu.",
+    maxRequests: 5,
+    windowMs: 900_000, // 5 req / 15 min
+    message: "Previše pokušaja prijave. Pokušajte ponovo za 15 minuta.",
   });
 
   const registerLimiter = createRateLimiter({
     name: "register",
-    maxRequests: 5,
-    windowMs: 900_000, // 5 req / 15 min
-    message: "Previše pokušaja registracije. Pokušajte ponovo za minutu.",
+    maxRequests: 3,
+    windowMs: 3_600_000, // 3 req / 1 sat
+    message: "Previše pokušaja registracije. Pokušajte ponovo za sat vremena.",
   });
 
   const forgotPasswordLimiter = createRateLimiter({

@@ -74,13 +74,18 @@ export default function AdminCalendar() {
 
     // Filters and Data
     const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
-    const { data: usersList = [] } = trpc.user.list.useQuery();
+    const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
+    const usersList = usersQuery.data?.data || [];
     const { data: holidays = [] } = trpc.holiday.list.useQuery();
-    const { data: allReservations = [], isLoading: isResLoading } = trpc.reservation.listAll.useQuery({
+    const reservationsQuery = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
         userId: selectedUser !== "all" ? selectedUser : undefined,
+        pageSize: 1000,
     });
-    const { data: waitingList = [] } = trpc.waitingList.listAll.useQuery();
+    const allReservations = reservationsQuery.data?.data || [];
+    const isResLoading = reservationsQuery.isLoading;
+    const waitingListQuery = trpc.waitingList.listAll.useQuery({ pageSize: 1000 });
+    const waitingList = waitingListQuery.data?.data || [];
     const { data: sysSettings } = trpc.settings.get.useQuery();
     const utils = trpc.useUtils();
 

@@ -20,6 +20,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import {
+    Pagination,
+    PaginationContent,
+    PaginationItem,
+    PaginationNext,
+    PaginationPrevious,
+} from "@/components/ui/pagination";
 import { CalendarDays, Check, CheckCircle2, Loader2, User, X, MessageSquare } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -35,6 +42,8 @@ export default function AdminReservations() {
   const { lang } = useLang();
   const [statusFilter, setStatusFilter] = useState("pending");
   const [selectedUser, setSelectedUser] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -62,12 +71,18 @@ export default function AdminReservations() {
     }
   }, []);
 
-  const { data: reservationsList = [], isLoading } = trpc.reservation.listAll.useQuery(
+  const reservationsQuery = trpc.reservation.listAll.useQuery(
     {
       status: statusFilter !== "all" ? [statusFilter] : undefined,
       userId: selectedUser !== "all" ? selectedUser : undefined,
+      page,
+      pageSize,
     }
   );
+  
+  const reservationsList = reservationsQuery.data?.data || [];
+  const totalReservations = reservationsQuery.data?.total || 0;
+  const totalPages = Math.ceil(totalReservations / pageSize);
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
   const { data: usersList = [] } = trpc.user.list.useQuery();
@@ -182,7 +197,7 @@ export default function AdminReservations() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val); setPage(1); }}>
             <SelectTrigger className="w-[180px]">
               <SelectValue />
             </SelectTrigger>
@@ -198,7 +213,7 @@ export default function AdminReservations() {
           <UserSearchCombobox
             users={usersList as any}
             value={selectedUser}
-            onChange={setSelectedUser}
+            onChange={(val) => { setSelectedUser(val); setPage(1); }}
           />
           <Button onClick={() => setCreateOpen(true)} className="ml-2">
             <Plus className="h-4 w-4 mr-1" />
@@ -207,11 +222,11 @@ export default function AdminReservations() {
         </div>
       </div>
 
-      {isLoading ? (
+      {reservationsQuery.isLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
-      ) : (reservationsList as any[]).length === 0 ? (
+      ) : reservationsList.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
@@ -371,6 +386,30 @@ export default function AdminReservations() {
               </CardContent>
             </Card>
           ))}
+          
+          {totalPages > 1 && (
+            <div className="flex justify-center py-6 border-t mt-6">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious 
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                  <div className="flex items-center px-4 text-sm font-medium">
+                    {page} / {totalPages} ({totalReservations} ukupno)
+                  </div>
+                  <PaginationItem>
+                    <PaginationNext 
+                      onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
         </div>
       )}
 

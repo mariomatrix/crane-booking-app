@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -85,12 +85,21 @@ export async function getUserById(id: string) {
   return res[0];
 }
 
-export async function listAllUsers() {
+export async function listAllUsers(limit = 100, offset = 0) {
   const db = await getDb();
-  if (!db) return [];
-  return db.select().from(users)
+  if (!db) return { data: [], total: 0 };
+  
+  const [countRes] = await db.select({ count: sql<number>`count(*)` })
+    .from(users)
+    .where(isNull(users.anonymizedAt));
+    
+  const data = await db.select().from(users)
     .where(isNull(users.anonymizedAt))
-    .orderBy(users.name, users.email);
+    .orderBy(users.name, users.email)
+    .limit(limit)
+    .offset(offset);
+    
+  return { data, total: Number(countRes.count) };
 }
 
 export async function updateUserRole(id: string, role: "user" | "operator" | "admin") {
@@ -218,15 +227,22 @@ export async function listReservationsByUser(userId: string) {
     .orderBy(desc(reservations.createdAt));
 }
 
-export async function listAllReservations(status?: string) {
+export async function listAllReservations(status?: string, limit = 50, offset = 0) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return { data: [], total: 0 };
+  
+  let countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
+  let dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(limit).offset(offset);
+  
   if (status) {
-    return db.select().from(reservations)
-      .where(eq(reservations.status, status as any))
-      .orderBy(desc(reservations.createdAt));
+    countQuery.where(eq(reservations.status, status as any));
+    dataQuery.where(eq(reservations.status, status as any));
   }
-  return db.select().from(reservations).orderBy(desc(reservations.createdAt));
+  
+  const [countRes] = await countQuery;
+  const data = await dataQuery;
+  
+  return { data, total: Number(countRes.count) };
 }
 
 export async function updateReservationStatus(
@@ -310,10 +326,14 @@ export async function listWaitingListByUser(userId: string) {
     .orderBy(desc(waitingList.createdAt));
 }
 
-export async function listAllWaiting() {
+export async function listAllWaiting(limit = 50, offset = 0) {
   const db = await getDb();
-  if (!db) return [];
-  return db.select().from(waitingList).orderBy(desc(waitingList.createdAt));
+  if (!db) return { data: [], total: 0 };
+  
+  const [countRes] = await db.select({ count: sql<number>`count(*)` }).from(waitingList);
+  const data = await db.select().from(waitingList).orderBy(desc(waitingList.createdAt)).limit(limit).offset(offset);
+  
+  return { data, total: Number(countRes.count) };
 }
 
 export async function getWaitingListById(id: string) {

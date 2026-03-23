@@ -17,12 +17,14 @@ export type TrpcContext = {
 };
 
 export function getJwtSecret() {
-  const secret = process.env.JWT_SECRET || "marina-dev-secret-change-in-production";
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET environment variable is not set");
   return new TextEncoder().encode(secret);
 }
 
 export function getRefreshSecret() {
-  const secret = process.env.JWT_REFRESH_SECRET || "marina-dev-refresh-change-in-production";
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret) throw new Error("JWT_REFRESH_SECRET environment variable is not set");
   return new TextEncoder().encode(secret);
 }
 

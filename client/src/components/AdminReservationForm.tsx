@@ -48,7 +48,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const { data: serviceTypes = [], isLoading: serviceTypesLoading } =
         trpc.serviceType.list.useQuery({ onlyActive: true });
 
-    const { data: usersList = [] } = trpc.user.list.useQuery();
+    const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
+    const usersList = usersQuery.data?.data || [];
     const { data: cranes = [] } = trpc.crane.list.useQuery();
 
     // ── Mutation ─────────────────────────────────────────────────────────
