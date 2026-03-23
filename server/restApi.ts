@@ -18,10 +18,11 @@ const router = Router();
 // 100 req/min limit for API keys
 const apiLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 100, // Limit each IP or Key to 100 requests per `window` (here, per 1 minute)
+    max: 100,
     standardHeaders: true,
     legacyHeaders: false,
     keyGenerator: (req: Request) => req.header("x-api-key") || req.ip || "unknown",
+    validate: false,
     message: { error: "Too many requests, please try again later." },
 });
 
