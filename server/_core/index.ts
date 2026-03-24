@@ -29,6 +29,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 async function startServer() {
+  console.log("🚀 LSS STARTUP: Version 2.0.1 - Rate Limit Fix Applied");
   if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
     console.error("❌ CRITICAL: JWT_SECRET or JWT_REFRESH_SECRET is not set in environment.");
     process.exit(1);
