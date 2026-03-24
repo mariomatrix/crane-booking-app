@@ -21,8 +21,14 @@ const apiLimiter = rateLimit({
     max: 100,
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req: Request) => req.header("x-api-key") || req.ip || "unknown",
-    validate: false,
+    keyGenerator: (req: Request) => {
+        const apiKey = req.header("x-api-key");
+        if (apiKey) return apiKey;
+        const forwarded = req.headers["x-forwarded-for"];
+        if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
+        return req.socket.remoteAddress || "unknown";
+    },
+    validate: { keyGeneratorIpFallback: false },
     message: { error: "Too many requests, please try again later." },
 });
 

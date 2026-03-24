@@ -1,0 +1,3629 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// drizzle/schema.ts
+var schema_exports = {};
+__export(schema_exports, {
+  apiKeys: () => apiKeys,
+  auditLog: () => auditLog,
+  craneStatusEnum: () => craneStatusEnum,
+  craneTypeEnum: () => craneTypeEnum,
+  cranes: () => cranes,
+  emailVerificationTokens: () => emailVerificationTokens,
+  holidays: () => holidays,
+  maintenanceBlocks: () => maintenanceBlocks,
+  messages: () => messages,
+  passwordResets: () => passwordResets,
+  reservationStatusEnum: () => reservationStatusEnum,
+  reservations: () => reservations,
+  roleEnum: () => roleEnum,
+  seasons: () => seasons,
+  serviceTypes: () => serviceTypes,
+  settings: () => settings,
+  userStatusEnum: () => userStatusEnum,
+  users: () => users,
+  vesselTypeEnum: () => vesselTypeEnum,
+  vessels: () => vessels,
+  waitingList: () => waitingList,
+  waitingListStatusEnum: () => waitingListStatusEnum
+});
+import {
+  pgTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+  boolean,
+  integer,
+  pgEnum,
+  date,
+  jsonb,
+  uuid
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+var roleEnum, userStatusEnum, reservationStatusEnum, craneStatusEnum, craneTypeEnum, vesselTypeEnum, waitingListStatusEnum, users, serviceTypes, cranes, vessels, reservations, waitingList, messages, seasons, holidays, maintenanceBlocks, settings, apiKeys, auditLog, passwordResets, emailVerificationTokens;
+var init_schema = __esm({
+  "drizzle/schema.ts"() {
+    "use strict";
+    roleEnum = pgEnum("role", ["user", "operator", "admin"]);
+    userStatusEnum = pgEnum("user_status", ["active", "suspended", "pending_verification"]);
+    reservationStatusEnum = pgEnum("reservation_status", [
+      "pending",
+      "approved",
+      "rejected",
+      "cancelled",
+      "completed",
+      "waitlisted"
+    ]);
+    craneStatusEnum = pgEnum("crane_status", ["active", "inactive", "maintenance"]);
+    craneTypeEnum = pgEnum("crane_type", ["travelift", "portalna", "mobilna", "ostalo"]);
+    vesselTypeEnum = pgEnum("vessel_type", ["jedrilica", "motorni", "katamaran", "ostalo"]);
+    waitingListStatusEnum = pgEnum("waiting_list_status", ["waiting", "notified", "accepted", "expired", "cancelled"]);
+    users = pgTable("users", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      email: varchar("email", { length: 320 }).unique().notNull(),
+      passwordHash: varchar("password_hash", { length: 255 }),
+      // NULL for OAuth users
+      googleId: varchar("google_id", { length: 255 }).unique(),
+      // Google OAuth ID
+      firstName: varchar("first_name", { length: 100 }),
+      lastName: varchar("last_name", { length: 100 }),
+      name: text("name"),
+      // display name (full name)
+      phone: varchar("phone", { length: 50 }),
+      role: roleEnum("role").default("user").notNull(),
+      userStatus: userStatusEnum("user_status").default("active").notNull(),
+      emailVerifiedAt: timestamp("email_verified_at"),
+      anonymizedAt: timestamp("anonymized_at"),
+      mustChangePassword: boolean("must_change_password").default(false).notNull(),
+      loginMethod: varchar("login_method", { length: 64 }),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull(),
+      lastSignedIn: timestamp("last_signed_in").defaultNow().notNull()
+    });
+    serviceTypes = pgTable("service_types", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      name: varchar("name", { length: 255 }).notNull(),
+      description: text("description"),
+      defaultDurationMin: integer("default_duration_min").default(60).notNull(),
+      isActive: boolean("is_active").default(true).notNull(),
+      sortOrder: integer("sort_order").default(0).notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    });
+    cranes = pgTable("cranes", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      name: varchar("name", { length: 255 }).notNull(),
+      type: craneTypeEnum("type").default("travelift").notNull(),
+      maxCapacityKN: integer("max_capacity_kn").notNull(),
+      maxPoolWidth: decimal("max_pool_width", { precision: 6, scale: 2 }),
+      location: varchar("location", { length: 255 }),
+      craneStatus: craneStatusEnum("crane_status").default("active").notNull(),
+      description: text("description"),
+      notes: text("notes"),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    });
+    vessels = pgTable("vessels", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      ownerId: uuid("owner_id").notNull().references(() => users.id),
+      name: varchar("name", { length: 255 }).notNull(),
+      type: vesselTypeEnum("type").notNull(),
+      lengthM: decimal("length_m", { precision: 7, scale: 2 }),
+      beamM: decimal("beam_m", { precision: 6, scale: 2 }),
+      draftM: decimal("draft_m", { precision: 5, scale: 2 }),
+      weightTons: decimal("weight_tons", { precision: 8, scale: 2 }),
+      registration: varchar("registration", { length: 100 }),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    });
+    reservations = pgTable("reservations", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      reservationNumber: varchar("reservation_number", { length: 20 }).unique(),
+      userId: uuid("user_id").notNull().references(() => users.id),
+      vesselId: uuid("vessel_id").references(() => vessels.id),
+      serviceTypeId: uuid("service_type_id").references(() => serviceTypes.id),
+      craneId: uuid("crane_id").references(() => cranes.id),
+      // NULL until approved
+      // User request info
+      requestedDate: date("requested_date"),
+      requestedTimeSlot: varchar("requested_time_slot", { length: 50 }),
+      // jutro/poslijepodne/po dogovoru
+      // Confirmed schedule (set by operator on approval)
+      scheduledStart: timestamp("scheduled_start"),
+      scheduledEnd: timestamp("scheduled_end"),
+      durationMin: integer("duration_min").default(60).notNull(),
+      // Status
+      status: reservationStatusEnum("status").default("pending").notNull(),
+      // Vessel snapshot (for safety reference, even if vessel profile changes)
+      vesselName: varchar("vessel_name", { length: 255 }),
+      vesselType: vesselTypeEnum("vessel_type"),
+      vesselLengthM: decimal("vessel_length_m", { precision: 7, scale: 2 }),
+      vesselBeamM: decimal("vessel_beam_m", { precision: 6, scale: 2 }),
+      vesselDraftM: decimal("vessel_draft_m", { precision: 5, scale: 2 }),
+      vesselWeightTons: decimal("vessel_weight_tons", { precision: 8, scale: 2 }),
+      vesselRegistration: varchar("vessel_registration", { length: 100 }),
+      // Notes
+      userNote: text("user_note"),
+      adminNote: text("admin_note"),
+      // internal, not shown to user
+      rejectionReason: text("rejection_reason"),
+      cancelReason: text("cancel_reason"),
+      cancelledByType: varchar("cancelled_by_type", { length: 20 }),
+      // 'user' | 'admin'
+      // Admin actions
+      approvedBy: uuid("approved_by").references(() => users.id),
+      approvedAt: timestamp("approved_at"),
+      completedAt: timestamp("completed_at"),
+      // Legacy / compat fields
+      isMaintenance: boolean("is_maintenance").default(false).notNull(),
+      reminderSent: boolean("reminder_sent").default(false).notNull(),
+      contactPhone: varchar("contact_phone", { length: 50 }),
+      liftPurpose: text("lift_purpose"),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    });
+    waitingList = pgTable("waiting_list", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: uuid("user_id").notNull().references(() => users.id),
+      vesselId: uuid("vessel_id").references(() => vessels.id),
+      serviceTypeId: uuid("service_type_id").references(() => serviceTypes.id),
+      craneId: uuid("crane_id").references(() => cranes.id),
+      // optional preference
+      requestedDate: date("requested_date").notNull(),
+      position: integer("position").default(0).notNull(),
+      status: waitingListStatusEnum("status").default("waiting").notNull(),
+      vesselData: jsonb("vessel_data"),
+      notified: boolean("notified").default(false).notNull(),
+      expiresAt: timestamp("expires_at"),
+      createdAt: timestamp("created_at").defaultNow().notNull(),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    });
+    messages = pgTable("messages", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      reservationId: uuid("reservation_id").notNull().references(() => reservations.id),
+      senderId: uuid("sender_id").notNull().references(() => users.id),
+      body: text("body").notNull(),
+      isRead: boolean("is_read").default(false).notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    seasons = pgTable("seasons", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      name: varchar("name", { length: 100 }).notNull(),
+      startDate: date("start_date").notNull(),
+      endDate: date("end_date").notNull(),
+      workingHours: jsonb("working_hours").notNull(),
+      // { mon: {from: "08:00", to: "17:00"}, ... }
+      isActive: boolean("is_active").default(true).notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    holidays = pgTable("holidays", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      date: date("date").notNull(),
+      name: varchar("name", { length: 255 }).notNull(),
+      isRecurring: boolean("is_recurring").default(true).notNull(),
+      // yearly recurring
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    maintenanceBlocks = pgTable("maintenance_blocks", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      craneId: uuid("crane_id").notNull().references(() => cranes.id),
+      startAt: timestamp("start_at").notNull(),
+      endAt: timestamp("end_at").notNull(),
+      reason: text("reason"),
+      createdBy: uuid("created_by").references(() => users.id),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    settings = pgTable("settings", {
+      key: varchar("key", { length: 100 }).primaryKey(),
+      value: jsonb("value").notNull(),
+      updatedBy: uuid("updated_by").references(() => users.id),
+      updatedAt: timestamp("updated_at").defaultNow().notNull()
+    });
+    apiKeys = pgTable("api_keys", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      name: varchar("name", { length: 100 }).notNull(),
+      key: varchar("key", { length: 128 }).notNull().unique(),
+      isActive: boolean("is_active").default(true).notNull(),
+      lastUsedAt: timestamp("last_used_at"),
+      createdBy: uuid("created_by").references(() => users.id),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    auditLog = pgTable("audit_log", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      actorId: uuid("actor_id").references(() => users.id),
+      action: varchar("action", { length: 100 }).notNull(),
+      entityType: varchar("entity_type", { length: 50 }).notNull(),
+      entityId: text("entity_id"),
+      payload: jsonb("payload"),
+      ipAddress: varchar("ip_address", { length: 45 }),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    passwordResets = pgTable("password_resets", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: uuid("user_id").notNull().references(() => users.id),
+      token: varchar("token", { length: 255 }).notNull().unique(),
+      expiresAt: timestamp("expires_at").notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+    emailVerificationTokens = pgTable("email_verification_tokens", {
+      id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+      userId: uuid("user_id").notNull().references(() => users.id),
+      token: varchar("token", { length: 255 }).notNull().unique(),
+      expiresAt: timestamp("expires_at").notNull(),
+      createdAt: timestamp("created_at").defaultNow().notNull()
+    });
+  }
+});
+
+// server/db.ts
+var db_exports = {};
+__export(db_exports, {
+  addToWaitingList: () => addToWaitingList,
+  adminRemoveFromWaitingList: () => adminRemoveFromWaitingList,
+  checkOverlap: () => checkOverlap,
+  countUnreadMessages: () => countUnreadMessages,
+  createApiKey: () => createApiKey,
+  createAuditEntry: () => createAuditEntry,
+  createCrane: () => createCrane,
+  createEmailVerificationToken: () => createEmailVerificationToken,
+  createHoliday: () => createHoliday,
+  createLocalUser: () => createLocalUser,
+  createReservation: () => createReservation,
+  createSeason: () => createSeason,
+  createServiceType: () => createServiceType,
+  createVessel: () => createVessel,
+  deleteCrane: () => deleteCrane,
+  deleteExpiredVerificationTokens: () => deleteExpiredVerificationTokens,
+  deleteHoliday: () => deleteHoliday,
+  deleteSeason: () => deleteSeason,
+  deleteServiceType: () => deleteServiceType,
+  deleteVessel: () => deleteVessel,
+  getActiveSeason: () => getActiveSeason,
+  getAllSettings: () => getAllSettings,
+  getCraneById: () => getCraneById,
+  getDb: () => getDb,
+  getReservationById: () => getReservationById,
+  getReservationsForCalendar: () => getReservationsForCalendar,
+  getServiceTypeById: () => getServiceTypeById,
+  getUnreadCountForReservation: () => getUnreadCountForReservation,
+  getUserByEmail: () => getUserByEmail,
+  getUserByGoogleId: () => getUserByGoogleId,
+  getUserById: () => getUserById,
+  getUserByOpenId: () => getUserByOpenId,
+  getVesselById: () => getVesselById,
+  getWaitingListById: () => getWaitingListById,
+  isHoliday: () => isHoliday,
+  listAllReservations: () => listAllReservations,
+  listAllUsers: () => listAllUsers,
+  listAllWaiting: () => listAllWaiting,
+  listApiKeys: () => listApiKeys,
+  listAuditLog: () => listAuditLog,
+  listCranes: () => listCranes,
+  listHolidays: () => listHolidays,
+  listMessages: () => listMessages,
+  listReservationsByUser: () => listReservationsByUser,
+  listSeasons: () => listSeasons,
+  listServiceTypes: () => listServiceTypes,
+  listVesselsByUser: () => listVesselsByUser,
+  listWaitingListByUser: () => listWaitingListByUser,
+  markMessagesRead: () => markMessagesRead,
+  removeFromWaitingList: () => removeFromWaitingList,
+  revokeApiKey: () => revokeApiKey,
+  seedCroatianHolidays: () => seedCroatianHolidays,
+  seedServiceTypes: () => seedServiceTypes,
+  sendMessage: () => sendMessage,
+  softDeleteUser: () => softDeleteUser,
+  updateCrane: () => updateCrane,
+  updateReservationStatus: () => updateReservationStatus,
+  updateSeason: () => updateSeason,
+  updateServiceType: () => updateServiceType,
+  updateSetting: () => updateSetting,
+  updateUser: () => updateUser,
+  updateUserRole: () => updateUserRole,
+  updateVessel: () => updateVessel,
+  updateWaitingList: () => updateWaitingList,
+  upsertUser: () => upsertUser,
+  validateApiKeyAndUpdateLastUsed: () => validateApiKeyAndUpdateLastUsed,
+  verifyEmailToken: () => verifyEmailToken
+});
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql as sql2 } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import crypto from "crypto";
+async function getDb() {
+  if (!_db && process.env.DATABASE_URL) {
+    _db = drizzle(postgres(process.env.DATABASE_URL));
+  }
+  return _db;
+}
+async function createLocalUser(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const name = data.username || `${data.firstName} ${data.lastName}`.trim();
+  const res = await db.insert(users).values({
+    email: data.email,
+    passwordHash: data.passwordHash,
+    firstName: data.firstName,
+    lastName: data.lastName,
+    name,
+    phone: data.phone,
+    mustChangePassword: data.mustChangePassword ?? false,
+    loginMethod: "email",
+    lastSignedIn: /* @__PURE__ */ new Date()
+  }).returning({ id: users.id });
+  return res[0]?.id;
+}
+async function getUserByEmail(email) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return res[0];
+}
+async function getUserByGoogleId(googleId) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(users).where(eq(users.googleId, googleId)).limit(1);
+  return res[0];
+}
+async function getUserById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return res[0];
+}
+async function listAllUsers(limit = 100, offset = 0) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const [countRes] = await db.select({ count: sql2`count(*)` }).from(users).where(isNull(users.anonymizedAt));
+  const data = await db.select().from(users).where(isNull(users.anonymizedAt)).orderBy(users.name, users.email).limit(limit).offset(offset);
+  return { data, total: Number(countRes.count) };
+}
+async function updateUserRole(id, role) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(users).set({ role, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id));
+}
+async function softDeleteUser(id) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(users).set({
+    anonymizedAt: /* @__PURE__ */ new Date(),
+    updatedAt: /* @__PURE__ */ new Date(),
+    email: `deleted-${Date.now()}@deleted.invalid`,
+    firstName: "Obrisani",
+    lastName: "Korisnik",
+    name: "Obrisani Korisnik",
+    phone: null,
+    googleId: null,
+    passwordHash: null
+  }).where(eq(users.id, id));
+}
+async function updateUser(id, data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const { id: _, role: __, ...updateData } = data;
+  await db.update(users).set({ ...updateData, updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, id));
+}
+async function listCranes(activeOnly = true) {
+  const db = await getDb();
+  if (!db) return [];
+  return activeOnly ? db.select().from(cranes).where(eq(cranes.craneStatus, "active")) : db.select().from(cranes);
+}
+async function getCraneById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(cranes).where(eq(cranes.id, id)).limit(1);
+  return res[0];
+}
+async function createCrane(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(cranes).values(data).returning({ id: cranes.id });
+  return res[0].id;
+}
+async function updateCrane(id, data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(cranes).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(cranes.id, id));
+}
+async function deleteCrane(id) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(cranes).set({ craneStatus: "inactive", updatedAt: /* @__PURE__ */ new Date() }).where(eq(cranes.id, id));
+}
+async function listVesselsByUser(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(vessels).where(eq(vessels.ownerId, userId)).orderBy(desc(vessels.createdAt));
+}
+async function getVesselById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(vessels).where(eq(vessels.id, id)).limit(1);
+  return res[0];
+}
+async function createVessel(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(vessels).values(data).returning({ id: vessels.id });
+  return res[0].id;
+}
+async function updateVessel(id, ownerId, data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(vessels).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
+}
+async function deleteVessel(id, ownerId) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(vessels).where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
+}
+async function createReservation(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(reservations).values(data).returning({ id: reservations.id });
+  return res[0].id;
+}
+async function getReservationById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
+  return res[0];
+}
+async function listReservationsByUser(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reservations).where(eq(reservations.userId, userId)).orderBy(desc(reservations.createdAt));
+}
+async function listAllReservations(status, limit = 50, offset = 0) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  let countQuery = db.select({ count: sql2`count(*)` }).from(reservations);
+  let dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(limit).offset(offset);
+  if (status) {
+    countQuery.where(eq(reservations.status, status));
+    dataQuery.where(eq(reservations.status, status));
+  }
+  const [countRes] = await countQuery;
+  const data = await dataQuery;
+  return { data, total: Number(countRes.count) };
+}
+async function updateReservationStatus(id, status, approvedBy, adminNote, cancelReason, cancelledByType) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(reservations).set({
+    status,
+    approvedBy,
+    approvedAt: status === "approved" ? /* @__PURE__ */ new Date() : void 0,
+    completedAt: status === "completed" ? /* @__PURE__ */ new Date() : void 0,
+    adminNote,
+    cancelReason,
+    cancelledByType,
+    updatedAt: /* @__PURE__ */ new Date()
+  }).where(eq(reservations.id, id));
+}
+async function checkOverlap(craneId, startDate, effectiveEnd, excludeId) {
+  const db = await getDb();
+  if (!db) return false;
+  const conditions = [
+    eq(reservations.craneId, craneId),
+    or(
+      eq(reservations.status, "pending"),
+      eq(reservations.status, "approved")
+    ),
+    lt(reservations.scheduledStart, effectiveEnd),
+    gt(reservations.scheduledEnd, startDate)
+  ];
+  if (excludeId) conditions.push(ne(reservations.id, excludeId));
+  const res = await db.select({ id: reservations.id }).from(reservations).where(and(...conditions)).limit(1);
+  return res.length > 0;
+}
+async function getReservationsForCalendar(start, end, includePending = true) {
+  const db = await getDb();
+  if (!db) return [];
+  const statusConditions = includePending ? [or(eq(reservations.status, "approved"), eq(reservations.status, "pending"))] : [eq(reservations.status, "approved")];
+  const conditions = [...statusConditions];
+  if (start) conditions.push(gte(reservations.scheduledStart, start));
+  if (end) conditions.push(lte(reservations.scheduledEnd, end));
+  return db.select().from(reservations).where(and(...conditions));
+}
+async function addToWaitingList(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(waitingList).values(data).returning({ id: waitingList.id });
+  return res[0].id;
+}
+async function listWaitingListByUser(userId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(waitingList).where(eq(waitingList.userId, userId)).orderBy(desc(waitingList.createdAt));
+}
+async function listAllWaiting(limit = 50, offset = 0) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const [countRes] = await db.select({ count: sql2`count(*)` }).from(waitingList);
+  const data = await db.select().from(waitingList).orderBy(desc(waitingList.createdAt)).limit(limit).offset(offset);
+  return { data, total: Number(countRes.count) };
+}
+async function getWaitingListById(id) {
+  const db = await getDb();
+  if (!db) return null;
+  const res = await db.select().from(waitingList).where(eq(waitingList.id, id));
+  return res[0] ?? null;
+}
+async function updateWaitingList(id, data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(waitingList).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(waitingList.id, id));
+}
+async function adminRemoveFromWaitingList(id) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(waitingList).where(eq(waitingList.id, id));
+}
+async function removeFromWaitingList(id, userId) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(waitingList).where(and(eq(waitingList.id, id), eq(waitingList.userId, userId)));
+}
+async function getAllSettings() {
+  const db = await getDb();
+  if (!db) return DEFAULT_SETTINGS;
+  const rows = await db.select().from(settings);
+  const result = { ...DEFAULT_SETTINGS };
+  for (const row of rows) {
+    const val = row.value;
+    result[row.key] = typeof val === "string" ? val : String(val);
+  }
+  return result;
+}
+async function updateSetting(key, value) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.insert(settings).values({ key, value, updatedAt: /* @__PURE__ */ new Date() }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: /* @__PURE__ */ new Date() } });
+}
+async function createAuditEntry(data) {
+  const db = await getDb();
+  if (db) await db.insert(auditLog).values({
+    actorId: data.actorId,
+    action: data.action,
+    entityType: data.entityType,
+    entityId: data.entityId,
+    payload: data.payload,
+    ipAddress: data.ipAddress
+  });
+}
+async function listAuditLog(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: auditLog.id,
+    action: auditLog.action,
+    entityType: auditLog.entityType,
+    entityId: auditLog.entityId,
+    payload: auditLog.payload,
+    ipAddress: auditLog.ipAddress,
+    createdAt: auditLog.createdAt,
+    actor: {
+      id: users.id,
+      name: users.name
+    }
+  }).from(auditLog).leftJoin(users, eq(auditLog.actorId, users.id)).orderBy(desc(auditLog.createdAt)).limit(limit);
+}
+async function listServiceTypes(onlyActive = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const query = db.select().from(serviceTypes);
+  if (onlyActive) query.where(eq(serviceTypes.isActive, true));
+  return query.orderBy(asc(serviceTypes.sortOrder), asc(serviceTypes.name));
+}
+async function getServiceTypeById(id) {
+  const db = await getDb();
+  if (!db) return void 0;
+  const res = await db.select().from(serviceTypes).where(eq(serviceTypes.id, id)).limit(1);
+  return res[0];
+}
+async function createServiceType(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(serviceTypes).values(data).returning();
+  return res[0];
+}
+async function updateServiceType(id, data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.update(serviceTypes).set({ ...data, updatedAt: /* @__PURE__ */ new Date() }).where(eq(serviceTypes.id, id)).returning();
+  return res[0];
+}
+async function deleteServiceType(id) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(serviceTypes).where(eq(serviceTypes.id, id));
+}
+async function seedServiceTypes() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(serviceTypes).limit(1);
+  if (existing.length > 0) return;
+  const defaults = [
+    { name: "Spu\u0161tanje", description: "Spu\u0161tanje plovila u more", defaultDurationMin: 60, sortOrder: 0 },
+    { name: "Va\u0111enje", description: "Va\u0111enje plovila iz mora", defaultDurationMin: 60, sortOrder: 1 },
+    { name: "Premje\u0161tanje", description: "Premje\u0161tanje plovila unutar marine", defaultDurationMin: 90, sortOrder: 2 },
+    { name: "Zimovanje", description: "Skladi\u0161tenje plovila za zimu", defaultDurationMin: 120, sortOrder: 3 },
+    { name: "Ostalo", description: "Ostale operacije dizalicom", defaultDurationMin: 60, sortOrder: 4 }
+  ];
+  await db.insert(serviceTypes).values(defaults);
+}
+async function createEmailVerificationToken(userId) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1e3);
+  await db.insert(emailVerificationTokens).values({
+    userId,
+    token,
+    expiresAt
+  });
+  return token;
+}
+async function verifyEmailToken(token) {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select().from(emailVerificationTokens).where(and(
+    eq(emailVerificationTokens.token, token),
+    gte(emailVerificationTokens.expiresAt, /* @__PURE__ */ new Date())
+  )).limit(1);
+  if (!row) return null;
+  await db.update(users).set({ emailVerifiedAt: /* @__PURE__ */ new Date(), userStatus: "active", updatedAt: /* @__PURE__ */ new Date() }).where(eq(users.id, row.userId));
+  await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, row.userId));
+  return row.userId;
+}
+async function deleteExpiredVerificationTokens() {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(emailVerificationTokens).where(lt(emailVerificationTokens.expiresAt, /* @__PURE__ */ new Date()));
+}
+async function sendMessage(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [msg] = await db.insert(messages).values(data).returning();
+  return msg;
+}
+async function listMessages(reservationId) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: messages.id,
+    reservationId: messages.reservationId,
+    senderId: messages.senderId,
+    senderName: users.name,
+    senderRole: users.role,
+    body: messages.body,
+    isRead: messages.isRead,
+    createdAt: messages.createdAt
+  }).from(messages).innerJoin(users, eq(messages.senderId, users.id)).where(eq(messages.reservationId, reservationId)).orderBy(asc(messages.createdAt));
+}
+async function markMessagesRead(reservationId, readerId) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(messages).set({ isRead: true }).where(and(
+    eq(messages.reservationId, reservationId),
+    ne(messages.senderId, readerId),
+    eq(messages.isRead, false)
+  ));
+}
+async function countUnreadMessages(userId, role) {
+  const db = await getDb();
+  if (!db) return 0;
+  if (role === "admin" || role === "operator") {
+    const result = await db.select({
+      id: messages.id
+    }).from(messages).innerJoin(users, eq(messages.senderId, users.id)).where(and(
+      eq(messages.isRead, false),
+      eq(users.role, "user")
+    ));
+    return result.length;
+  } else {
+    const result = await db.select({
+      id: messages.id
+    }).from(messages).innerJoin(reservations, eq(messages.reservationId, reservations.id)).innerJoin(users, eq(messages.senderId, users.id)).where(and(
+      eq(messages.isRead, false),
+      eq(reservations.userId, userId),
+      ne(users.role, "user")
+    ));
+    return result.length;
+  }
+}
+async function getUnreadCountForReservation(reservationId, userId, role) {
+  const db = await getDb();
+  if (!db) return 0;
+  const conditions = [
+    eq(messages.reservationId, reservationId),
+    eq(messages.isRead, false)
+  ];
+  if (role === "admin" || role === "operator") {
+    const result = await db.select({ id: messages.id }).from(messages).innerJoin(users, eq(messages.senderId, users.id)).where(and(...conditions, eq(users.role, "user")));
+    return result.length;
+  } else {
+    const result = await db.select({ id: messages.id }).from(messages).innerJoin(users, eq(messages.senderId, users.id)).where(and(...conditions, ne(users.role, "user")));
+    return result.length;
+  }
+}
+async function createSeason(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [s] = await db.insert(seasons).values(data).returning();
+  return s;
+}
+async function listSeasons() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(seasons).orderBy(asc(seasons.startDate));
+}
+async function updateSeason(id, data) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(seasons).set(data).where(eq(seasons.id, id));
+}
+async function deleteSeason(id) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(seasons).where(eq(seasons.id, id));
+}
+async function getActiveSeason(dateStr) {
+  const db = await getDb();
+  if (!db) return null;
+  const [s] = await db.select().from(seasons).where(and(
+    eq(seasons.isActive, true),
+    lte(seasons.startDate, dateStr),
+    gte(seasons.endDate, dateStr)
+  ));
+  return s ?? null;
+}
+async function createHoliday(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [h] = await db.insert(holidays).values(data).returning();
+  return h;
+}
+async function listHolidays() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(holidays).orderBy(asc(holidays.date));
+}
+async function deleteHoliday(id) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(holidays).where(eq(holidays.id, id));
+}
+async function isHoliday(dateStr) {
+  const db = await getDb();
+  if (!db) return false;
+  const [exact] = await db.select().from(holidays).where(eq(holidays.date, dateStr));
+  if (exact) return true;
+  const md = dateStr.slice(5);
+  const recurring = await db.select().from(holidays).where(eq(holidays.isRecurring, true));
+  return recurring.some((h) => h.date.slice(5) === md);
+}
+async function seedCroatianHolidays() {
+  const db = await getDb();
+  if (!db) return;
+  const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
+  const hrHolidays = [
+    { date: `${currentYear}-01-01`, name: "Nova godina" },
+    { date: `${currentYear}-01-06`, name: "Sveta tri kralja" },
+    { date: `${currentYear}-05-01`, name: "Praznik rada" },
+    { date: `${currentYear}-05-30`, name: "Dan dr\u017Eavnosti" },
+    { date: `${currentYear}-06-22`, name: "Dan antifa\u0161isti\u010Dke borbe" },
+    { date: `${currentYear}-08-05`, name: "Dan pobjede" },
+    { date: `${currentYear}-08-15`, name: "Velika Gospa" },
+    { date: `${currentYear}-10-08`, name: "Dan neovisnosti" },
+    { date: `${currentYear}-11-01`, name: "Svi sveti" },
+    { date: `${currentYear}-11-18`, name: "Dan sje\u0107anja na Vukovar" },
+    { date: `${currentYear}-12-25`, name: "Bo\u017Ei\u0107" },
+    { date: `${currentYear}-12-26`, name: "Sveti Stjepan" }
+  ];
+  for (const h of hrHolidays) {
+    const existing = await db.select().from(holidays).where(eq(holidays.date, h.date));
+    if (existing.length === 0) {
+      await db.insert(holidays).values({ ...h, isRecurring: true });
+    }
+  }
+}
+async function createApiKey(data) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [k] = await db.insert(apiKeys).values(data).returning();
+  return k;
+}
+async function listApiKeys() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: apiKeys.id,
+    name: apiKeys.name,
+    key: apiKeys.key,
+    // Only returning partial key or full key depending on security, let's return full for now since admin needs to see it once or we just show it. Actually, better return truncated or full. Let's return full.
+    isActive: apiKeys.isActive,
+    lastUsedAt: apiKeys.lastUsedAt,
+    createdAt: apiKeys.createdAt
+  }).from(apiKeys).orderBy(desc(apiKeys.createdAt));
+}
+async function revokeApiKey(id) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(apiKeys).set({ isActive: false }).where(eq(apiKeys.id, id));
+}
+async function validateApiKeyAndUpdateLastUsed(key) {
+  const db = await getDb();
+  if (!db) return false;
+  const [k] = await db.select().from(apiKeys).where(and(eq(apiKeys.key, key), eq(apiKeys.isActive, true)));
+  if (k) {
+    db.update(apiKeys).set({ lastUsedAt: /* @__PURE__ */ new Date() }).where(eq(apiKeys.id, k.id)).execute();
+    return true;
+  }
+  return false;
+}
+async function getUserByOpenId(openId) {
+  return getUserByGoogleId(openId);
+}
+async function upsertUser(data) {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await getUserByGoogleId(data.openId);
+  if (existing) {
+    await db.update(users).set({
+      ...data.name !== void 0 ? { name: data.name } : {},
+      ...typeof data.email === "string" ? { email: data.email } : {},
+      ...data.loginMethod !== void 0 ? { loginMethod: data.loginMethod } : {},
+      ...data.lastSignedIn ? { lastSignedIn: data.lastSignedIn } : {},
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(eq(users.googleId, data.openId));
+  } else {
+    await db.insert(users).values({
+      googleId: data.openId,
+      email: data.email ?? `${data.openId}@oauth.placeholder`,
+      name: data.name,
+      loginMethod: data.loginMethod,
+      lastSignedIn: data.lastSignedIn ?? /* @__PURE__ */ new Date()
+    });
+  }
+}
+var _db, DEFAULT_SETTINGS;
+var init_db = __esm({
+  "server/db.ts"() {
+    "use strict";
+    init_schema();
+    _db = null;
+    DEFAULT_SETTINGS = {
+      slotDurationMinutes: "60",
+      bufferMinutes: "15",
+      workdayStart: "08:00",
+      workdayEnd: "16:00"
+    };
+  }
+});
+
+// server/_core/email.ts
+var email_exports = {};
+__export(email_exports, {
+  sendEmail: () => sendEmail,
+  sendEmailVerification: () => sendEmailVerification,
+  sendNewMessageNotification: () => sendNewMessageNotification,
+  sendPasswordResetEmail: () => sendPasswordResetEmail,
+  sendReservationConfirmation: () => sendReservationConfirmation,
+  sendReservationReceived: () => sendReservationReceived,
+  sendReservationRejection: () => sendReservationRejection,
+  sendUserInvitation: () => sendUserInvitation,
+  sendWaitingListNotification: () => sendWaitingListNotification
+});
+import nodemailer from "nodemailer";
+function getTransporter() {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || "smtp.gmail.com",
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    }
+  });
+}
+async function sendEmail(payload) {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.warn("[Email] SMTP not configured \u2014 skipping email to", payload.to);
+    return false;
+  }
+  try {
+    const transporter = getTransporter();
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM ? `"Marina Crane Booking" <${process.env.SMTP_FROM}>` : `"Marina Crane Booking" <${process.env.SMTP_USER}>`,
+      ...payload
+    });
+    return true;
+  } catch (err) {
+    console.warn("[Email] Failed to send:", err);
+    return false;
+  }
+}
+function getHtmlWrapper(content) {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: sans-serif; line-height: 1.5; color: #333; margin: 0; padding: 0; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { text-align: center; margin-bottom: 30px; }
+    .logo { max-width: 150px; height: auto; }
+    .content { background: #fff; }
+    .footer { margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="${LOGO_URL}" alt="P\u0160D \u0160pinut Logo" class="logo">
+    </div>
+    <div class="content">
+      ${content}
+    </div>
+    <div class="footer">
+      ${CONTACT_BLOCK}
+      ${EMAIL_FOOTER}
+    </div>
+  </div>
+</body>
+</html>
+`;
+}
+async function sendReservationConfirmation(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? `Rezervacija potvr\u0111ena \u2014 ${opts.craneName}` : `Reservation Confirmed \u2014 ${opts.craneName}`;
+  const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
+  const endStr = opts.endDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
+  const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr ? "Va\u0161a rezervacija je potvr\u0111ena. Molimo Vas da se pojavite u lu\u010Dici na vrijeme." : "Your reservation has been confirmed. Please arrive at the marina on time."}</p>
+    <table style="border-collapse:collapse;font-family:sans-serif;width:100%;max-width:500px">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;width:140px">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Po\u010Detak" : "Start"}:</td><td>${startStr}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Kraj" : "End"}:</td><td>${endStr}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Lokacija" : "Location"}:</td><td><strong>${opts.craneLocation}</strong></td></tr>
+      
+      <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
+      ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
+      ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
+      ${opts.vesselWeightTons ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Te\u017Eina" : "Weight"}:</td><td>${Number(opts.vesselWeightTons).toLocaleString(isHr ? "hr-HR" : "en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
+      
+      ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Va\u0161a napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
+      
+      ${opts.adminNotes ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Napomena administratora" : "Admin Note"}</td></tr><tr><td colspan="2" style="padding:4px 0;color:#2563eb">${opts.adminNotes}</td></tr>` : ""}
+    </table>
+    <p style="margin-top:24px">${isHr ? "Vidimo se!" : "See you there!"}</p>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendReservationRejection(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? `Rezervacija odbijena \u2014 ${opts.craneName}` : `Reservation Rejected \u2014 ${opts.craneName}`;
+  const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
+  const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr ? "Na\u017Ealost, va\u0161a rezervacija je odbijena." : "Unfortunately, your reservation has been rejected."}</p>
+    <table style="border-collapse:collapse;font-family:sans-serif">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tra\u017Eeno vrijeme" : "Requested time"}:</td><td>${startStr}</td></tr>
+      ${opts.reason ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Razlog" : "Reason"}:</td><td>${opts.reason}</td></tr>` : ""}
+    </table>
+    <p style="margin-top:16px">${isHr ? "Poku\u0161ajte s drugim terminom." : "Please try another time slot."}</p>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendWaitingListNotification(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? `Termin dostupan \u2014 ${opts.craneName}` : `Slot Available \u2014 ${opts.craneName}`;
+  const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr ? `Termin koji ste \u010Dekali za <strong>${opts.craneName}</strong> na dan <strong>${opts.date}</strong> je sada dostupan.` : `A slot you were waiting for on <strong>${opts.craneName}</strong> on <strong>${opts.date}</strong> is now available.`}</p>
+    <p>${isHr ? "Prijavite se i rezervirajte termin dok je dostupan." : "Log in and book the slot while it's available."}</p>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendPasswordResetEmail(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? "Resetiranje lozinke \u2014 Marina Crane Booking" : "Reset your password \u2014 Marina Crane Booking";
+  const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr ? "Primili smo zahtjev za resetiranje va\u0161e lozinke. Ako niste zatra\u017Eili ovu promjenu, mo\u017Eete slobodno ignorirati ovaj email." : "We received a request to reset your password. If you didn't make this request, you can safely ignore this email."}</p>
+    <p>${isHr ? `Za postavljanje nove lozinke, kliknite na gumb ispod:` : `To set a new password, click the button below:`}</p>
+    <div style="margin:24px 0">
+      <a href="${opts.resetUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+        ${isHr ? "Resetiraj lozinku" : "Reset Password"}
+      </a>
+    </div>
+    <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 60 minuta." : "This link is valid for 60 minutes."}</p>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendReservationReceived(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? `Zahtjev zaprimljen \u2014 ${opts.reservationNumber}` : `Request Received \u2014 ${opts.reservationNumber}`;
+  const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr ? "Va\u0161 zahtjev za rezervaciju je uspje\u0161no zaprimljen i trenutno \u010Deka na odobrenje administratora." : "Your reservation request has been successfully received and is currently waiting for administrator approval."}</p>
+    <table style="border-collapse:collapse;font-family:sans-serif;width:100%;max-width:500px">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;width:140px">${isHr ? "Broj rezervacije" : "Reservation Number"}:</td><td>${opts.reservationNumber}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tra\u017Eeni datum" : "Requested Date"}:</td><td>${opts.requestedDate}</td></tr>
+      ${opts.craneName ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Dizalica" : "Crane"}:</td><td>${opts.craneName}</td></tr>` : ""}
+      
+      <tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Detalji plovila" : "Vessel Details"}</td></tr>
+      ${opts.vesselRegistration ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Plovilo:" : "Vessel Registration:"}</td><td>${opts.vesselRegistration}</td></tr>` : ""}
+      ${opts.vesselType ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Tip" : "Type"}:</td><td>${opts.vesselType}</td></tr>` : ""}
+      ${opts.vesselWeightTons ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Te\u017Eina" : "Weight"}:</td><td>${Number(opts.vesselWeightTons).toLocaleString(isHr ? "hr-HR" : "en-US", { minimumFractionDigits: 1, maximumFractionDigits: 2 })} t</td></tr>` : ""}
+      
+      ${opts.contactPhone ? `<tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Kontakt telefon" : "Contact Phone"}:</td><td>${opts.contactPhone}</td></tr>` : ""}
+      
+      ${opts.userNote ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Va\u0161a napomena" : "Your Note"}</td></tr><tr><td colspan="2" style="padding:4px 0">${opts.userNote}</td></tr>` : ""}
+    </table>
+    <hr style="border:0;border-top:1px solid #eee;margin:16px 0"/>
+    <p style="margin-top:16px">${isHr ? "Obavijestit \u0107emo vas \u010Dim status va\u0161e rezervacije bude promijenjen." : "We will notify you as soon as the status of your reservation is changed."}</p>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendEmailVerification(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? "Potvrdite email adresu \u2014 Marina Crane Booking" : "Verify your email \u2014 Marina Crane Booking";
+  const content = `
+    <h2>${isHr ? "Dobrodo\u0161li" : "Welcome"}, ${opts.userName}!</h2>
+    <p>${isHr ? "Hvala na registraciji. Molimo potvrdite svoju email adresu klikom na gumb ispod:" : "Thank you for registering. Please verify your email address by clicking the button below:"}</p>
+    <div style="margin:24px 0">
+      <a href="${opts.verifyUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+        ${isHr ? "Potvrdi email" : "Verify Email"}
+      </a>
+    </div>
+    <p style="color:#888;font-size:12px">${isHr ? "Ovaj link vrijedi 24 sata." : "This link is valid for 24 hours."}</p>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendUserInvitation(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? "Va\u0161 korisni\u010Dki ra\u010Dun je kreiran \u2014 Marina Crane Booking" : "Your account has been created \u2014 Marina Crane Booking";
+  const content = `
+    <h2>${isHr ? "Dobrodo\u0161li" : "Welcome"}, ${opts.userName}!</h2>
+    <p>${isHr ? "Administrator je kreirao va\u0161 korisni\u010Dki ra\u010Dun za sustav rezervacije dizalice." : "An administrator has created your account for the crane booking system."}</p>
+    <p>${isHr ? "Va\u0161i podaci za prijavu su:" : "Your login credentials are:"}</p>
+    <table style="border-collapse:collapse;font-family:sans-serif;margin:16px 0">
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">Email:</td><td>${opts.to}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;font-weight:bold;">${isHr ? "Lozinka" : "Password"}:</td><td><code>${opts.tempPassword}</code></td></tr>
+    </table>
+    <p style="color:#ef4444;font-weight:bold">${isHr ? "Molimo vas da promijenite lozinku odmah nakon prve prijave." : "Please change your password immediately after your first login."}</p>
+    <div style="margin:24px 0">
+      <a href="${opts.loginUrl}" style="background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+        ${isHr ? "Prijavi se" : "Log In"}
+      </a>
+    </div>
+  `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+async function sendNewMessageNotification(opts) {
+  const { lang = "hr" } = opts;
+  const isHr = lang === "hr";
+  const subject = isHr ? `Nova poruka u vezi rezervacije \u2014 Marina Crane Booking` : `New message regarding reservation \u2014 Marina Crane Booking`;
+  const content = `
+        <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+        <p>${isHr ? `Imate novu poruku od osoblja marine u vezi va\u0161e rezervacije <strong>${opts.reservationNumber}</strong>.` : `You have a new message from the marina staff regarding your reservation <strong>${opts.reservationNumber}</strong>.`}</p>
+        <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;background-color:#f9fafb;">${opts.messageBody}</blockquote>
+        <p>${isHr ? "Prijavite se na platformu za odgovor." : "Please log in to the platform to respond."}</p>
+    `;
+  return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+var BASE_URL, LOGO_URL, EMAIL_FOOTER, CONTACT_BLOCK;
+var init_email = __esm({
+  "server/_core/email.ts"() {
+    "use strict";
+    BASE_URL = process.env.PUBLIC_URL || "http://localhost:5173";
+    LOGO_URL = `${BASE_URL}/logo.png`;
+    EMAIL_FOOTER = `<p style="color:#888;font-size:12px;margin-top:24px;">P\u0160D \u0160pinut Crane Booking App</p>`;
+    CONTACT_BLOCK = `
+<div style="margin-top:24px;border-top:1px solid #eee;padding-top:16px;color:#555;font-size:14px;line-height:1.5;">
+  <strong>Pomorsko \u0161portsko dru\u0161tvo \u201C\u0160pinut\u201D</strong><br/>
+  Lu\u010Dica 7,  Split<br/>
+  Tel.: 021/ 386 813<br/>
+  Fax.: 021/ 323 002<br/>
+  mob. kapetan: 091/ 505 59 86<br/>
+  e-mail: <a href="mailto:lucica@psd-spinut.hr" style="color:#2563eb;text-decoration:none;">lucica@psd-spinut.hr</a>
+</div>
+`;
+  }
+});
+
+// server/_core/sms.ts
+var sms_exports = {};
+__export(sms_exports, {
+  sendReservationConfirmationSms: () => sendReservationConfirmationSms,
+  sendReservationRejectionSms: () => sendReservationRejectionSms,
+  sendSms: () => sendSms
+});
+async function sendSms(to, message) {
+  if (!INFOBIP_BASE_URL || !INFOBIP_API_KEY) {
+    console.warn("[SMS] Infobip not configured \u2014 skipping SMS to", to);
+    return false;
+  }
+  try {
+    const response = await fetch(`${INFOBIP_BASE_URL}/sms/2/text/advanced`, {
+      method: "POST",
+      headers: {
+        "Authorization": `App ${INFOBIP_API_KEY}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        messages: [
+          {
+            from: INFOBIP_SENDER,
+            destinations: [{ to }],
+            text: message
+          }
+        ]
+      })
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.warn(`[SMS] Failed (${response.status}): ${detail}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[SMS] Error:", err);
+    return false;
+  }
+}
+async function sendReservationConfirmationSms(opts) {
+  const { lang = "hr" } = opts;
+  const time = opts.startDate.toLocaleString(lang === "hr" ? "hr-HR" : "en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  const msg = lang === "hr" ? `MARINA: Rezervacija za ${opts.craneName} potvr\u0111ena. Do\u0111ite u ${opts.location} u ${time}.` : `MARINA: Reservation for ${opts.craneName} confirmed. Come to ${opts.location} at ${time}.`;
+  return sendSms(opts.phone, msg);
+}
+async function sendReservationRejectionSms(opts) {
+  const { lang = "hr" } = opts;
+  const msg = lang === "hr" ? `MARINA: Rezervacija za ${opts.craneName} je odbijena.${opts.reason ? " Razlog: " + opts.reason : ""}` : `MARINA: Reservation for ${opts.craneName} was rejected.${opts.reason ? " Reason: " + opts.reason : ""}`;
+  return sendSms(opts.phone, msg);
+}
+var INFOBIP_BASE_URL, INFOBIP_API_KEY, INFOBIP_SENDER;
+var init_sms = __esm({
+  "server/_core/sms.ts"() {
+    "use strict";
+    INFOBIP_BASE_URL = process.env.INFOBIP_BASE_URL;
+    INFOBIP_API_KEY = process.env.INFOBIP_API_KEY;
+    INFOBIP_SENDER = process.env.INFOBIP_SENDER || "Marina";
+  }
+});
+
+// server/services/notifications.ts
+var notifications_exports = {};
+__export(notifications_exports, {
+  notifyStatusChange: () => notifyStatusChange,
+  notifyWaitingList: () => notifyWaitingList,
+  processReminders: () => processReminders,
+  processWaitingListExpiry: () => processWaitingListExpiry,
+  startNotificationCron: () => startNotificationCron
+});
+import { eq as eq2, and as and2, gte as gte2, lt as lt2 } from "drizzle-orm";
+async function processReminders() {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const now = /* @__PURE__ */ new Date();
+    const twentyFourHoursFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1e3);
+    const windowEnd = new Date(twentyFourHoursFromNow.getTime() + 65 * 60 * 1e3);
+    const pending = await db.select({
+      res: reservations,
+      user: users,
+      crane: cranes
+    }).from(reservations).innerJoin(users, eq2(reservations.userId, users.id)).innerJoin(cranes, eq2(reservations.craneId, cranes.id)).where(and2(
+      eq2(reservations.status, "approved"),
+      eq2(reservations.reminderSent, false),
+      gte2(reservations.scheduledStart, twentyFourHoursFromNow),
+      lt2(reservations.scheduledStart, windowEnd)
+    ));
+    for (const { res, user, crane } of pending) {
+      const dateStr = res.scheduledStart ? new Date(res.scheduledStart).toLocaleString("hr-HR") : "-";
+      const msg = `PODSJETNIK: Vasa rezervacija ${res.reservationNumber} za ${crane.name} je sutra u ${dateStr}.`;
+      if (user.phone) await sendSms(user.phone, msg);
+      await db.update(reservations).set({ reminderSent: true }).where(eq2(reservations.id, res.id));
+    }
+  } catch (error) {
+    console.error("Failed to process reminders:", error);
+  }
+}
+async function notifyStatusChange(reservationId) {
+  const db = await getDb();
+  if (!db) return;
+  const [item] = await db.select({
+    res: reservations,
+    user: users,
+    crane: cranes
+  }).from(reservations).innerJoin(users, eq2(reservations.userId, users.id)).innerJoin(cranes, eq2(reservations.craneId, cranes.id)).where(eq2(reservations.id, reservationId));
+  if (!item) return;
+  const { res, user, crane } = item;
+  if (res.status === "approved" && user.email) {
+    await sendReservationConfirmation({
+      to: user.email,
+      userName: user.name || user.firstName || "Korisnik",
+      craneName: crane.name,
+      startDate: res.scheduledStart ?? /* @__PURE__ */ new Date(),
+      endDate: res.scheduledEnd ?? /* @__PURE__ */ new Date(),
+      craneLocation: crane.location || "-",
+      adminNotes: res.adminNote || void 0,
+      lang: "hr"
+    });
+    if (user.phone) {
+      await sendReservationConfirmationSms({
+        phone: user.phone,
+        craneName: crane.name,
+        startDate: res.scheduledStart ?? /* @__PURE__ */ new Date(),
+        location: crane.location || "-",
+        lang: "hr"
+      });
+    }
+  } else if (res.status === "rejected" && user.email) {
+    await sendReservationRejection({
+      to: user.email,
+      userName: user.name || user.firstName || "Korisnik",
+      craneName: crane.name,
+      startDate: res.scheduledStart ?? /* @__PURE__ */ new Date(),
+      reason: res.adminNote || void 0,
+      lang: "hr"
+    });
+    if (user.phone) {
+      await sendReservationRejectionSms({
+        phone: user.phone,
+        craneName: crane.name,
+        reason: res.adminNote || void 0,
+        lang: "hr"
+      });
+    }
+  }
+}
+async function notifyWaitingList(craneId, dateStr) {
+  const db = await getDb();
+  if (!db) return;
+  const { waitingList: waitingList2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+  const items = await db.select({
+    w: waitingList2,
+    user: users,
+    crane: cranes
+  }).from(waitingList2).innerJoin(users, eq2(waitingList2.userId, users.id)).innerJoin(cranes, eq2(waitingList2.craneId, cranes.id)).where(and2(
+    eq2(waitingList2.craneId, craneId),
+    eq2(waitingList2.requestedDate, dateStr),
+    eq2(waitingList2.notified, false)
+  ));
+  for (const { w, user, crane } of items) {
+    if (user.email) {
+      await sendWaitingListNotification({
+        to: user.email,
+        userName: user.name || user.firstName || "Korisnik",
+        craneName: crane.name,
+        date: dateStr,
+        lang: "hr"
+      });
+    }
+    if (user.phone) {
+      const msg = `MARINA: Termin za ${crane.name} dana ${dateStr} je ponovno dostupan. Rezervirajte online.`;
+      await sendSms(user.phone, msg);
+    }
+    await db.update(waitingList2).set({ notified: true }).where(eq2(waitingList2.id, w.id));
+  }
+}
+async function processWaitingListExpiry() {
+  try {
+    const db = await getDb();
+    if (!db) return;
+    const { waitingList: waitingList2 } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+    const expired = await db.select({
+      w: waitingList2,
+      user: users
+    }).from(waitingList2).innerJoin(users, eq2(waitingList2.userId, users.id)).where(and2(
+      eq2(waitingList2.status, "waiting"),
+      lt2(waitingList2.expiresAt, /* @__PURE__ */ new Date())
+    ));
+    for (const { w, user } of expired) {
+      await db.update(waitingList2).set({ status: "expired", updatedAt: /* @__PURE__ */ new Date() }).where(eq2(waitingList2.id, w.id));
+      if (user.email) {
+        const { sendWaitingListNotification: sendWaitingListNotification3 } = await Promise.resolve().then(() => (init_email(), email_exports));
+        await sendWaitingListNotification3({
+          to: user.email,
+          userName: user.name || user.firstName || "Korisnik",
+          craneName: "\u2014",
+          date: w.requestedDate,
+          lang: "hr"
+        }).catch(console.warn);
+      }
+      if (user.phone) {
+        const { sendSms: sendSms2 } = await Promise.resolve().then(() => (init_sms(), sms_exports));
+        await sendSms2(
+          user.phone,
+          `MARINA: Va\u0161a ponuda na listi \u010Dekanja za ${w.requestedDate} je istekla. Molimo zaka\u017Eite novi termin.`
+        ).catch(console.warn);
+      }
+    }
+    if (expired.length > 0) {
+      console.log(`[WaitingList] Processed ${expired.length} expired entries`);
+    }
+  } catch (error) {
+    console.error("Failed to process waiting list expiry:", error);
+  }
+}
+function startNotificationCron() {
+  console.log("Notification service started (reminders hourly, waiting list every 30min)");
+  processReminders();
+  setInterval(processReminders, 60 * 60 * 1e3);
+  processWaitingListExpiry();
+  setInterval(processWaitingListExpiry, 30 * 60 * 1e3);
+}
+var init_notifications = __esm({
+  "server/services/notifications.ts"() {
+    "use strict";
+    init_db();
+    init_schema();
+    init_email();
+    init_sms();
+  }
+});
+
+// server/_core/rateLimit.ts
+var rateLimit_exports = {};
+__export(rateLimit_exports, {
+  createRateLimiter: () => createRateLimiter
+});
+function getClientKey(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+function cleanup(store, windowMs) {
+  const now = Date.now();
+  const keys = Array.from(store.keys());
+  for (const key of keys) {
+    const entry = store.get(key);
+    if (!entry) continue;
+    entry.timestamps = entry.timestamps.filter((t2) => now - t2 < windowMs);
+    if (entry.timestamps.length === 0) {
+      store.delete(key);
+    }
+  }
+}
+function createRateLimiter(options) {
+  const { maxRequests, windowMs, name = "default", message } = options;
+  if (!stores.has(name)) {
+    stores.set(name, /* @__PURE__ */ new Map());
+  }
+  const store = stores.get(name);
+  const cleanupInterval = setInterval(() => cleanup(store, windowMs), 6e4);
+  cleanupInterval.unref();
+  return (req, res, next) => {
+    const key = getClientKey(req);
+    const now = Date.now();
+    let entry = store.get(key);
+    if (!entry) {
+      entry = { timestamps: [] };
+      store.set(key, entry);
+    }
+    entry.timestamps = entry.timestamps.filter((t2) => now - t2 < windowMs);
+    if (entry.timestamps.length >= maxRequests) {
+      const retryAfterMs = entry.timestamps[0] + windowMs - now;
+      const retryAfterSec = Math.ceil(retryAfterMs / 1e3);
+      res.set("Retry-After", String(retryAfterSec));
+      res.status(429).json({
+        error: "TOO_MANY_REQUESTS",
+        message: message || `Previ\u0161e zahtjeva. Poku\u0161ajte ponovo za ${retryAfterSec} sekundi.`,
+        retryAfterSeconds: retryAfterSec
+      });
+      return;
+    }
+    entry.timestamps.push(now);
+    next();
+  };
+}
+var stores;
+var init_rateLimit = __esm({
+  "server/_core/rateLimit.ts"() {
+    "use strict";
+    stores = /* @__PURE__ */ new Map();
+  }
+});
+
+// server/_core/index.ts
+import "dotenv/config";
+import express2 from "express";
+import { createServer } from "http";
+import net from "net";
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+
+// server/_core/oauth.ts
+init_db();
+
+// server/_core/cookies.ts
+function isSecureRequest(req) {
+  if (req.protocol === "https") return true;
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  if (!forwardedProto) return false;
+  const protoList = Array.isArray(forwardedProto) ? forwardedProto : forwardedProto.split(",");
+  return protoList.some((proto) => proto.trim().toLowerCase() === "https");
+}
+function getSessionCookieOptions(req) {
+  return {
+    httpOnly: true,
+    path: "/",
+    sameSite: "none",
+    secure: isSecureRequest(req)
+  };
+}
+function getRefreshCookieOptions(req) {
+  return {
+    httpOnly: true,
+    path: "/",
+    // needs to be accessible for silent refresh
+    sameSite: "none",
+    secure: isSecureRequest(req)
+  };
+}
+
+// server/_core/context.ts
+import { jwtVerify, SignJWT } from "jose";
+
+// shared/const.ts
+var COOKIE_NAME = "app_session_id";
+var REFRESH_COOKIE_NAME = "app_refresh_token";
+var ONE_YEAR_MS = 1e3 * 60 * 60 * 24 * 365;
+var ACCESS_TOKEN_EXPIRY_MS = 15 * 60 * 1e3;
+var REFRESH_TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1e3;
+var UNAUTHED_ERR_MSG = "Please login (10001)";
+var NOT_ADMIN_ERR_MSG = "You do not have required permission (10002)";
+
+// server/_core/context.ts
+init_db();
+import { parse as parseCookieHeader } from "cookie";
+function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET environment variable is not set");
+  return new TextEncoder().encode(secret);
+}
+function getRefreshSecret() {
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret) throw new Error("JWT_REFRESH_SECRET environment variable is not set");
+  return new TextEncoder().encode(secret);
+}
+async function verifyAccessToken(token) {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
+      algorithms: ["HS256"]
+    });
+    return payload.sub ?? null;
+  } catch {
+    return null;
+  }
+}
+async function verifyRefreshToken(token) {
+  try {
+    const { payload } = await jwtVerify(token, getRefreshSecret(), {
+      algorithms: ["HS256"]
+    });
+    return payload.sub ?? null;
+  } catch {
+    return null;
+  }
+}
+async function issueAccessToken(userId) {
+  return new SignJWT({ sub: userId }).setProtectedHeader({ alg: "HS256" }).setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1e3}s`).setIssuedAt().sign(getJwtSecret());
+}
+async function createContext(opts) {
+  let user = null;
+  try {
+    const cookieHeader = opts.req.headers.cookie;
+    if (cookieHeader) {
+      const cookies = parseCookieHeader(cookieHeader);
+      const accessToken = cookies[COOKIE_NAME];
+      const refreshToken = cookies[REFRESH_COOKIE_NAME];
+      if (accessToken) {
+        const userId = await verifyAccessToken(accessToken);
+        if (userId) {
+          user = await getUserById(userId) ?? null;
+        }
+      }
+      if (!user && refreshToken) {
+        const userId = await verifyRefreshToken(refreshToken);
+        if (userId) {
+          user = await getUserById(userId) ?? null;
+          if (user) {
+            const newAccessToken = await issueAccessToken(user.id);
+            const cookieOptions = getSessionCookieOptions(opts.req);
+            opts.res.cookie(COOKIE_NAME, newAccessToken, {
+              ...cookieOptions,
+              maxAge: ACCESS_TOKEN_EXPIRY_MS
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    user = null;
+  }
+  return {
+    req: opts.req,
+    res: opts.res,
+    user
+  };
+}
+
+// server/_core/oauth.ts
+import { SignJWT as SignJWT2 } from "jose";
+import axios from "axios";
+var GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
+var GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
+var GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo";
+function getGoogleConfig() {
+  return {
+    clientId: process.env.GOOGLE_CLIENT_ID || "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+    callbackUrl: process.env.GOOGLE_CALLBACK_URL || "http://localhost:3000/auth/google/callback"
+  };
+}
+async function issueTokenPair(userId, role, req, res) {
+  const accessToken = await new SignJWT2({ sub: userId, role }).setProtectedHeader({ alg: "HS256" }).setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1e3}s`).setIssuedAt().sign(getJwtSecret());
+  const refreshToken = await new SignJWT2({ sub: userId }).setProtectedHeader({ alg: "HS256" }).setExpirationTime(`${REFRESH_TOKEN_EXPIRY_MS / 1e3}s`).setIssuedAt().sign(getRefreshSecret());
+  const sessionOpts = getSessionCookieOptions(req);
+  const refreshOpts = getRefreshCookieOptions(req);
+  res.cookie(COOKIE_NAME, accessToken, { ...sessionOpts, maxAge: ACCESS_TOKEN_EXPIRY_MS });
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, { ...refreshOpts, maxAge: REFRESH_TOKEN_EXPIRY_MS });
+}
+function registerOAuthRoutes(app) {
+  app.get("/auth/google", (req, res) => {
+    const { clientId, callbackUrl } = getGoogleConfig();
+    if (!clientId) {
+      res.status(500).json({ error: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID in .env." });
+      return;
+    }
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: callbackUrl,
+      response_type: "code",
+      scope: "openid email profile",
+      access_type: "offline",
+      prompt: "consent"
+    });
+    res.redirect(302, `${GOOGLE_AUTH_URL}?${params.toString()}`);
+  });
+  app.get("/auth/google/callback", async (req, res) => {
+    const code = req.query.code;
+    const error = req.query.error;
+    if (error || !code) {
+      console.warn("[Google OAuth] Error or no code:", error);
+      res.redirect("/?error=google_auth_failed");
+      return;
+    }
+    try {
+      const { clientId, clientSecret, callbackUrl } = getGoogleConfig();
+      const tokenResponse = await axios.post(GOOGLE_TOKEN_URL, {
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: callbackUrl,
+        grant_type: "authorization_code"
+      });
+      const { access_token } = tokenResponse.data;
+      const userInfoResponse = await axios.get(GOOGLE_USERINFO_URL, {
+        headers: { Authorization: `Bearer ${access_token}` }
+      });
+      const { id: googleId, email, name, given_name, family_name } = userInfoResponse.data;
+      if (!googleId || !email) {
+        res.redirect("/?error=google_missing_info");
+        return;
+      }
+      let user = await getUserByGoogleId(googleId);
+      if (!user) {
+        user = await getUserByEmail(email);
+        if (user) {
+          await updateUser(user.id, {
+            googleId,
+            loginMethod: "google",
+            emailVerifiedAt: user.emailVerifiedAt || /* @__PURE__ */ new Date()
+            // Google email is verified
+          });
+          user = await getUserById(user.id) ?? void 0;
+        } else {
+          const userId = await createLocalUser({
+            email,
+            passwordHash: "",
+            // No password for OAuth users
+            firstName: given_name || name?.split(" ")[0] || "",
+            lastName: family_name || name?.split(" ").slice(1).join(" ") || ""
+          });
+          if (userId) {
+            await updateUser(userId, {
+              googleId,
+              loginMethod: "google",
+              emailVerifiedAt: /* @__PURE__ */ new Date(),
+              // Google email is already verified
+              userStatus: "active"
+            });
+            user = await getUserById(userId) ?? void 0;
+          }
+        }
+      } else {
+        await updateUser(user.id, {
+          lastSignedIn: /* @__PURE__ */ new Date(),
+          loginMethod: "google"
+        });
+      }
+      if (!user) {
+        res.redirect("/?error=google_user_creation_failed");
+        return;
+      }
+      await issueTokenPair(user.id, user.role, req, res);
+      await createAuditEntry({
+        actorId: user.id,
+        action: "google_login",
+        entityType: "user",
+        entityId: user.id
+      });
+      res.redirect(302, "/");
+    } catch (err) {
+      console.error("[Google OAuth] Callback failed:", err);
+      res.redirect("/?error=google_auth_failed");
+    }
+  });
+}
+
+// server/_core/systemRouter.ts
+import { z } from "zod";
+
+// server/_core/notification.ts
+import { TRPCError } from "@trpc/server";
+
+// server/_core/env.ts
+var ENV = {
+  appId: process.env.VITE_APP_ID ?? "",
+  cookieSecret: process.env.JWT_SECRET ?? "",
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  oAuthServerUrl: process.env.OAUTH_SERVER_URL ?? "",
+  ownerOpenId: process.env.OWNER_OPEN_ID ?? "",
+  isProduction: process.env.NODE_ENV === "production",
+  forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
+  forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? ""
+};
+
+// server/_core/notification.ts
+var TITLE_MAX_LENGTH = 1200;
+var CONTENT_MAX_LENGTH = 2e4;
+var trimValue = (value) => value.trim();
+var isNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0;
+var buildEndpointUrl = (baseUrl) => {
+  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+  return new URL(
+    "webdevtoken.v1.WebDevService/SendNotification",
+    normalizedBase
+  ).toString();
+};
+var validatePayload = (input) => {
+  if (!isNonEmptyString(input.title)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Notification title is required."
+    });
+  }
+  if (!isNonEmptyString(input.content)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Notification content is required."
+    });
+  }
+  const title = trimValue(input.title);
+  const content = trimValue(input.content);
+  if (title.length > TITLE_MAX_LENGTH) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Notification title must be at most ${TITLE_MAX_LENGTH} characters.`
+    });
+  }
+  if (content.length > CONTENT_MAX_LENGTH) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Notification content must be at most ${CONTENT_MAX_LENGTH} characters.`
+    });
+  }
+  return { title, content };
+};
+async function notifyOwner(payload) {
+  const { title, content } = validatePayload(payload);
+  if (!ENV.forgeApiUrl) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Notification service URL is not configured."
+    });
+  }
+  if (!ENV.forgeApiKey) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Notification service API key is not configured."
+    });
+  }
+  const endpoint = buildEndpointUrl(ENV.forgeApiUrl);
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${ENV.forgeApiKey}`,
+        "content-type": "application/json",
+        "connect-protocol-version": "1"
+      },
+      body: JSON.stringify({ title, content })
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      console.warn(
+        `[Notification] Failed to notify owner (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`
+      );
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.warn("[Notification] Error calling notification service:", error);
+    return false;
+  }
+}
+
+// server/_core/trpc.ts
+import { initTRPC, TRPCError as TRPCError2 } from "@trpc/server";
+import superjson from "superjson";
+var t = initTRPC.context().create({
+  transformer: superjson
+});
+var router = t.router;
+var publicProcedure = t.procedure;
+var requireUser = t.middleware(async (opts) => {
+  const { ctx, next } = opts;
+  if (!ctx.user) {
+    throw new TRPCError2({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+  return next({
+    ctx: {
+      ...ctx,
+      user: ctx.user
+    }
+  });
+});
+var protectedProcedure = t.procedure.use(requireUser);
+var adminProcedure = t.procedure.use(
+  t.middleware(async (opts) => {
+    const { ctx, next } = opts;
+    if (!ctx.user || ctx.user.role !== "admin") {
+      throw new TRPCError2({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user
+      }
+    });
+  })
+);
+var operatorProcedure = t.procedure.use(
+  t.middleware(async (opts) => {
+    const { ctx, next } = opts;
+    if (!ctx.user || ctx.user.role !== "admin" && ctx.user.role !== "operator") {
+      throw new TRPCError2({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user
+      }
+    });
+  })
+);
+
+// server/_core/systemRouter.ts
+var systemRouter = router({
+  health: publicProcedure.input(
+    z.object({
+      timestamp: z.number().min(0, "timestamp cannot be negative")
+    })
+  ).query(() => ({
+    ok: true
+  })),
+  notifyOwner: adminProcedure.input(
+    z.object({
+      title: z.string().min(1, "title is required"),
+      content: z.string().min(1, "content is required")
+    })
+  ).mutation(async ({ input }) => {
+    const delivered = await notifyOwner(input);
+    return {
+      success: delivered
+    };
+  }),
+  auditLogs: adminProcedure.input(z.object({ limit: z.number().int().positive().default(100).optional() }).optional()).query(async ({ input }) => {
+    const { listAuditLog: listAuditLog2 } = await Promise.resolve().then(() => (init_db(), db_exports));
+    return listAuditLog2(input?.limit ?? 100);
+  })
+});
+
+// server/routers.ts
+init_db();
+init_email();
+init_notifications();
+init_schema();
+init_sms();
+import { z as z2 } from "zod";
+import { TRPCError as TRPCError3 } from "@trpc/server";
+import { and as and3, eq as eq3, gte as gte3, or as or2, lte as lte2, desc as desc2, sql as sql3 } from "drizzle-orm";
+import crypto2 from "crypto";
+import bcrypt from "bcryptjs";
+import { SignJWT as SignJWT3, jwtVerify as jwtVerify2 } from "jose";
+async function issueTokenPair2(userId, role, ctx) {
+  const accessToken = await new SignJWT3({ sub: userId, role }).setProtectedHeader({ alg: "HS256" }).setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1e3}s`).setIssuedAt().sign(getJwtSecret());
+  const refreshToken = await new SignJWT3({ sub: userId }).setProtectedHeader({ alg: "HS256" }).setExpirationTime(`${REFRESH_TOKEN_EXPIRY_MS / 1e3}s`).setIssuedAt().sign(getRefreshSecret());
+  const sessionOpts = getSessionCookieOptions(ctx.req);
+  const refreshOpts = getRefreshCookieOptions(ctx.req);
+  ctx.res.cookie(COOKIE_NAME, accessToken, { ...sessionOpts, maxAge: ACCESS_TOKEN_EXPIRY_MS });
+  ctx.res.cookie(REFRESH_COOKIE_NAME, refreshToken, { ...refreshOpts, maxAge: REFRESH_TOKEN_EXPIRY_MS });
+}
+function parseHHMM(timeStr) {
+  const [h, m] = timeStr.split(":").map(Number);
+  return { h: h ?? 8, m: m ?? 0 };
+}
+var appRouter = router({
+  system: systemRouter,
+  // ÔöÇÔöÇÔöÇ Auth ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  auth: router({
+    me: publicProcedure.query((opts) => opts.ctx.user),
+    register: publicProcedure.input(z2.object({
+      email: z2.string().email(),
+      password: z2.string().min(8),
+      firstName: z2.string().min(1).max(100),
+      lastName: z2.string().min(1).max(100),
+      username: z2.string().optional(),
+      phone: z2.string().min(1)
+    })).mutation(async ({ input, ctx }) => {
+      const existing = await getUserByEmail(input.email);
+      if (existing) {
+        throw new TRPCError3({ code: "CONFLICT", message: "Email je ve\u0107 registriran." });
+      }
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      const userId = await createLocalUser({
+        email: input.email,
+        passwordHash,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        username: input.username,
+        phone: input.phone
+      });
+      if (!userId) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      await issueTokenPair2(String(userId), "user", ctx);
+      const verifyToken = await createEmailVerificationToken(String(userId));
+      const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+      const verifyUrl = `${baseUrl}/auth?verifyToken=${verifyToken}`;
+      sendEmailVerification({
+        to: input.email,
+        userName: input.firstName,
+        verifyUrl
+      }).catch(console.warn);
+      return { success: true };
+    }),
+    login: publicProcedure.input(z2.object({
+      email: z2.string().email(),
+      password: z2.string()
+    })).mutation(async ({ input, ctx }) => {
+      const user = await getUserByEmail(input.email);
+      if (!user || !user.passwordHash) {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Pogre\u0161an email ili lozinka." });
+      }
+      const valid = await bcrypt.compare(input.password, user.passwordHash);
+      if (!valid) {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Pogre\u0161an email ili lozinka." });
+      }
+      await issueTokenPair2(String(user.id), user.role, ctx);
+      return { success: true, role: user.role };
+    }),
+    logout: publicProcedure.mutation(({ ctx }) => {
+      const sessionOpts = getSessionCookieOptions(ctx.req);
+      const refreshOpts = getRefreshCookieOptions(ctx.req);
+      ctx.res.clearCookie(COOKIE_NAME, { ...sessionOpts, maxAge: -1 });
+      ctx.res.clearCookie(REFRESH_COOKIE_NAME, { ...refreshOpts, maxAge: -1 });
+      return { success: true };
+    }),
+    refresh: publicProcedure.mutation(async ({ ctx }) => {
+      const cookieHeader = ctx.req.headers.cookie;
+      if (!cookieHeader) throw new TRPCError3({ code: "UNAUTHORIZED", message: "Sesija je istekla." });
+      const { parse: parseCookies } = await import("cookie");
+      const cookies = parseCookies(cookieHeader);
+      const refreshToken = cookies[REFRESH_COOKIE_NAME];
+      if (!refreshToken) throw new TRPCError3({ code: "UNAUTHORIZED", message: "Sesija je istekla." });
+      try {
+        const { payload } = await jwtVerify2(refreshToken, getRefreshSecret(), { algorithms: ["HS256"] });
+        const userId = payload.sub;
+        if (!userId) throw new Error("missing sub");
+        const user = await getUserById(userId);
+        if (!user) throw new TRPCError3({ code: "UNAUTHORIZED", message: "Korisnik nije prona\u0111en." });
+        await issueTokenPair2(user.id, user.role, ctx);
+        return { success: true };
+      } catch {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Sesija je istekla. Molimo prijavite se ponovo." });
+      }
+    }),
+    forgotPassword: publicProcedure.input(z2.object({ email: z2.string().email() })).mutation(async ({ input }) => {
+      const user = await getUserByEmail(input.email);
+      if (!user) return { success: true };
+      const token = crypto2.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1e3);
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      await db.insert(passwordResets).values({
+        userId: user.id,
+        token,
+        expiresAt
+      });
+      const resetUrl = `${process.env.PUBLIC_URL || "http://localhost:5173"}/auth?token=${token}`;
+      await sendPasswordResetEmail({
+        to: user.email,
+        userName: user.name || user.firstName || "Korisnik",
+        resetUrl
+      });
+      return { success: true };
+    }),
+    resetPassword: publicProcedure.input(z2.object({ token: z2.string(), password: z2.string().min(8) })).mutation(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      const [reset] = await db.select().from(passwordResets).where(and3(eq3(passwordResets.token, input.token), gte3(passwordResets.expiresAt, /* @__PURE__ */ new Date()))).limit(1);
+      if (!reset) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Token je neva\u017Ee\u0107i ili je istekao." });
+      }
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      await db.update(users).set({ passwordHash, mustChangePassword: false, updatedAt: /* @__PURE__ */ new Date() }).where(eq3(users.id, reset.userId));
+      await db.delete(passwordResets).where(eq3(passwordResets.userId, reset.userId));
+      return { success: true };
+    }),
+    verifyEmail: publicProcedure.input(z2.object({ token: z2.string().min(1) })).mutation(async ({ input }) => {
+      const userId = await verifyEmailToken(input.token);
+      if (!userId) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Link za verifikaciju je neva\u017Ee\u0107i ili je istekao." });
+      }
+      return { success: true };
+    }),
+    resendVerification: protectedProcedure.mutation(async ({ ctx }) => {
+      if (ctx.user.emailVerifiedAt) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Email je ve\u0107 verificiran." });
+      }
+      const verifyToken = await createEmailVerificationToken(ctx.user.id);
+      const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+      const verifyUrl = `${baseUrl}/auth?verifyToken=${verifyToken}`;
+      await sendEmailVerification({
+        to: ctx.user.email,
+        userName: ctx.user.name || ctx.user.firstName || "Korisnik",
+        verifyUrl
+      });
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Vessels ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  vessel: router({
+    listMine: protectedProcedure.query(async ({ ctx }) => {
+      return listVesselsByUser(ctx.user.id);
+    }),
+    getById: protectedProcedure.input(z2.object({ id: z2.string().uuid() })).query(async ({ input, ctx }) => {
+      const vessel = await getVesselById(input.id);
+      if (!vessel || vessel.ownerId !== ctx.user.id) {
+        throw new TRPCError3({ code: "NOT_FOUND", message: "Plovilo nije prona\u0111eno." });
+      }
+      return vessel;
+    }),
+    create: protectedProcedure.input(z2.object({
+      name: z2.string().min(1).max(255),
+      type: z2.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
+      lengthM: z2.number().positive().optional(),
+      beamM: z2.number().positive().optional(),
+      draftM: z2.number().positive().optional(),
+      weightTons: z2.number().positive().optional(),
+      registration: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const id = await createVessel({
+        ...input,
+        ownerId: ctx.user.id
+      });
+      await createAuditEntry({ actorId: ctx.user.id, action: "vessel_created", entityType: "vessel", entityId: id });
+      return { id };
+    }),
+    update: protectedProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      name: z2.string().min(1).max(255).optional(),
+      type: z2.enum(["jedrilica", "motorni", "katamaran", "ostalo"]).optional(),
+      lengthM: z2.number().positive().optional(),
+      beamM: z2.number().positive().optional(),
+      draftM: z2.number().positive().optional(),
+      weightTons: z2.number().positive().optional(),
+      registration: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const { id, ...data } = input;
+      await updateVessel(id, ctx.user.id, data);
+      await createAuditEntry({ actorId: ctx.user.id, action: "vessel_updated", entityType: "vessel", entityId: id });
+      return { success: true };
+    }),
+    delete: protectedProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await deleteVessel(input.id, ctx.user.id);
+      await createAuditEntry({ actorId: ctx.user.id, action: "vessel_deleted", entityType: "vessel", entityId: input.id });
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ User Management (Admin) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  user: router({
+    list: operatorProcedure.input(z2.object({
+      page: z2.number().int().min(1).default(1),
+      pageSize: z2.number().int().min(1).max(1e3).default(100)
+    }).optional().default({ page: 1, pageSize: 100 })).query(async ({ input }) => {
+      const { page, pageSize } = input;
+      const offset = (page - 1) * pageSize;
+      return listAllUsers(pageSize, offset);
+    }),
+    create: adminProcedure.input(z2.object({
+      email: z2.string().email(),
+      firstName: z2.string().min(1),
+      lastName: z2.string().min(1),
+      phone: z2.string().optional(),
+      role: z2.enum(["user", "operator", "admin"]).default("user")
+    })).mutation(async ({ input, ctx }) => {
+      const existing = await getUserByEmail(input.email);
+      if (existing) {
+        throw new TRPCError3({ code: "CONFLICT", message: "Email je ve\u0107 registriran." });
+      }
+      const tempPassword = crypto2.randomBytes(5).toString("hex");
+      const passwordHash = await bcrypt.hash(tempPassword, 12);
+      const userId = await createLocalUser({
+        email: input.email,
+        passwordHash,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        phone: input.phone,
+        mustChangePassword: true
+      });
+      if (!userId) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      if (input.role !== "user") {
+        await updateUserRole(String(userId), input.role);
+      }
+      const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+      const loginUrl = `${baseUrl}/auth`;
+      const emailSent = await sendUserInvitation({
+        to: input.email,
+        userName: input.firstName,
+        tempPassword,
+        loginUrl
+      });
+      if (!emailSent) {
+        console.warn(`[Email] Failed to send invitation to ${input.email}`);
+      }
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "user_created_admin",
+        entityType: "user",
+        entityId: String(userId),
+        payload: { email: input.email, role: input.role }
+      });
+      return { success: true, tempPassword };
+    }),
+    setRole: adminProcedure.input(z2.object({ id: z2.string().uuid(), role: z2.enum(["user", "operator", "admin"]) })).mutation(async ({ input, ctx }) => {
+      if (input.id === ctx.user.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ne mo\u017Eete sami sebi promijeniti rolu." });
+      }
+      await updateUserRole(input.id, input.role);
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "user_role_updated",
+        entityType: "user",
+        entityId: input.id,
+        payload: { role: input.role }
+      });
+      return { success: true };
+    }),
+    updateMe: protectedProcedure.input(z2.object({
+      firstName: z2.string().min(1).optional(),
+      lastName: z2.string().min(1).optional(),
+      name: z2.string().optional(),
+      phone: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const { updateUser: updateUserDb } = await Promise.resolve().then(() => (init_db(), db_exports));
+      await updateUserDb(ctx.user.id, input);
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "profile_updated",
+        entityType: "user",
+        entityId: ctx.user.id
+      });
+      return { success: true };
+    }),
+    update: adminProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      firstName: z2.string().optional(),
+      lastName: z2.string().optional(),
+      name: z2.string().optional(),
+      phone: z2.string().optional(),
+      role: z2.enum(["user", "operator", "admin"]).optional()
+    })).mutation(async ({ input, ctx }) => {
+      const { updateUser: updateUserDb, updateUserRole: updateUserRole2 } = await Promise.resolve().then(() => (init_db(), db_exports));
+      const { id, role, ...data } = input;
+      if (Object.keys(data).length > 0) {
+        await updateUserDb(id, data);
+      }
+      if (role) {
+        if (id === ctx.user.id && role !== "admin") {
+          throw new TRPCError3({ code: "BAD_REQUEST", message: "Ne mo\u017Eete sami sebi promijeniti rolu." });
+        }
+        await updateUserRole2(id, role);
+      }
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "user_updated_admin",
+        entityType: "user",
+        entityId: id
+      });
+      return { success: true };
+    }),
+    delete: adminProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      if (input.id === ctx.user.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ne mo\u017Eete obrisati sami sebe." });
+      }
+      await softDeleteUser(input.id);
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "user_deleted",
+        entityType: "user",
+        entityId: input.id
+      });
+      return { success: true };
+    }),
+    resetPassword: adminProcedure.input(z2.object({ id: z2.string().uuid(), password: z2.string().min(8) })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      const passwordHash = await bcrypt.hash(input.password, 12);
+      await db.update(users).set({ passwordHash, mustChangePassword: false, updatedAt: /* @__PURE__ */ new Date() }).where(eq3(users.id, input.id));
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "user_password_reset_admin",
+        entityType: "user",
+        entityId: input.id
+      });
+      return { success: true };
+    }),
+    changePassword: protectedProcedure.input(z2.object({
+      oldPassword: z2.string().min(8),
+      newPassword: z2.string().min(8)
+    })).mutation(async ({ input, ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      const user = await db.select().from(users).where(eq3(users.id, ctx.user.id)).limit(1);
+      if (!user[0] || !user[0].passwordHash) {
+        throw new TRPCError3({ code: "UNAUTHORIZED", message: "Korisnik nije prona\u0111en ili nema lozinku." });
+      }
+      const isValid = await bcrypt.compare(input.oldPassword, user[0].passwordHash);
+      if (!isValid) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Trenutna lozinka nije ispravna." });
+      }
+      const passwordHash = await bcrypt.hash(input.newPassword, 12);
+      await db.update(users).set({
+        passwordHash,
+        mustChangePassword: false,
+        updatedAt: /* @__PURE__ */ new Date()
+      }).where(eq3(users.id, ctx.user.id));
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "password_changed",
+        entityType: "user",
+        entityId: ctx.user.id
+      });
+      return { success: true };
+    }),
+    anonymize: adminProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      if (input.id === ctx.user.id) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Ne mo\u017Eete anonimizirati sami sebe." });
+      }
+      await softDeleteUser(input.id);
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "user_anonymized",
+        entityType: "user",
+        entityId: input.id
+      });
+      return { success: true };
+    }),
+    exportData: protectedProcedure.query(async ({ ctx }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      const userRecord = await getUserById(ctx.user.id);
+      const userVessels = await listVesselsByUser(ctx.user.id);
+      const userReservations = await db.select().from(reservations).where(eq3(reservations.userId, ctx.user.id));
+      const userWaitingList = await db.select().from(waitingList).where(eq3(waitingList.userId, ctx.user.id));
+      return {
+        profile: userRecord,
+        vessels: userVessels,
+        reservations: userReservations,
+        waitingList: userWaitingList,
+        exportedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+    }),
+    getCard: protectedProcedure.input(z2.object({ userId: z2.string().uuid().optional() }).optional()).query(async ({ input, ctx }) => {
+      const isStaff = ctx.user.role === "admin" || ctx.user.role === "operator";
+      const targetId = isStaff && input?.userId ? input.userId : ctx.user.id;
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      const [userRecord] = await db.select().from(users).where(eq3(users.id, targetId));
+      if (!userRecord) throw new TRPCError3({ code: "NOT_FOUND", message: "Korisnik nije prona\u0111en." });
+      const userReservations = await db.select({
+        id: reservations.id,
+        reservationNumber: reservations.reservationNumber,
+        status: reservations.status,
+        requestedDate: reservations.requestedDate,
+        requestedTimeSlot: reservations.requestedTimeSlot,
+        scheduledStart: reservations.scheduledStart,
+        scheduledEnd: reservations.scheduledEnd,
+        durationMin: reservations.durationMin,
+        vesselName: reservations.vesselName,
+        vesselType: reservations.vesselType,
+        vesselWeightTons: reservations.vesselWeightTons,
+        userNote: reservations.userNote,
+        adminNote: reservations.adminNote,
+        craneId: reservations.craneId,
+        createdAt: reservations.createdAt,
+        craneName: cranes.name,
+        craneLocation: cranes.location
+      }).from(reservations).leftJoin(cranes, eq3(reservations.craneId, cranes.id)).where(eq3(reservations.userId, targetId)).orderBy(sql3`${reservations.createdAt} desc`);
+      const userVessels = await listVesselsByUser(targetId);
+      const stats = {
+        total: userReservations.length,
+        pending: userReservations.filter((r) => r.status === "pending").length,
+        approved: userReservations.filter((r) => r.status === "approved").length,
+        completed: userReservations.filter((r) => r.status === "completed").length,
+        rejected: userReservations.filter((r) => r.status === "rejected").length,
+        cancelled: userReservations.filter((r) => r.status === "cancelled").length
+      };
+      return {
+        user: {
+          id: userRecord.id,
+          name: userRecord.name,
+          firstName: userRecord.firstName,
+          lastName: userRecord.lastName,
+          email: userRecord.email,
+          phone: userRecord.phone,
+          role: userRecord.role,
+          createdAt: userRecord.createdAt,
+          lastSignedIn: userRecord.lastSignedIn
+        },
+        stats,
+        reservations: userReservations,
+        vessels: userVessels
+      };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Cranes ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  crane: router({
+    list: publicProcedure.input(z2.object({ activeOnly: z2.boolean().optional().default(true) }).optional()).query(async ({ input }) => listCranes(input?.activeOnly ?? true)),
+    getById: publicProcedure.input(z2.object({ id: z2.string().uuid() })).query(async ({ input }) => {
+      const crane = await getCraneById(input.id);
+      if (!crane) throw new TRPCError3({ code: "NOT_FOUND", message: "Dizalica nije prona\u0111ena." });
+      return crane;
+    }),
+    create: operatorProcedure.input(z2.object({
+      name: z2.string().min(1).max(255),
+      type: z2.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
+      maxCapacityKN: z2.number().positive(),
+      maxPoolWidth: z2.string().optional(),
+      description: z2.string().optional(),
+      location: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const id = await createCrane(input);
+      await createAuditEntry({ actorId: ctx.user.id, action: "crane_created", entityType: "crane", entityId: id });
+      return { id };
+    }),
+    update: operatorProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      name: z2.string().min(1).max(255).optional(),
+      type: z2.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
+      maxCapacityKN: z2.number().positive().optional(),
+      maxPoolWidth: z2.string().optional(),
+      description: z2.string().optional(),
+      location: z2.string().optional(),
+      craneStatus: z2.enum(["active", "inactive", "maintenance"]).optional()
+    })).mutation(async ({ input, ctx }) => {
+      const { id, ...data } = input;
+      await updateCrane(id, data);
+      await createAuditEntry({ actorId: ctx.user.id, action: "crane_updated", entityType: "crane", entityId: id });
+      return { success: true };
+    }),
+    delete: operatorProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await deleteCrane(input.id);
+      await createAuditEntry({ actorId: ctx.user.id, action: "crane_deactivated", entityType: "crane", entityId: input.id });
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Reservations ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  reservation: router({
+    create: protectedProcedure.input(z2.object({
+      userId: z2.string().uuid().optional(),
+      // For admins creating on behalf of a user
+      isAutoApprove: z2.boolean().optional(),
+      craneId: z2.string().uuid().optional(),
+      scheduledStart: z2.date().optional(),
+      durationMin: z2.number().int().positive().optional(),
+      // Service type ÔÇö required in v2.0
+      serviceTypeId: z2.string().uuid(),
+      // Requested time ÔÇö user preference (no crane assignment at this stage)
+      requestedDate: z2.string().min(1),
+      // YYYY-MM-DD
+      requestedTimeSlot: z2.enum(["jutro", "poslijepodne", "po_dogovoru"]).default("po_dogovoru"),
+      userNote: z2.string().max(1e3).optional(),
+      // Vessel data
+      vesselId: z2.string().uuid().optional(),
+      vesselType: z2.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
+      vesselRegistration: z2.string().optional(),
+      vesselLengthM: z2.number().positive().optional(),
+      vesselBeamM: z2.number().positive().optional(),
+      vesselDraftM: z2.number().positive().optional(),
+      vesselWeightTons: z2.number().nonnegative().optional(),
+      // Contact
+      contactPhone: z2.string().min(6)
+    })).mutation(async ({ input, ctx }) => {
+      if (!ctx.user.emailVerifiedAt) {
+        throw new TRPCError3({
+          code: "FORBIDDEN",
+          message: "Molimo potvrdite svoju email adresu prije kreiranja rezervacije."
+        });
+      }
+      const myActive = await listReservationsByUser(ctx.user.id);
+      const activeCount = myActive.filter((r) => r.status === "pending" || r.status === "approved").length;
+      if (activeCount >= 3) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Imate maksimalni broj aktivnih rezervacija (3). Molimo pri\u010Dekajte zavr\u0161etak ili otka\u017Eite postoje\u0107e."
+        });
+      }
+      const dateIsHoliday = await isHoliday(input.requestedDate);
+      if (dateIsHoliday) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Odabrani datum je praznik ili neradni dan."
+        });
+      }
+      const activeSeason = await getActiveSeason(input.requestedDate);
+      if (!activeSeason) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: "Odabrani datum je izvan sezone rada. Molimo odaberite datum unutar aktivne sezone."
+        });
+      }
+      const serviceType = await getServiceTypeById(input.serviceTypeId);
+      if (!serviceType || !serviceType.isActive) {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Odabrani tip operacije nije dostupan." });
+      }
+      let vesselSnapshot = {
+        vesselType: input.vesselType,
+        vesselRegistration: input.vesselRegistration,
+        vesselLengthM: input.vesselLengthM ? String(input.vesselLengthM) : void 0,
+        vesselBeamM: input.vesselBeamM ? String(input.vesselBeamM) : void 0,
+        vesselDraftM: input.vesselDraftM ? String(input.vesselDraftM) : void 0,
+        vesselWeightTons: input.vesselWeightTons ?? 0,
+        contactPhone: input.contactPhone,
+        liftPurpose: null
+        // v2: no liftPurpose, use userNote
+      };
+      if (input.vesselId) {
+        const vessel = await getVesselById(input.vesselId);
+        if (vessel) {
+          vesselSnapshot = {
+            vesselType: vessel.type,
+            vesselRegistration: vessel.registration,
+            vesselLengthM: vessel.lengthM ?? void 0,
+            vesselBeamM: vessel.beamM ?? void 0,
+            vesselDraftM: vessel.draftM ?? void 0,
+            vesselWeightTons: vessel.weightTons ?? 0,
+            contactPhone: input.contactPhone,
+            liftPurpose: null
+          };
+        }
+      }
+      const year = (/* @__PURE__ */ new Date()).getFullYear().toString().slice(-2);
+      const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const reservationNumber = `REZ-${year}-${randomStr}`;
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
+      const targetUserId = (ctx.user.role === "admin" || ctx.user.role === "operator") && input.userId ? input.userId : ctx.user.id;
+      const targetUser = await getUserById(targetUserId);
+      if (!targetUser) throw new TRPCError3({ code: "BAD_REQUEST", message: "Korisnik nije prona\u0111en." });
+      let finalStatus = "pending";
+      let finalCraneId = void 0;
+      let finalScheduledStart = void 0;
+      let finalScheduledEnd = void 0;
+      let finalDurationMin = void 0;
+      let finalApprovedBy = void 0;
+      let finalApprovedAt = void 0;
+      let autoApproveCrane = null;
+      if (input.isAutoApprove && (ctx.user.role === "admin" || ctx.user.role === "operator")) {
+        if (!input.craneId || !input.scheduledStart || !input.durationMin) {
+          throw new TRPCError3({ code: "BAD_REQUEST", message: "Nedostaju podaci za automatsko odobrenje." });
+        }
+        autoApproveCrane = await getCraneById(input.craneId);
+        if (!autoApproveCrane || autoApproveCrane.craneStatus !== "active") {
+          throw new TRPCError3({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+        }
+        finalScheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 6e4);
+        if (vesselSnapshot.vesselWeightTons && Number(vesselSnapshot.vesselWeightTons) * 10 > Number(autoApproveCrane.maxCapacityKN)) {
+          throw new TRPCError3({
+            code: "BAD_REQUEST",
+            message: `Te\u017Eina plovila (${vesselSnapshot.vesselWeightTons} t) prelazi kapacitet dizalice (${autoApproveCrane.maxCapacityKN} kN).`
+          });
+        }
+        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, finalScheduledEnd);
+        if (hasOverlap) throw new TRPCError3({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+        finalStatus = "approved";
+        finalCraneId = input.craneId;
+        finalScheduledStart = input.scheduledStart;
+        finalDurationMin = input.durationMin;
+        finalApprovedBy = ctx.user.id;
+        finalApprovedAt = /* @__PURE__ */ new Date();
+      }
+      const { reservations: resTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+      const created = await db.insert(resTable).values({
+        userId: targetUserId,
+        vesselId: input.vesselId,
+        serviceTypeId: input.serviceTypeId,
+        requestedDate: input.requestedDate,
+        requestedTimeSlot: input.requestedTimeSlot,
+        status: finalStatus,
+        reservationNumber,
+        craneId: finalCraneId,
+        scheduledStart: finalScheduledStart,
+        scheduledEnd: finalScheduledEnd,
+        durationMin: finalDurationMin,
+        approvedBy: finalApprovedBy,
+        approvedAt: finalApprovedAt,
+        vesselType: vesselSnapshot.vesselType,
+        vesselRegistration: vesselSnapshot.vesselRegistration,
+        vesselLengthM: vesselSnapshot.vesselLengthM,
+        vesselBeamM: vesselSnapshot.vesselBeamM,
+        vesselDraftM: vesselSnapshot.vesselDraftM,
+        vesselWeightTons: vesselSnapshot.vesselWeightTons,
+        contactPhone: input.contactPhone,
+        userNote: input.userNote
+      }).returning({ id: resTable.id });
+      const resId = created[0]?.id;
+      if (!resId) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "reservation_created",
+        entityType: "reservation",
+        entityId: resId,
+        payload: { serviceTypeId: input.serviceTypeId, requestedDate: input.requestedDate }
+      });
+      const { sendReservationReceived: sendReservationReceived2, sendReservationConfirmation: sendReservationConfirmation2 } = await Promise.resolve().then(() => (init_email(), email_exports));
+      if (finalStatus === "approved" && autoApproveCrane && finalScheduledStart && finalScheduledEnd) {
+        sendReservationConfirmation2({
+          to: targetUser.email,
+          userName: targetUser.name || targetUser.firstName || targetUser.email,
+          craneName: autoApproveCrane.name,
+          startDate: finalScheduledStart,
+          endDate: finalScheduledEnd,
+          craneLocation: autoApproveCrane.location || autoApproveCrane.name,
+          vesselRegistration: vesselSnapshot.vesselRegistration || void 0,
+          vesselType: vesselSnapshot.vesselType || void 0,
+          vesselWeightTons: vesselSnapshot.vesselWeightTons || void 0,
+          userNote: input.userNote || void 0
+        }).catch(console.warn);
+      } else {
+        sendReservationReceived2({
+          to: targetUser.email,
+          userName: targetUser.name || targetUser.firstName || targetUser.email,
+          reservationNumber,
+          requestedDate: input.requestedDate,
+          vesselRegistration: vesselSnapshot.vesselRegistration || void 0,
+          vesselType: vesselSnapshot.vesselType || void 0,
+          vesselWeightTons: vesselSnapshot.vesselWeightTons || void 0,
+          contactPhone: input.contactPhone,
+          userNote: input.userNote || void 0,
+          lang: "hr"
+        }).catch(console.warn);
+      }
+      return { id: resId, reservationNumber };
+    }),
+    myReservations: protectedProcedure.query(async ({ ctx }) => {
+      const items = await listReservationsByUser(ctx.user.id);
+      return Promise.all(items.map(async (r) => {
+        const crane = r.craneId ? await getCraneById(r.craneId) : null;
+        const unreadCount = await getUnreadCountForReservation(r.id, ctx.user.id, ctx.user.role);
+        return {
+          ...r,
+          crane: crane ? { id: crane.id, name: crane.name, location: crane.location } : null,
+          unreadCount
+        };
+      }));
+    }),
+    getById: protectedProcedure.input(z2.object({ id: z2.string().uuid() })).query(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      if (reservation.userId !== ctx.user.id && ctx.user.role !== "admin" && ctx.user.role !== "operator") {
+        throw new TRPCError3({ code: "FORBIDDEN" });
+      }
+      const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
+      const user = await getUserById(reservation.userId);
+      return { ...reservation, crane, user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null };
+    }),
+    cancel: protectedProcedure.input(z2.object({ id: z2.string().uuid(), reason: z2.string().min(3) })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      if (reservation.userId !== ctx.user.id) throw new TRPCError3({ code: "FORBIDDEN" });
+      if (reservation.status !== "pending" && reservation.status !== "approved") {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Mogu se otkazati samo rezervacije na \u010Dekanju ili odobrene rezervacije." });
+      }
+      await updateReservationStatus(input.id, "cancelled", void 0, void 0, input.reason, "user");
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "reservation_cancelled",
+        entityType: "reservation",
+        entityId: input.id,
+        payload: { reason: input.reason }
+      });
+      if (reservation.status === "approved" && reservation.craneId) {
+        const dateStr = reservation.scheduledStart ? new Date(reservation.scheduledStart).toISOString().split("T")[0] : "";
+        notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+      }
+      return { success: true };
+    }),
+    // ÔöÇÔöÇ Admin ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+    listAll: adminProcedure.input(z2.object({
+      status: z2.array(z2.string()).optional(),
+      userId: z2.string().uuid().optional(),
+      vesselId: z2.string().uuid().optional(),
+      scheduledStart: z2.date().optional(),
+      scheduledEnd: z2.date().optional(),
+      page: z2.number().int().min(1).default(1),
+      pageSize: z2.number().int().min(1).max(200).default(50)
+    }).optional().default({ page: 1, pageSize: 50 })).query(async ({ input, ctx }) => {
+      const { page, pageSize, ...filters } = input;
+      const offset = (page - 1) * pageSize;
+      const db = await getDb();
+      if (!db) return { data: [], total: 0 };
+      const conditions = [];
+      if (filters.status && filters.status.length > 0) {
+        const statusOrs = filters.status.map((s) => eq3(reservations.status, s));
+        conditions.push(or2(...statusOrs));
+      }
+      if (filters.userId) conditions.push(eq3(reservations.userId, filters.userId));
+      if (filters.vesselId) conditions.push(eq3(reservations.vesselId, filters.vesselId));
+      if (filters.scheduledStart) conditions.push(gte3(reservations.scheduledStart, filters.scheduledStart));
+      if (filters.scheduledEnd) conditions.push(lte2(reservations.scheduledEnd, filters.scheduledEnd));
+      const countQuery = db.select({ count: sql3`count(*)` }).from(reservations);
+      const dataQuery = db.select().from(reservations).orderBy(desc2(reservations.createdAt)).limit(pageSize).offset(offset);
+      if (conditions.length > 0) {
+        countQuery.where(and3(...conditions));
+        dataQuery.where(and3(...conditions));
+      }
+      const [countRow] = await countQuery;
+      const items = await dataQuery;
+      const data = await Promise.all(items.map(async (r) => {
+        const crane = r.craneId ? await getCraneById(r.craneId) : null;
+        const user = await getUserById(r.userId);
+        const approver = r.approvedBy ? await getUserById(r.approvedBy) : null;
+        const unreadCount = await getUnreadCountForReservation(r.id, ctx.user.id, ctx.user.role);
+        return {
+          ...r,
+          crane: crane ?? null,
+          user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null,
+          approver: approver ? { id: approver.id, name: approver.name } : null,
+          unreadCount
+        };
+      }));
+      return { data, total: Number(countRow.count) };
+    }),
+    approve: operatorProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      craneId: z2.string().uuid(),
+      scheduledStart: z2.date(),
+      durationMin: z2.number().int().positive().default(60),
+      adminNote: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      if (reservation.status !== "pending") throw new TRPCError3({ code: "BAD_REQUEST", message: "Samo rezervacije na \u010Dekanju se mogu odobriti." });
+      const crane = await getCraneById(input.craneId);
+      if (!crane || crane.craneStatus !== "active") {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+      }
+      const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 6e4);
+      if (reservation.vesselWeightTons && Number(reservation.vesselWeightTons) * 10 > Number(crane.maxCapacityKN)) {
+        throw new TRPCError3({
+          code: "BAD_REQUEST",
+          message: `Te\u017Eina plovila (${reservation.vesselWeightTons} t) prelazi kapacitet dizalice (${crane.maxCapacityKN} kN).`
+        });
+      }
+      const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, scheduledEnd, input.id);
+      if (hasOverlap) throw new TRPCError3({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+      const db = await getDb();
+      if (db) {
+        await db.update(reservations).set({
+          craneId: input.craneId,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd,
+          durationMin: input.durationMin,
+          status: "approved",
+          adminNote: input.adminNote,
+          approvedBy: ctx.user.id,
+          approvedAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq3(reservations.id, input.id));
+      }
+      await createAuditEntry({ actorId: ctx.user.id, action: "reservation_approved", entityType: "reservation", entityId: input.id });
+      const user = await getUserById(reservation.userId);
+      if (user?.email) {
+        await sendReservationConfirmation({
+          to: user.email,
+          userName: user.name || user.email,
+          craneName: crane.name,
+          startDate: input.scheduledStart,
+          endDate: scheduledEnd,
+          craneLocation: crane.location || crane.name,
+          adminNotes: input.adminNote,
+          vesselRegistration: reservation.vesselRegistration || void 0,
+          vesselType: reservation.vesselType || void 0,
+          vesselWeightTons: reservation.vesselWeightTons || void 0,
+          userNote: reservation.userNote || void 0
+        }).catch(console.warn);
+      }
+      if (user?.phone) {
+        await sendReservationConfirmationSms({
+          phone: user.phone,
+          craneName: crane.name,
+          startDate: input.scheduledStart,
+          location: crane.location || crane.name
+        }).catch(console.warn);
+      }
+      return { success: true };
+    }),
+    reject: operatorProcedure.input(z2.object({ id: z2.string().uuid(), adminNote: z2.string().optional() })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      if (reservation.status !== "pending") throw new TRPCError3({ code: "BAD_REQUEST", message: "Samo rezervacije na \u010Dekanju se mogu odbiti." });
+      await updateReservationStatus(input.id, "rejected", ctx.user.id, input.adminNote);
+      await createAuditEntry({ actorId: ctx.user.id, action: "reservation_rejected", entityType: "reservation", entityId: input.id });
+      const user = await getUserById(reservation.userId);
+      const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
+      if (user?.email && crane) {
+        await sendReservationRejection({
+          to: user.email,
+          userName: user.name || user.email,
+          craneName: crane.name,
+          startDate: reservation.scheduledStart ? new Date(reservation.scheduledStart) : /* @__PURE__ */ new Date(),
+          reason: input.adminNote
+        }).catch(console.warn);
+      }
+      if (user?.phone && crane) {
+        await sendReservationRejectionSms({
+          phone: user.phone,
+          craneName: crane.name,
+          reason: input.adminNote
+        }).catch(console.warn);
+      }
+      if (reservation.craneId) {
+        const dateStr = reservation.scheduledStart ? new Date(reservation.scheduledStart).toISOString().split("T")[0] : "";
+        notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
+      }
+      return { success: true };
+    }),
+    // Admin: move/reschedule a reservation (drag-and-drop)
+    reschedule: operatorProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      scheduledStart: z2.date(),
+      scheduledEnd: z2.date(),
+      craneId: z2.string().uuid().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      const targetCraneId = input.craneId ?? reservation.craneId;
+      const sysSettings = await getAllSettings();
+      const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
+      const effectiveEnd = new Date(input.scheduledEnd.getTime() + bufferMin * 6e4);
+      if (targetCraneId) {
+        const hasOverlap = await checkOverlap(targetCraneId, input.scheduledStart, effectiveEnd, input.id);
+        if (hasOverlap) throw new TRPCError3({ code: "CONFLICT", message: "Preslagani termin se preklapa." });
+      }
+      const db = await getDb();
+      if (db) {
+        await db.update(reservations).set({
+          scheduledStart: input.scheduledStart,
+          scheduledEnd: input.scheduledEnd,
+          craneId: targetCraneId,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq3(reservations.id, input.id));
+      }
+      const { notifyStatusChange: notifyStatusChange2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
+      notifyStatusChange2(input.id).catch(console.error);
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "reservation_rescheduled",
+        entityType: "reservation",
+        entityId: input.id,
+        payload: { oldCraneId: reservation.craneId, newCraneId: targetCraneId, scheduledStart: input.scheduledStart }
+      });
+      return { success: true };
+    }),
+    // Mark reservation as completed
+    complete: operatorProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      if (reservation.status !== "approved") {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Samo odobrene rezervacije se mogu ozna\u010Diti kao zavr\u0161ene." });
+      }
+      const db = await getDb();
+      if (db) {
+        await db.update(reservations).set({
+          status: "completed",
+          completedAt: /* @__PURE__ */ new Date(),
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq3(reservations.id, input.id));
+      }
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "reservation_completed",
+        entityType: "reservation",
+        entityId: input.id
+      });
+      return { success: true };
+    }),
+    // Revert reservation to pending
+    revertToPending: operatorProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.id);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      if (reservation.status !== "approved" && reservation.status !== "cancelled" && reservation.status !== "rejected") {
+        throw new TRPCError3({ code: "BAD_REQUEST", message: "Samo odobrene ili otkazane/odbijene rezervacije se mogu vratiti na obradu." });
+      }
+      const db = await getDb();
+      if (db) {
+        const { reservations: resTable } = await Promise.resolve().then(() => (init_schema(), schema_exports));
+        await db.update(resTable).set({
+          status: "pending",
+          craneId: null,
+          // Clear crane assignment so it can be re-assigned
+          scheduledStart: null,
+          scheduledEnd: null,
+          approvedBy: null,
+          approvedAt: null,
+          updatedAt: /* @__PURE__ */ new Date()
+        }).where(eq3(resTable.id, input.id));
+      }
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "reservation_reverted_to_pending",
+        entityType: "reservation",
+        entityId: input.id
+      });
+      const { notifyStatusChange: notifyStatusChange2 } = await Promise.resolve().then(() => (init_notifications(), notifications_exports));
+      notifyStatusChange2(input.id).catch(console.error);
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Messages ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  message: router({
+    send: protectedProcedure.input(z2.object({
+      reservationId: z2.string().uuid(),
+      body: z2.string().min(1).max(2e3)
+    })).mutation(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.reservationId);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      const isStaff = ctx.user.role === "admin" || ctx.user.role === "operator";
+      if (!isStaff && reservation.userId !== ctx.user.id) {
+        throw new TRPCError3({ code: "FORBIDDEN" });
+      }
+      const msg = await sendMessage({
+        reservationId: input.reservationId,
+        senderId: ctx.user.id,
+        body: input.body
+      });
+      try {
+        if (isStaff) {
+          const owner = await getUserById(reservation.userId);
+          if (owner?.email) {
+            const { sendNewMessageNotification: sendNewMessageNotification3 } = await Promise.resolve().then(() => (init_email(), email_exports));
+            await sendNewMessageNotification3({
+              to: owner.email,
+              userName: owner.name || owner.firstName || "Korisnik",
+              reservationNumber: reservation.reservationNumber || "",
+              messageBody: input.body
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[Messages] Email notification failed:", e);
+      }
+      return msg;
+    }),
+    list: protectedProcedure.input(z2.object({ reservationId: z2.string().uuid() })).query(async ({ input, ctx }) => {
+      const reservation = await getReservationById(input.reservationId);
+      if (!reservation) throw new TRPCError3({ code: "NOT_FOUND" });
+      const isStaff = ctx.user.role === "admin" || ctx.user.role === "operator";
+      if (!isStaff && reservation.userId !== ctx.user.id) {
+        throw new TRPCError3({ code: "FORBIDDEN" });
+      }
+      await markMessagesRead(input.reservationId, ctx.user.id);
+      return listMessages(input.reservationId);
+    }),
+    markRead: protectedProcedure.input(z2.object({ reservationId: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await markMessagesRead(input.reservationId, ctx.user.id);
+      return { success: true };
+    }),
+    unreadCount: protectedProcedure.query(async ({ ctx }) => {
+      const count = await countUnreadMessages(ctx.user.id, ctx.user.role);
+      return { count };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Service Types ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  serviceType: router({
+    list: publicProcedure.input(z2.object({ onlyActive: z2.boolean().optional().default(true) }).optional()).query(async ({ input }) => listServiceTypes(input?.onlyActive ?? true)),
+    listAll: adminProcedure.query(async () => listServiceTypes(false)),
+    create: operatorProcedure.input(z2.object({
+      name: z2.string().min(1).max(255),
+      description: z2.string().optional(),
+      defaultDurationMin: z2.number().int().positive().default(60),
+      isActive: z2.boolean().default(true),
+      sortOrder: z2.number().int().default(0)
+    })).mutation(async ({ input, ctx }) => {
+      const item = await createServiceType(input);
+      await createAuditEntry({ actorId: ctx.user.id, action: "service_type_created", entityType: "service_type", entityId: item?.id });
+      return item;
+    }),
+    update: operatorProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      name: z2.string().min(1).max(255).optional(),
+      description: z2.string().optional(),
+      defaultDurationMin: z2.number().int().positive().optional(),
+      isActive: z2.boolean().optional(),
+      sortOrder: z2.number().int().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const { id, ...data } = input;
+      const item = await updateServiceType(id, data);
+      await createAuditEntry({ actorId: ctx.user.id, action: "service_type_updated", entityType: "service_type", entityId: id });
+      return item;
+    }),
+    delete: operatorProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await deleteServiceType(input.id);
+      await createAuditEntry({ actorId: ctx.user.id, action: "service_type_deleted", entityType: "service_type", entityId: input.id });
+      return { success: true };
+    }),
+    seed: operatorProcedure.mutation(async () => {
+      await seedServiceTypes();
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Public Calendar ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  calendar: router({
+    events: publicProcedure.input(z2.object({
+      scheduledStart: z2.date().optional(),
+      scheduledEnd: z2.date().optional(),
+      craneId: z2.string().uuid().optional()
+    }).optional()).query(async ({ input, ctx }) => {
+      const items = await getReservationsForCalendar(input?.scheduledStart, input?.scheduledEnd, true);
+      const enriched = await Promise.all(items.map(async (r) => {
+        const crane = r.craneId ? await getCraneById(r.craneId) : null;
+        const isAdminOrOperator = ctx.user?.role === "admin" || ctx.user?.role === "operator";
+        const isOwner = ctx.user?.id === r.userId;
+        const showDetails = isAdminOrOperator || isOwner;
+        return {
+          id: r.id,
+          craneId: r.craneId,
+          craneName: crane?.name ?? "Nepoznata dizalica",
+          craneLocation: crane?.location ?? "",
+          scheduledStart: r.scheduledStart,
+          scheduledEnd: r.scheduledEnd,
+          // Mask sensitive data for non-owners/non-admins
+          vesselType: showDetails ? r.vesselType : r.isMaintenance ? "Odr\u017Eavanje" : "Zauzeto",
+          liftPurpose: showDetails ? r.liftPurpose : void 0,
+          status: r.status,
+          userId: r.userId,
+          isMaintenance: r.isMaintenance,
+          isOwner
+        };
+      }));
+      const result = input?.craneId ? enriched.filter((e) => e.craneId === input.craneId) : enriched;
+      return result;
+    }),
+    availableSlots: publicProcedure.input(z2.object({
+      craneId: z2.string().uuid(),
+      date: z2.string(),
+      // YYYY-MM-DD
+      durationMin: z2.number().min(30).max(480).default(60)
+    })).query(async ({ input }) => {
+      const sysSettings = await getAllSettings();
+      const slotMin = input.durationMin;
+      const bufferMin = 0;
+      const dateObj = new Date(input.date);
+      const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
+      const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
+      const dayStartUTC = new Date(dateObj.getTime());
+      dayStartUTC.setUTCHours(wsH, wsM, 0, 0);
+      const dayEndUTC = new Date(dateObj.getTime());
+      dayEndUTC.setUTCHours(weH, weM, 0, 0);
+      const totalMinutes = (dayEndUTC.getTime() - dayStartUTC.getTime()) / 6e4;
+      const totalSlots = Math.floor(totalMinutes / slotMin);
+      const availableStarts = [];
+      for (let i = 0; i < totalSlots; i++) {
+        const slotStart = new Date(dayStartUTC.getTime() + i * slotMin * 6e4);
+        const slotEnd = new Date(slotStart.getTime() + slotMin * 6e4);
+        const effectiveEnd = new Date(slotEnd.getTime() + bufferMin * 6e4);
+        const overlap = await checkOverlap(input.craneId, slotStart, effectiveEnd);
+        if (!overlap) availableStarts.push(slotStart);
+      }
+      return { availableStarts, slotDurationMinutes: slotMin };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Waiting List ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  waitingList: router({
+    join: protectedProcedure.input(z2.object({
+      craneId: z2.string().uuid(),
+      requestedDate: z2.string(),
+      vesselData: z2.record(z2.string(), z2.any()).optional(),
+      serviceTypeId: z2.string().uuid().optional(),
+      userNote: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const id = await addToWaitingList({
+        userId: ctx.user.id,
+        craneId: input.craneId,
+        requestedDate: input.requestedDate,
+        vesselData: input.vesselData ?? null,
+        serviceTypeId: input.serviceTypeId
+      });
+      return { id };
+    }),
+    mine: protectedProcedure.query(async ({ ctx }) => {
+      return listWaitingListByUser(ctx.user.id);
+    }),
+    leave: protectedProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await removeFromWaitingList(input.id, ctx.user.id);
+      return { success: true };
+    }),
+    listAll: adminProcedure.input(z2.object({
+      page: z2.number().int().min(1).default(1),
+      pageSize: z2.number().int().min(1).max(200).default(50)
+    }).optional().default({ page: 1, pageSize: 50 })).query(async ({ input }) => {
+      const { page, pageSize } = input;
+      const offset = (page - 1) * pageSize;
+      const { data: items, total } = await listAllWaiting(pageSize, offset);
+      const data = await Promise.all(items.map(async (w) => {
+        const user = await getUserById(w.userId);
+        const crane = w.craneId ? await getCraneById(w.craneId) : null;
+        return { ...w, user: user ? { name: user.name, email: user.email, phone: user.phone } : null, crane: crane ? { name: crane.name } : null };
+      }));
+      return { data, total };
+    }),
+    update: adminProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      craneId: z2.string().uuid().optional(),
+      requestedDate: z2.string().optional(),
+      status: z2.enum(["waiting", "notified", "converted", "expired"]).optional()
+    })).mutation(async ({ input, ctx }) => {
+      const item = await getWaitingListById(input.id);
+      if (!item) throw new TRPCError3({ code: "NOT_FOUND" });
+      await updateWaitingList(input.id, {
+        craneId: input.craneId,
+        requestedDate: input.requestedDate
+      });
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "waiting_list_updated",
+        entityType: "waiting_list",
+        entityId: input.id
+      });
+      return { success: true };
+    }),
+    toReservation: adminProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      scheduledStart: z2.date(),
+      scheduledEnd: z2.date(),
+      craneId: z2.string().uuid().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const item = await getWaitingListById(input.id);
+      if (!item) throw new TRPCError3({ code: "NOT_FOUND" });
+      const targetCraneId = input.craneId ?? item.craneId ?? void 0;
+      if (!targetCraneId) throw new TRPCError3({ code: "BAD_REQUEST", message: "Dizalica nije navedena." });
+      const hasOverlap = await checkOverlap(targetCraneId, input.scheduledStart, input.scheduledEnd);
+      if (hasOverlap) throw new TRPCError3({ code: "CONFLICT", message: "Termin je zauzet." });
+      const vesselData = item.vesselData || {};
+      const resId = await createReservation({
+        userId: item.userId,
+        craneId: targetCraneId,
+        scheduledStart: input.scheduledStart,
+        scheduledEnd: input.scheduledEnd,
+        status: "approved",
+        vesselName: vesselData.name || "Brod s liste \u010Dekanja",
+        vesselType: vesselData.type || "motorni",
+        vesselWeightTons: String(vesselData.weightTons || 0),
+        vesselLengthM: vesselData.lengthM ? String(vesselData.lengthM) : void 0,
+        vesselBeamM: vesselData.beamM ? String(vesselData.beamM) : void 0,
+        vesselDraftM: vesselData.draftM ? String(vesselData.draftM) : void 0,
+        liftPurpose: "Lista \u010Dekanja",
+        contactPhone: "N/A"
+      });
+      await adminRemoveFromWaitingList(input.id);
+      notifyStatusChange(resId).catch(console.error);
+      await createAuditEntry({
+        actorId: ctx.user.id,
+        action: "waiting_list_converted",
+        entityType: "reservation",
+        entityId: resId,
+        payload: { waitingListId: input.id }
+      });
+      return { id: resId };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Settings (Admin) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  settings: router({
+    get: publicProcedure.query(async () => getAllSettings()),
+    update: adminProcedure.input(z2.object({
+      key: z2.enum(["slotDurationMinutes", "bufferMinutes", "workdayStart", "workdayEnd"]),
+      value: z2.string()
+    })).mutation(async ({ input, ctx }) => {
+      await updateSetting(input.key, input.value);
+      await createAuditEntry({ actorId: ctx.user.id, action: "setting_updated", entityType: "setting", payload: input });
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Seasons ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  season: router({
+    list: publicProcedure.query(async () => listSeasons()),
+    create: operatorProcedure.input(z2.object({
+      name: z2.string().min(1).max(100),
+      startDate: z2.string(),
+      // YYYY-MM-DD
+      endDate: z2.string(),
+      workingHours: z2.record(z2.string(), z2.object({ from: z2.string(), to: z2.string() }))
+    })).mutation(async ({ input, ctx }) => {
+      const season = await createSeason(input);
+      await createAuditEntry({ actorId: ctx.user.id, action: "season_created", entityType: "season", entityId: season.id });
+      return season;
+    }),
+    update: operatorProcedure.input(z2.object({
+      id: z2.string().uuid(),
+      name: z2.string().min(1).max(100).optional(),
+      startDate: z2.string().optional(),
+      endDate: z2.string().optional(),
+      workingHours: z2.record(z2.string(), z2.object({ from: z2.string(), to: z2.string() })).optional(),
+      isActive: z2.boolean().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const { id, ...data } = input;
+      await updateSeason(id, data);
+      await createAuditEntry({ actorId: ctx.user.id, action: "season_updated", entityType: "season", entityId: id });
+      return { success: true };
+    }),
+    delete: operatorProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await deleteSeason(input.id);
+      await createAuditEntry({ actorId: ctx.user.id, action: "season_deleted", entityType: "season", entityId: input.id });
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Holidays ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  holiday: router({
+    list: publicProcedure.query(async () => listHolidays()),
+    create: operatorProcedure.input(z2.object({
+      date: z2.string(),
+      // YYYY-MM-DD
+      name: z2.string().min(1).max(255),
+      isRecurring: z2.boolean().default(true)
+    })).mutation(async ({ input, ctx }) => {
+      const holiday = await createHoliday(input);
+      await createAuditEntry({ actorId: ctx.user.id, action: "holiday_created", entityType: "holiday", entityId: holiday.id });
+      return holiday;
+    }),
+    delete: operatorProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await deleteHoliday(input.id);
+      await createAuditEntry({ actorId: ctx.user.id, action: "holiday_deleted", entityType: "holiday", entityId: input.id });
+      return { success: true };
+    }),
+    seed: operatorProcedure.mutation(async ({ ctx }) => {
+      await seedCroatianHolidays();
+      await createAuditEntry({ actorId: ctx.user.id, action: "holidays_seeded", entityType: "holiday" });
+      return { success: true };
+    }),
+    // Public: check if a date is blocked
+    checkDate: publicProcedure.input(z2.object({ date: z2.string() })).query(async ({ input }) => {
+      const holiday = await isHoliday(input.date);
+      const season = await getActiveSeason(input.date);
+      return {
+        isBlocked: holiday || !season,
+        isHoliday: holiday,
+        isOutOfSeason: !season,
+        season: season ? { name: season.name, workingHours: season.workingHours } : null
+      };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ API Keys (Admin Only) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  apiKey: router({
+    list: adminProcedure.query(async () => listApiKeys()),
+    create: adminProcedure.input(z2.object({
+      name: z2.string().min(1).max(100)
+    })).mutation(async ({ input, ctx }) => {
+      const crypto3 = await import("crypto");
+      const rawKey = crypto3.randomBytes(32).toString("hex");
+      const key = await createApiKey({
+        name: input.name,
+        key: rawKey,
+        createdBy: ctx.user.id
+      });
+      await createAuditEntry({ actorId: ctx.user.id, action: "api_key_created", entityType: "api_key", entityId: key.id });
+      return { id: key.id, key: rawKey, name: key.name };
+    }),
+    revoke: adminProcedure.input(z2.object({ id: z2.string().uuid() })).mutation(async ({ input, ctx }) => {
+      await revokeApiKey(input.id);
+      await createAuditEntry({ actorId: ctx.user.id, action: "api_key_revoked", entityType: "api_key", entityId: input.id });
+      return { success: true };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Maintenance (Admin Only) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  maintenance: router({
+    create: operatorProcedure.input(z2.object({
+      craneId: z2.string().uuid(),
+      scheduledStart: z2.date(),
+      scheduledEnd: z2.date(),
+      description: z2.string().optional()
+    })).mutation(async ({ input, ctx }) => {
+      const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, input.scheduledEnd);
+      if (hasOverlap) {
+        throw new TRPCError3({ code: "CONFLICT", message: "Termin se preklapa s postoje\u0107im rezervacijama." });
+      }
+      const id = await createReservation({
+        userId: ctx.user.id,
+        craneId: input.craneId,
+        scheduledStart: input.scheduledStart,
+        scheduledEnd: input.scheduledEnd,
+        status: "approved",
+        isMaintenance: true,
+        liftPurpose: input.description || "Odr\u017Eavanje",
+        contactPhone: "ADMIN",
+        vesselType: "ostalo",
+        vesselWeightTons: "0"
+      });
+      await createAuditEntry({ actorId: ctx.user.id, action: "maintenance_blocked", entityType: "reservation", entityId: id });
+      return { id };
+    })
+  }),
+  // ÔöÇÔöÇÔöÇ Audit Log ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  audit: router({
+    list: adminProcedure.input(z2.object({ limit: z2.number().optional().default(50) }).optional()).query(async ({ input }) => listAuditLog(input?.limit ?? 50))
+  }),
+  // ÔöÇÔöÇÔöÇ Analytics (Admin Only) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+  analytics: router({
+    dashboard: operatorProcedure.input(z2.object({
+      range: z2.enum(["7d", "30d", "90d", "365d", "all"]).optional().default("30d")
+    })).query(async ({ input }) => {
+      const db = await getDb();
+      if (!db) throw new TRPCError3({ code: "INTERNAL_SERVER_ERROR" });
+      let startDate = /* @__PURE__ */ new Date("2000-01-01");
+      if (input.range !== "all") {
+        startDate = /* @__PURE__ */ new Date();
+        const days = parseInt(input.range.replace("d", ""), 10);
+        startDate.setDate(startDate.getDate() - days);
+      }
+      const allRes = await db.select({
+        id: reservations.id,
+        craneId: reservations.craneId,
+        userId: reservations.userId,
+        userName: sql3`COALESCE(${users.name}, ${users.email}, 'Unknown')`,
+        status: reservations.status,
+        isMaintenance: reservations.isMaintenance,
+        scheduledStart: reservations.scheduledStart,
+        scheduledEnd: reservations.scheduledEnd,
+        cancelReason: reservations.cancelReason,
+        serviceTypeId: reservations.serviceTypeId
+      }).from(reservations).leftJoin(users, eq3(reservations.userId, users.id)).where(gte3(reservations.scheduledStart, startDate));
+      const allCranes = await db.select().from(cranes);
+      const allServiceTypes = await db.select().from(serviceTypes);
+      const craneStats = allCranes.map((c) => {
+        const craneRes = allRes.filter((r) => r.craneId === c.id);
+        const approved = craneRes.filter((r) => r.status === "approved" && !r.isMaintenance);
+        const maintenance = craneRes.filter((r) => r.isMaintenance);
+        const rejected = craneRes.filter((r) => r.status === "rejected");
+        const cancelled = craneRes.filter((r) => r.status === "cancelled");
+        const totalHoursApproved = approved.reduce((acc, r) => {
+          if (!r.scheduledStart || !r.scheduledEnd) return acc;
+          return acc + (new Date(r.scheduledEnd).getTime() - new Date(r.scheduledStart).getTime()) / 36e5;
+        }, 0);
+        const totalHoursMaint = maintenance.reduce((acc, r) => {
+          if (!r.scheduledStart || !r.scheduledEnd) return acc;
+          return acc + (new Date(r.scheduledEnd).getTime() - new Date(r.scheduledStart).getTime()) / 36e5;
+        }, 0);
+        return {
+          craneId: c.id,
+          craneName: c.name,
+          utilization: totalHoursApproved,
+          maintenanceHours: totalHoursMaint,
+          rejectedCount: rejected.length,
+          cancelledCount: cancelled.length
+        };
+      });
+      const userResCounts = {};
+      for (const r of allRes) {
+        if (r.status === "approved" && !r.isMaintenance) {
+          if (!userResCounts[r.userId]) {
+            userResCounts[r.userId] = { count: 0, name: r.userName };
+          }
+          userResCounts[r.userId].count++;
+        }
+      }
+      const topUsers = Object.entries(userResCounts).map(([id, data]) => ({ id, ...data })).sort((a, b) => b.count - a.count).slice(0, 5);
+      const cancelReasons = {};
+      allRes.filter((r) => r.status === "cancelled" && r.cancelReason).forEach((r) => {
+        const reason = r.cancelReason || "Nije navedeno";
+        cancelReasons[reason] = (cancelReasons[reason] || 0) + 1;
+      });
+      const trendMap = {};
+      allRes.filter((r) => r.status === "approved" && r.scheduledStart).forEach((r) => {
+        const day = r.scheduledStart.toISOString().split("T")[0];
+        trendMap[day] = (trendMap[day] || 0) + 1;
+      });
+      const trendStats = Object.entries(trendMap).sort((a, b) => a[0].localeCompare(b[0])).map(([date2, count]) => ({ date: date2, count }));
+      const serviceTypeMap = {};
+      allRes.filter((r) => r.status === "approved").forEach((r) => {
+        if (r.serviceTypeId) {
+          const serviceInfo = allServiceTypes.find((st) => st.id === r.serviceTypeId);
+          if (serviceInfo) {
+            serviceTypeMap[serviceInfo.name] = (serviceTypeMap[serviceInfo.name] || 0) + 1;
+          }
+        } else if (r.isMaintenance) {
+          serviceTypeMap["Odr\u017Eavanje"] = (serviceTypeMap["Odr\u017Eavanje"] || 0) + 1;
+        } else {
+          serviceTypeMap["Nepoznato"] = (serviceTypeMap["Nepoznato"] || 0) + 1;
+        }
+      });
+      const serviceTypeStats = Object.entries(serviceTypeMap).map(([name, value]) => ({ name, value }));
+      return {
+        craneStats,
+        topUsers,
+        cancelReasons: Object.entries(cancelReasons).map(([name, value]) => ({ name, value })),
+        trendStats,
+        serviceTypeStats
+      };
+    })
+  })
+});
+
+// server/restApi.ts
+init_db();
+init_schema();
+import { Router } from "express";
+import { eq as eq4, desc as desc3 } from "drizzle-orm";
+import rateLimit from "express-rate-limit";
+import swaggerUi from "swagger-ui-express";
+import swaggerJSDoc from "swagger-jsdoc";
+var router2 = Router();
+var apiLimiter = rateLimit({
+  windowMs: 60 * 1e3,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.header("x-api-key") || req.ip || "unknown",
+  validate: false,
+  message: { error: "Too many requests, please try again later." }
+});
+router2.use(apiLimiter);
+var swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Crane Booking API",
+      version: "1.0.0",
+      description: "REST API for external integration (e.g. Marina ERP)"
+    },
+    components: {
+      securitySchemes: {
+        ApiKeyAuth: {
+          type: "apiKey",
+          in: "header",
+          name: "x-api-key"
+        }
+      }
+    },
+    security: [{ ApiKeyAuth: [] }]
+  },
+  apis: ["./server/restApi.ts"]
+  // parse comments in this file
+};
+var swaggerSpec = swaggerJSDoc(swaggerOptions);
+router2.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+async function apiKeyAuth(req, res, next) {
+  const apiKey = req.header("x-api-key");
+  if (!apiKey) {
+    return res.status(401).json({ error: "Missing x-api-key header" });
+  }
+  try {
+    const isValid = await validateApiKeyAndUpdateLastUsed(apiKey);
+    if (!isValid) {
+      return res.status(403).json({ error: "Invalid or inactive API key" });
+    }
+    next();
+  } catch (error) {
+    console.error("API Key validation error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+router2.use(apiKeyAuth);
+router2.get("/vessels/:registration/reservations", async (req, res) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    const { registration } = req.params;
+    const { status, from, to } = req.query;
+    let query = db.select({
+      id: reservations.id,
+      scheduledStart: reservations.scheduledStart,
+      durationMin: reservations.durationMin,
+      status: reservations.status,
+      notes: reservations.userNote,
+      serviceType: serviceTypes.name,
+      crane: cranes.name
+    }).from(reservations).innerJoin(vessels, eq4(reservations.vesselId, vessels.id)).innerJoin(serviceTypes, eq4(reservations.serviceTypeId, serviceTypes.id)).innerJoin(cranes, eq4(reservations.craneId, cranes.id)).where(eq4(vessels.registration, registration));
+    const results = await query.orderBy(desc3(reservations.createdAt));
+    let filtered = results;
+    if (status && typeof status === "string") {
+      filtered = filtered.filter((r) => r.status === status);
+    }
+    if (from && typeof from === "string") {
+      const fromDate = new Date(from);
+      filtered = filtered.filter((r) => r.scheduledStart && new Date(r.scheduledStart) >= fromDate);
+    }
+    if (to && typeof to === "string") {
+      const toDate = new Date(to);
+      filtered = filtered.filter((r) => r.scheduledStart && new Date(r.scheduledStart) <= toDate);
+    }
+    res.json(filtered);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router2.get("/reservations/completed", async (req, res) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    const { from, to, registration, limit = 50, offset = 0 } = req.query;
+    const query = db.select({
+      id: reservations.id,
+      scheduledStart: reservations.scheduledStart,
+      durationMin: reservations.durationMin,
+      status: reservations.status,
+      vesselName: vessels.name,
+      vesselRegistration: vessels.registration,
+      serviceType: serviceTypes.name,
+      crane: cranes.name
+    }).from(reservations).innerJoin(vessels, eq4(reservations.vesselId, vessels.id)).innerJoin(serviceTypes, eq4(reservations.serviceTypeId, serviceTypes.id)).innerJoin(cranes, eq4(reservations.craneId, cranes.id)).where(eq4(reservations.status, "completed")).orderBy(desc3(reservations.createdAt)).limit(Number(limit)).offset(Number(offset));
+    const results = await query;
+    let filtered = results;
+    if (registration && typeof registration === "string") {
+      filtered = filtered.filter((r) => r.vesselRegistration === registration);
+    }
+    if (from && typeof from === "string") {
+      const fromDate = new Date(from);
+      filtered = filtered.filter((r) => r.scheduledStart && new Date(r.scheduledStart) >= fromDate);
+    }
+    if (to && typeof to === "string") {
+      const toDate = new Date(to);
+      filtered = filtered.filter((r) => r.scheduledStart && new Date(r.scheduledStart) <= toDate);
+    }
+    res.json(filtered);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router2.get("/service-types", async (req, res) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    const results = await db.select({
+      id: serviceTypes.id,
+      name: serviceTypes.name,
+      description: serviceTypes.description,
+      duration: serviceTypes.defaultDurationMin
+    }).from(serviceTypes);
+    res.json(results);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router2.get("/cranes", async (req, res) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    const results = await db.select({
+      id: cranes.id,
+      name: cranes.name,
+      maxCapacityKN: cranes.maxCapacityKN,
+      status: cranes.craneStatus
+    }).from(cranes);
+    res.json(results);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router2.get("/reservations", async (req, res) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    const { status, limit = 50, offset = 0 } = req.query;
+    const query = db.select({
+      id: reservations.id,
+      scheduledStart: reservations.scheduledStart,
+      durationMin: reservations.durationMin,
+      status: reservations.status,
+      vesselName: vessels.name,
+      vesselRegistration: vessels.registration,
+      serviceType: serviceTypes.name,
+      crane: cranes.name
+    }).from(reservations).innerJoin(vessels, eq4(reservations.vesselId, vessels.id)).innerJoin(serviceTypes, eq4(reservations.serviceTypeId, serviceTypes.id)).innerJoin(cranes, eq4(reservations.craneId, cranes.id)).orderBy(desc3(reservations.createdAt)).limit(Number(limit)).offset(Number(offset));
+    const results = await query;
+    let filtered = results;
+    if (status && typeof status === "string") {
+      filtered = filtered.filter((r) => r.status === status);
+    }
+    res.json(filtered);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+router2.get("/reservations/:id", async (req, res) => {
+  try {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not available" });
+    const { id } = req.params;
+    const [result] = await db.select({
+      id: reservations.id,
+      scheduledStart: reservations.scheduledStart,
+      durationMin: reservations.durationMin,
+      status: reservations.status,
+      notes: reservations.userNote,
+      vesselName: vessels.name,
+      vesselRegistration: vessels.registration,
+      serviceType: serviceTypes.name,
+      crane: cranes.name,
+      createdAt: reservations.createdAt
+    }).from(reservations).innerJoin(vessels, eq4(reservations.vesselId, vessels.id)).innerJoin(serviceTypes, eq4(reservations.serviceTypeId, serviceTypes.id)).innerJoin(cranes, eq4(reservations.craneId, cranes.id)).where(eq4(reservations.id, id));
+    if (!result) {
+      return res.status(404).json({ error: "Reservation not found" });
+    }
+    res.json(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+var restApi_default = router2;
+
+// server/_core/vite.ts
+import express from "express";
+import fs from "fs";
+import path from "path";
+function serveStatic(app) {
+  const distPath = path.resolve(process.cwd(), "dist", "public");
+  if (!fs.existsSync(distPath)) {
+    console.error(`Build directory NOT FOUND: ${distPath}`);
+  }
+  app.use(express.static(distPath));
+  app.use("*", (_req, res) => {
+    const indexPath = path.resolve(distPath, "index.html");
+    if (fs.existsSync(indexPath)) {
+      res.sendFile(indexPath);
+    } else {
+      res.status(404).send("Error: index.html not found. Make sure to run 'vite build'.");
+    }
+  });
+}
+async function setupVite(app, server) {
+}
+
+// server/_core/index.ts
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.listen(port, () => {
+      server.close(() => resolve(true));
+    });
+    server.on("error", () => resolve(false));
+  });
+}
+async function findAvailablePort(startPort = 3e3) {
+  for (let port = startPort; port < startPort + 20; port++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`No available port found starting from ${startPort}`);
+}
+async function startServer() {
+  if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+    console.error("\u274C CRITICAL: JWT_SECRET or JWT_REFRESH_SECRET is not set in environment.");
+    process.exit(1);
+  }
+  const app = express2();
+  const server = createServer(app);
+  app.use(express2.json({ limit: "50mb" }));
+  app.use(express2.urlencoded({ limit: "50mb", extended: true }));
+  registerOAuthRoutes(app);
+  const { createRateLimiter: createRateLimiter2 } = await Promise.resolve().then(() => (init_rateLimit(), rateLimit_exports));
+  const loginLimiter = createRateLimiter2({
+    name: "login",
+    maxRequests: 5,
+    windowMs: 9e5,
+    // 5 req / 15 min
+    message: "Previ\u0161e poku\u0161aja prijave. Poku\u0161ajte ponovo za 15 minuta."
+  });
+  const registerLimiter = createRateLimiter2({
+    name: "register",
+    maxRequests: 3,
+    windowMs: 36e5,
+    // 3 req / 1 sat
+    message: "Previ\u0161e poku\u0161aja registracije. Poku\u0161ajte ponovo za sat vremena."
+  });
+  const forgotPasswordLimiter = createRateLimiter2({
+    name: "forgotPassword",
+    maxRequests: 3,
+    windowMs: 9e5,
+    // 3 req / 15 min
+    message: "Previ\u0161e zahtjeva za reset lozinke. Poku\u0161ajte ponovo za minutu."
+  });
+  app.use("/api/trpc/auth.login", loginLimiter);
+  app.use("/api/trpc/auth.register", registerLimiter);
+  app.use("/api/trpc/auth.forgotPassword", forgotPasswordLimiter);
+  app.use("/auth/google", loginLimiter);
+  app.use(
+    "/api/trpc",
+    createExpressMiddleware({
+      router: appRouter,
+      createContext
+    })
+  );
+  app.use("/api/v1", restApi_default);
+  if (process.env.NODE_ENV === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+  const preferredPort = parseInt(process.env.PORT || "3000");
+  const port = await findAvailablePort(preferredPort);
+  if (port !== preferredPort) {
+    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+  }
+  server.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}/`);
+    Promise.resolve().then(() => (init_notifications(), notifications_exports)).then((m) => m.startNotificationCron()).catch(console.error);
+  });
+}
+startServer().catch(console.error);
