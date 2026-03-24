@@ -44,8 +44,10 @@ export function createRateLimiter(options: {
     name?: string;
     /** Custom message on 429 */
     message?: string;
+    /** Custom key generator */
+    keyGenerator?: (req: Request) => string;
 }) {
-    const { maxRequests, windowMs, name = "default", message } = options;
+    const { maxRequests, windowMs, name = "default", message, keyGenerator } = options;
 
     if (!stores.has(name)) {
         stores.set(name, new Map());
@@ -57,7 +59,7 @@ export function createRateLimiter(options: {
     cleanupInterval.unref(); // Don't prevent process exit
 
     return (req: Request, res: Response, next: NextFunction) => {
-        const key = getClientKey(req);
+        const key = keyGenerator ? keyGenerator(req) : getClientKey(req);
         const now = Date.now();
 
         let entry = store.get(key);

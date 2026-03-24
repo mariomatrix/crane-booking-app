@@ -7,29 +7,27 @@ import {
     reservations, vessels, cranes, serviceTypes
 } from "../drizzle/schema";
 import { eq, and, gt, lt, gte, lte, desc, sql } from "drizzle-orm";
-// @ts-ignore
-import rateLimit from "express-rate-limit";
+import { createRateLimiter } from "./_core/rateLimit";
 import swaggerUi from "swagger-ui-express";
 import swaggerJSDoc from "swagger-jsdoc";
 
 const router = Router();
 
 // ─── Rate Limiting ───────────────────────────────────────────────────
-// 100 req/min limit for API keys
-const apiLimiter = rateLimit({
+// 100 req/min limit for API keys (using custom limiter to avoid IPv6 validation issues)
+const apiLimiter = createRateLimiter({
+    name: "rest-api",
     windowMs: 60 * 1000,
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req: Request) => {
+    maxRequests: 100,
+    keyGenerator: (req) => {
         const apiKey = req.header("x-api-key");
         if (apiKey) return apiKey;
+        // Fallback to IP from custom getClientKey logic (already handles proxies/IPv6)
         const forwarded = req.headers["x-forwarded-for"];
         if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
         return req.socket.remoteAddress || "unknown";
     },
-    validate: { keyGeneratorIpFallback: false },
-    message: { error: "Too many requests, please try again later." },
+    message: "Too many requests, please try again later.",
 });
 
 router.use(apiLimiter);
