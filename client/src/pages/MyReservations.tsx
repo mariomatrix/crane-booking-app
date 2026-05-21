@@ -3,12 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock, MessageSquare } from "lucide-react";
+import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock, MessageSquare, Check, Circle } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { ReservationChat } from "@/components/ReservationChat";
+import { BottomNav } from "@/components/BottomNav";
 import { formatAppDate } from "@/lib/date-utils";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +59,55 @@ export default function MyReservations() {
     if (!id) return null;
     const st = (serviceTypes as any[]).find((s: any) => s.id === id);
     return st?.name ?? null;
+  };
+
+  const StatusStepper = ({ status }: { status: string }) => {
+    const steps = [
+      { id: "pending", label: (t as any).myReservations.stepper.request },
+      { id: "approved", label: (t as any).myReservations.stepper.approved },
+      { id: "completed", label: (t as any).myReservations.stepper.done },
+    ];
+
+    if (status === "rejected" || status === "cancelled") {
+      return (
+        <div className="flex items-center gap-2 text-xs font-medium text-destructive mt-2">
+          <X className="h-3 w-3" />
+          {status === "rejected" ? t.myReservations.status.rejected : t.myReservations.status.cancelled}
+        </div>
+      );
+    }
+
+    const currentStepIndex = steps.findIndex(s => s.id === status);
+    const activeIndex = status === "completed" ? 2 : status === "approved" ? 1 : 0;
+
+    return (
+      <div className="flex items-center w-full max-w-xs mt-4 mb-2">
+        {steps.map((step, idx) => (
+          <div key={step.id} className="flex items-center flex-1 last:flex-none">
+            <div className="flex flex-col items-center relative">
+              <div className={cn(
+                "h-6 w-6 rounded-full border-2 flex items-center justify-center transition-colors",
+                idx <= activeIndex ? "bg-primary border-primary text-primary-foreground" : "bg-background border-muted text-muted-foreground"
+              )}>
+                {idx < activeIndex ? <Check className="h-3.5 w-3.5" /> : <Circle className={cn("h-1.5 w-1.5 fill-current", idx > activeIndex && "text-transparent")} />}
+              </div>
+              <span className={cn(
+                "absolute -bottom-5 text-[10px] font-medium whitespace-nowrap",
+                idx <= activeIndex ? "text-foreground" : "text-muted-foreground"
+              )}>
+                {step.label}
+              </span>
+            </div>
+            {idx < steps.length - 1 && (
+              <div className={cn(
+                "h-[2px] flex-1 mx-2",
+                idx < activeIndex ? "bg-primary" : "bg-muted"
+              )} />
+            )}
+          </div>
+        ))}
+      </div>
+    );
   };
 
   if (authLoading) {
@@ -190,6 +241,8 @@ export default function MyReservations() {
                             {reservation.adminNote}
                           </div>
                         )}
+
+                        <StatusStepper status={reservation.status} />
                       </div>
                       <div className="flex flex-col gap-2 shrink-0">
                         <div className="relative">
@@ -283,6 +336,7 @@ export default function MyReservations() {
           </DialogContent>
         </Dialog>
       </div>
+      <BottomNav />
     </div>
   );
 }

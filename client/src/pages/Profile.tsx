@@ -8,6 +8,7 @@ import { Loader2, User, Save, Download } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
+import { BottomNav } from "@/components/BottomNav";
 
 export default function Profile() {
     const { user, loading, refresh } = useAuth({ redirectOnUnauthenticated: true });
@@ -100,6 +101,7 @@ export default function Profile() {
     }
 
     return (
+    <>
         <div className="container max-w-2xl py-8 space-y-8">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">{t.profile.title}</h1>
@@ -232,5 +234,7 @@ export default function Profile() {
                 </CardContent>
             </Card>
         </div>
+        <BottomNav />
+    </>
     );
 }

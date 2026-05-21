@@ -88,6 +88,11 @@ export const en: Translations = {
         },
         cancel: "Cancel",
         cancelConfirm: "Are you sure you want to cancel this reservation?",
+        stepper: {
+            request: "Request",
+            approved: "Approved",
+            done: "Done",
+        },
     },
     auth: {
         register: "Register",
@@ -204,5 +209,19 @@ export const en: Translations = {
         passwordSuccess: "Password changed successfully.",
         passwordError: "Error changing password.",
         passwordsDontMatch: "Passwords do not match.",
+    },
+    // Dashboard
+    dashboard: {
+        welcome: "Welcome back",
+        nextReservation: "Next Reservation",
+        noUpcoming: "No upcoming reservations",
+        activeRequests: "Active Requests",
+        quickActions: "Quick Actions",
+        viewAll: "View All",
+        overview: "Overview of your activities in the marina.",
+        details: "Details",
+        noActive: "No active requests.",
+        myCard: "My Card",
+        viewFullCalendar: "View full calendar",
     },
 };
