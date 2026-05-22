@@ -1083,7 +1083,7 @@ export const appRouter = router({
         scheduledStart: z.date().optional(),
         scheduledEnd: z.date().optional(),
         page: z.number().int().min(1).default(1),
-        pageSize: z.number().int().min(1).max(200).default(50),
+        pageSize: z.number().int().min(1).max(1000).default(50),
       }).optional().default({ page: 1, pageSize: 50 }))
       .query(async ({ input, ctx }) => {
         const { page, pageSize, ...filters } = input;
@@ -1098,32 +1098,77 @@ export const appRouter = router({
         }
         if (filters.userId) conditions.push(eq(reservations.userId, filters.userId));
         if (filters.vesselId) conditions.push(eq(reservations.vesselId, filters.vesselId));
-        if (filters.scheduledStart) conditions.push(gte(reservations.scheduledStart, filters.scheduledStart));
-        if (filters.scheduledEnd) conditions.push(lte(reservations.scheduledEnd, filters.scheduledEnd));
 
-        const countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
-        const dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(pageSize).offset(offset);
-
-        if (conditions.length > 0) {
-          countQuery.where(and(...conditions));
-          dataQuery.where(and(...conditions));
+        // Date range filtering - check both confirmed schedule and requested date (for pending)
+        if (filters.scheduledStart && filters.scheduledEnd) {
+          const startStr = filters.scheduledStart.toISOString().split('T')[0];
+          const endStr = filters.scheduledEnd.toISOString().split('T')[0];
+          conditions.push(
+            or(
+              and(gte(reservations.scheduledStart, filters.scheduledStart), lte(reservations.scheduledStart, filters.scheduledEnd)),
+              and(gte(reservations.requestedDate, startStr), lte(reservations.requestedDate, endStr))
+            )
+          );
+        } else {
+          if (filters.scheduledStart) conditions.push(gte(reservations.scheduledStart, filters.scheduledStart));
+          if (filters.scheduledEnd) conditions.push(lte(reservations.scheduledEnd, filters.scheduledEnd));
         }
 
+        const countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
+        if (conditions.length > 0) {
+          countQuery.where(and(...conditions));
+        }
         const [countRow] = await countQuery;
-        const items = await dataQuery;
 
-        const data = await Promise.all(items.map(async (r) => {
-          const crane = r.craneId ? await getCraneById(r.craneId) : null;
-          const user = await getUserById(r.userId);
-          const approver = r.approvedBy ? await getUserById(r.approvedBy) : null;
-          const unreadCount = await getUnreadCountForReservation(r.id, ctx.user.id, ctx.user.role);
-          return {
-            ...r,
-            crane: crane ?? null,
-            user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null,
-            approver: approver ? { id: approver.id, name: approver.name } : null,
-            unreadCount
-          };
+        // Subquery for unread message counts to avoid N+1
+        const unreadCountSubquery = db
+          .select({
+            reservationId: messages.reservationId,
+            count: sql<number>`count(*)::int`.as('count')
+          })
+          .from(messages)
+          .innerJoin(users, eq(messages.senderId, users.id))
+          .where(and(eq(messages.isRead, false), eq(users.role, "user")))
+          .groupBy(messages.reservationId)
+          .as('unread_counts');
+
+        // Single optimized query with JOINs to eliminate N+1 problem
+        const items = await db
+          .select({
+            reservation: reservations,
+            user: {
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              phone: users.phone,
+            },
+            crane: {
+              id: cranes.id,
+              name: cranes.name,
+              location: cranes.location,
+            },
+            approver: {
+              id: sql<string>`approver_users.id`,
+              name: sql<string>`approver_users.name`,
+            },
+            unreadCount: sql<number>`COALESCE(${unreadCountSubquery.count}, 0)`
+          })
+          .from(reservations)
+          .leftJoin(users, eq(reservations.userId, users.id))
+          .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .leftJoin(sql`${users} as approver_users`, eq(reservations.approvedBy, sql`approver_users.id`))
+          .leftJoin(unreadCountSubquery, eq(reservations.id, unreadCountSubquery.reservationId))
+          .where(conditions.length > 0 ? and(...conditions) : undefined)
+          .orderBy(desc(reservations.createdAt))
+          .limit(pageSize)
+          .offset(offset);
+
+        const data = items.map((row) => ({
+            ...row.reservation,
+            crane: row.crane?.id ? row.crane : null,
+            user: row.user?.id ? row.user : null,
+            approver: row.approver?.id ? row.approver : null,
+            unreadCount: row.unreadCount
         }));
 
         return { data, total: Number(countRow.count) };
@@ -1498,19 +1543,53 @@ export const appRouter = router({
         craneId: z.string().uuid().optional(),
       }).optional())
       .query(async ({ input, ctx }) => {
-        const items = await getReservationsForCalendar(input?.scheduledStart, input?.scheduledEnd, true);
-        const enriched = await Promise.all(items.map(async (r) => {
-          const crane = r.craneId ? await getCraneById(r.craneId) : null;
+        const db = await getDb();
+        if (!db) return [];
 
-          const isAdminOrOperator = ctx.user?.role === 'admin' || ctx.user?.role === 'operator';
+        const conditions = [];
+        conditions.push(or(eq(reservations.status, "approved"), eq(reservations.status, "pending")));
+
+        if (input?.scheduledStart && input?.scheduledEnd) {
+          const startStr = input.scheduledStart.toISOString().split('T')[0];
+          const endStr = input.scheduledEnd.toISOString().split('T')[0];
+          conditions.push(
+            or(
+              and(gte(reservations.scheduledStart, input.scheduledStart), lte(reservations.scheduledStart, input.scheduledEnd)),
+              and(gte(reservations.requestedDate, startStr), lte(reservations.requestedDate, endStr))
+            )
+          );
+        } else {
+          if (input?.scheduledStart) conditions.push(gte(reservations.scheduledStart, input.scheduledStart));
+          if (input?.scheduledEnd) conditions.push(lte(reservations.scheduledEnd, input.scheduledEnd));
+        }
+
+        if (input?.craneId) conditions.push(eq(reservations.craneId, input.craneId));
+
+        const items = await db
+          .select({
+            reservation: reservations,
+            crane: {
+              id: cranes.id,
+              name: cranes.name,
+              location: cranes.location
+            }
+          })
+          .from(reservations)
+          .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .where(and(...conditions));
+
+        const isAdminOrOperator = ctx.user?.role === 'admin' || ctx.user?.role === 'operator';
+
+        return items.map((row) => {
+          const r = row.reservation;
           const isOwner = ctx.user?.id === r.userId;
           const showDetails = isAdminOrOperator || isOwner;
 
           return {
             id: r.id,
             craneId: r.craneId,
-            craneName: crane?.name ?? "Nepoznata dizalica",
-            craneLocation: crane?.location ?? "",
+            craneName: row.crane?.name ?? "Nepoznata dizalica",
+            craneLocation: row.crane?.location ?? "",
             scheduledStart: r.scheduledStart,
             scheduledEnd: r.scheduledEnd,
             // Mask sensitive data for non-owners/non-admins
@@ -1521,13 +1600,7 @@ export const appRouter = router({
             isMaintenance: r.isMaintenance,
             isOwner,
           };
-        }));
-
-        const result = input?.craneId
-          ? enriched.filter((e) => e.craneId === input.craneId)
-          : enriched;
-
-        return result;
+        });
       }),
 
     availableSlots: publicProcedure

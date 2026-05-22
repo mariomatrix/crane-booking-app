@@ -1,6 +1,6 @@
 {
-  "id": "90d25c5c-a2a6-4e44-9e14-4c7f0b9a8770",
-  "prevId": "598fc72d-58e0-4714-a560-c76ba752286c",
+  "id": "6a34fef8-dc41-4d57-aaaf-cc0da2e7a7e8",
+  "prevId": "1c89849b-a64b-4838-811f-a595caccb63f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -119,6 +119,58 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.password_resets": {
+      "name": "password_resets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "userId": {
+          "name": "userId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "password_resets_token_unique": {
+          "name": "password_resets_token_unique",
+          "columns": [
+            "token"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -258,6 +310,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "cancelReason": {
+          "name": "cancelReason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelledByType": {
+          "name": "cancelledByType",
+          "type": "varchar(20)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "createdAt": {
           "name": "createdAt",
           "type": "timestamp",
@@ -279,10 +343,10 @@
       "uniqueConstraints": {
         "reservations_reservationNumber_unique": {
           "name": "reservations_reservationNumber_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "reservationNumber"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -407,6 +471,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "deletedAt": {
+          "name": "deletedAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -415,17 +485,17 @@
       "uniqueConstraints": {
         "users_openId_unique": {
           "name": "users_openId_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "openId"
-          ]
+          ],
+          "nullsNotDistinct": false
         },
         "users_email_unique": {
           "name": "users_email_unique",
-          "nullsNotDistinct": false,
           "columns": [
             "email"
-          ]
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
@@ -603,10 +673,10 @@
     }
   },
   "schemas": {},
+  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
-  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},
