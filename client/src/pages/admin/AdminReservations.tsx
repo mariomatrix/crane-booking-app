@@ -85,7 +85,8 @@ export default function AdminReservations() {
   const totalPages = Math.ceil(totalReservations / pageSize);
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
-  const { data: usersList = [] } = trpc.user.list.useQuery();
+  const usersQuery = trpc.user.list.useQuery();
+  const usersList = usersQuery.data?.data || [];
 
   const approveMutation = trpc.reservation.approve.useMutation({
     onSuccess: () => {
