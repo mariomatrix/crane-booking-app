@@ -10,6 +10,7 @@ import {
     date,
     jsonb,
     uuid,
+    index,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -142,6 +143,16 @@ export const reservations = pgTable("reservations", {
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        scheduledStartIdx: index("res_scheduled_start_idx").on(table.scheduledStart),
+        scheduledEndIdx: index("res_scheduled_end_idx").on(table.scheduledEnd),
+        statusIdx: index("res_status_idx").on(table.status),
+        userIdIdx: index("res_user_id_idx").on(table.userId),
+        craneIdIdx: index("res_crane_id_idx").on(table.craneId),
+        requestedDateIdx: index("res_requested_date_idx").on(table.requestedDate),
+        isMaintenanceIdx: index("res_is_maintenance_idx").on(table.isMaintenance),
+    };
 });
 
 // ─── Waiting List ──────────────────────────────────────────────────────

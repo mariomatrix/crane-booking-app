@@ -8,6 +8,13 @@
       "when": 1740239400000,
       "tag": "0000_v2_initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779483995697,
+      "tag": "0001_add_reservation_indexes",
+      "breakpoints": true
     }
   ]
 }
