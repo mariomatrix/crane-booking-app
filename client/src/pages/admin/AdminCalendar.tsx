@@ -26,7 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { addDays, startOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
+import { addDays, startOfDay, endOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { Calendar } from "@/components/ui/calendar";
@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { useSearch } from "wouter";
 import { CalendarIcon } from "lucide-react";
+import { DatePicker } from "@/components/ui/date-picker";
 
 const STATUS_COLORS: Record<string, string> = {
     pending: "#f59e0b",   // Amber
@@ -67,6 +68,7 @@ export default function AdminCalendar() {
     });
     const [selectedCrane, setSelectedCrane] = useState<string>("all");
     const [isMaintOpen, setIsMaintOpen] = useState(false);
+    const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
 
     // Refs
     const draggableRef = useRef<HTMLDivElement>(null);
@@ -74,17 +76,33 @@ export default function AdminCalendar() {
 
     // Filters and Data
     const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
-    const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
+    const usersQuery = trpc.user.list.useQuery({ pageSize: 200 });
     const usersList = usersQuery.data?.data || [];
     const { data: holidays = [] } = trpc.holiday.list.useQuery();
+
+    const fetchRange = useMemo(() => {
+        if (viewMode === 'master') {
+            return {
+                start: startOfDay(viewDate),
+                end: endOfDay(addDays(viewDate, cranesList.length || 1))
+            };
+        }
+        return visibleRange;
+    }, [viewMode, viewDate, visibleRange, cranesList.length]);
+
     const reservationsQuery = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
         userId: selectedUser !== "all" ? selectedUser : undefined,
-        pageSize: 1000,
+        scheduledStart: fetchRange?.start,
+        scheduledEnd: fetchRange?.end,
+        pageSize: 500, // Reduced from 1000, still safe for a month view
+    }, {
+        enabled: !!fetchRange,
+        staleTime: 30000, // 30 seconds
     });
     const allReservations = reservationsQuery.data?.data || [];
     const isResLoading = reservationsQuery.isLoading;
-    const waitingListQuery = trpc.waitingList.listAll.useQuery({ pageSize: 1000 });
+    const waitingListQuery = trpc.waitingList.listAll.useQuery({ pageSize: 200 });
     const waitingList = waitingListQuery.data?.data || [];
     const { data: sysSettings } = trpc.settings.get.useQuery();
     const utils = trpc.useUtils();
@@ -400,6 +418,15 @@ export default function AdminCalendar() {
         setStatusFilters(prev =>
             prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
         );
+    };
+
+    const handleDatesSet = (arg: DatesSetArg) => {
+        if (viewMode !== 'master') {
+            setVisibleRange({
+                start: arg.start,
+                end: arg.end
+            });
+        }
     };
 
     return (
@@ -814,6 +841,7 @@ export default function AdminCalendar() {
                         }}
                         eventDrop={handleEventDrop}
                         eventClick={handleEventClick}
+                        datesSet={handleDatesSet}
                         events={calendarEvents as any}
                         dayHeaderContent={(arg: any) => {
                             if (viewMode !== 'master') return undefined;
