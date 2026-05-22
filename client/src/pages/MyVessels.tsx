@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState } from "react";
+import { BottomNav } from "@/components/BottomNav";
 
 export default function MyVessels() {
     const { user, loading: authLoading } = useAuth();
@@ -242,6 +243,7 @@ export default function MyVessels() {
                     </div>
                 )}
             </div>
+            <BottomNav />
         </div>
     );
 }

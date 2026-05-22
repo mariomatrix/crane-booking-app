@@ -91,6 +91,11 @@ export const hr = {
         },
         cancel: "Otkaži",
         cancelConfirm: "Jeste li sigurni da želite otkazati ovu rezervaciju?",
+        stepper: {
+            request: "Zahtjev",
+            approved: "Potvrđeno",
+            done: "Završeno",
+        },
     },
     // Auth
     auth: {
@@ -209,6 +214,20 @@ export const hr = {
         passwordSuccess: "Lozinka je uspješno promijenjena.",
         passwordError: "Greška pri promjeni lozinke.",
         passwordsDontMatch: "Lozinke se ne podudaraju.",
+    },
+    // Dashboard
+    dashboard: {
+        welcome: "Dobrodošli natrag",
+        nextReservation: "Sljedeća rezervacija",
+        noUpcoming: "Nema nadolazećih termina",
+        activeRequests: "Aktivni zahtjevi",
+        quickActions: "Brze akcije",
+        viewAll: "Vidi sve",
+        overview: "Pregled vaših aktivnosti u marini.",
+        details: "Detalji",
+        noActive: "Nema aktivnih zahtjeva.",
+        myCard: "Moj karton",
+        viewFullCalendar: "Vidi puni kalendar",
     },
 };
 
