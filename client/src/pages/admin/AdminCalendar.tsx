@@ -26,7 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { addDays, startOfDay, endOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
+import { addDays, addMonths, addWeeks, startOfDay, endOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { Calendar } from "@/components/ui/calendar";
@@ -750,21 +750,25 @@ export default function AdminCalendar() {
                     </div>
 
                     <div className="ml-auto flex items-center bg-background border rounded-md p-1 overflow-hidden shadow-sm">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => {
-                            if (viewMode === 'master') return addDays(d, -1);
-                            if (viewMode === 'timeGridWeek') return addDays(d, -7);
-                            return addDays(d, -30);
-                        })}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                            const newDate = viewMode === 'master' ? addDays(viewDate, -1) :
+                                           viewMode === 'timeGridWeek' ? addWeeks(viewDate, -1) :
+                                           addMonths(viewDate, -1);
+                            setViewDate(newDate);
+                            calendarRef.current?.getApi().gotoDate(newDate);
+                        }}>
                             <ChevronLeft className="h-4 w-4" />
                         </Button>
                         <div className="px-3 text-sm font-semibold tabular-nums min-w-[140px] text-center">
                             {viewMode === 'master' ? formatAppDate(viewDate, lang as any) : format(viewDate, "MMMM yyyy", { locale: lang === 'hr' ? hr : enUS })}
                         </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewDate(d => {
-                            if (viewMode === 'master') return addDays(d, 1);
-                            if (viewMode === 'timeGridWeek') return addDays(d, 7);
-                            return addDays(d, 30);
-                        })}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
+                            const newDate = viewMode === 'master' ? addDays(viewDate, 1) :
+                                           viewMode === 'timeGridWeek' ? addWeeks(viewDate, 1) :
+                                           addMonths(viewDate, 1);
+                            setViewDate(newDate);
+                            calendarRef.current?.getApi().gotoDate(newDate);
+                        }}>
                             <ChevronRight className="h-4 w-4" />
                         </Button>
                     </div>
@@ -795,6 +799,7 @@ export default function AdminCalendar() {
                         ref={calendarRef}
                         plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
                         initialView={viewMode === 'master' ? 'timeGrid' : viewMode}
+                        initialDate={viewDate}
                         visibleRange={viewMode === 'master' ? {
                             start: viewDate,
                             end: addDays(viewDate, activeCranes.length || 1)
