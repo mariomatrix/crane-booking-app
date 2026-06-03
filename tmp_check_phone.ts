@@ -12,7 +12,7 @@ async function checkUserPhone() {
 
     const result = await db.select({
         email: users.email,
-        phone: users.phone
+        phone: users.phone2
     })
         .from(users)
         .where(eq(users.email, "mario@imagomatrix.hr"));
