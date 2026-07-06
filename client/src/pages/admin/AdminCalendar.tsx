@@ -855,6 +855,9 @@ export default function AdminCalendar() {
                                 return crane ? (
                                     <div className="flex flex-col items-center py-1">
                                         <span className="text-xs font-bold">{crane.name}</span>
+                                        <span className="text-[10px] opacity-60 font-normal normal-case">
+                                            {format(viewDate, "eee dd.MM.", { locale: lang === 'hr' ? hr : enUS })}
+                                        </span>
                                     </div>
                                 ) : "";
                             }
