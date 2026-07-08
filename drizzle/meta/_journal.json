@@ -15,6 +15,13 @@
       "when": 1783082607947,
       "tag": "0001_daily_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783511451484,
+      "tag": "0002_mature_multiple_man",
+      "breakpoints": true
     }
   ]
 }
