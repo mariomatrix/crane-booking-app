@@ -856,6 +856,17 @@ export async function listLandZones() {
 export async function createLandZone(data: InsertLandZone) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
+
+  // Check if code already exists
+  const existing = await db
+    .select()
+    .from(landZones)
+    .where(eq(landZones.code, data.code))
+    .limit(1);
+  if (existing.length > 0) {
+    throw new Error(`Kopnena zona s kodom "${data.code}" već postoji.`);
+  }
+
   const res = await db.insert(landZones).values(data).returning({ id: landZones.id });
   return res[0].id;
 }
@@ -863,6 +874,18 @@ export async function createLandZone(data: InsertLandZone) {
 export async function updateLandZone(id: string, data: Partial<InsertLandZone>) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
+
+  if (data.code) {
+    const existing = await db
+      .select()
+      .from(landZones)
+      .where(and(eq(landZones.code, data.code), ne(landZones.id, id)))
+      .limit(1);
+    if (existing.length > 0) {
+      throw new Error(`Kopnena zona s kodom "${data.code}" već postoji.`);
+    }
+  }
+
   await db.update(landZones).set({ ...data, updatedAt: new Date() }).where(eq(landZones.id, id));
 }
 
