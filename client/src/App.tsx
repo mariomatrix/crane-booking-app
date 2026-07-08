@@ -24,6 +24,9 @@ import AdminSeasons from "./pages/admin/AdminSeasons";
 import AdminHolidays from "./pages/admin/AdminHolidays";
 import AdminAuditLog from "./pages/admin/AdminAuditLog";
 import AdminUserCard from "./pages/admin/AdminUserCard";
+import AdminLandZones from "./pages/admin/AdminLandZones";
+import AdminLandWaiting from "./pages/admin/AdminLandWaiting";
+import AdminCraneOps from "./pages/admin/AdminCraneOps";
 import Profile from "./pages/Profile";
 import MyCard from "./pages/MyCard";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
@@ -77,6 +80,15 @@ function Router() {
       </Route>
       <Route path="/admin/audit-log">
         <AdminLayout><AdminAuditLog /></AdminLayout>
+      </Route>
+      <Route path="/admin/land-zones">
+        <AdminLayout><AdminLandZones /></AdminLayout>
+      </Route>
+      <Route path="/admin/land-waiting">
+        <AdminLayout><AdminLandWaiting /></AdminLayout>
+      </Route>
+      <Route path="/admin/crane-ops">
+        <AdminLayout><AdminCraneOps /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />

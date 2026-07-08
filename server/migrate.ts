@@ -31,7 +31,7 @@ async function runMigration() {
     console.log("Migrations completed.");
 
     // ─── Import schema and helpers ────────────────────────────────────
-    const { cranes, users, serviceTypes, holidays } = await import("../drizzle/schema");
+    const { cranes, users, serviceTypes, holidays, landZones } = await import("../drizzle/schema");
     const { eq } = await import("drizzle-orm");
     const bcrypt = await import("bcryptjs");
 
@@ -103,6 +103,21 @@ async function runMigration() {
             { date: "2026-12-26", name: "Sveti Stjepan (Štefanje)", isRecurring: true },
         ]);
         console.log("HR holidays seeded.");
+    }
+
+    // ─── Seed: Land Zones ────────────────────────────────────────────
+    const existingLandZones = await db.select().from(landZones);
+    if (existingLandZones.length === 0) {
+        console.log("Seeding land zones...");
+        await db.insert(landZones).values([
+            { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+            { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
+            { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
+            { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
+            { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
+            { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
+        ]);
+        console.log("Land zones seeded.");
     }
 
     // ─── Seed: Admin Users ───────────────────────────────────────────

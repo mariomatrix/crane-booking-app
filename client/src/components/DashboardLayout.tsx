@@ -39,6 +39,8 @@ import {
   BarChart3,
   Globe,
   History,
+  Anchor,
+  ListOrdered,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -123,7 +125,7 @@ function DashboardLayoutContent({
   children,
   setSidebarWidth,
 }: DashboardLayoutContentProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
 
@@ -132,6 +134,9 @@ function DashboardLayoutContent({
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
+    { icon: Anchor, label: lang === "hr" ? "Kopnena mjesta" : "Dry Berths", path: "/admin/land-zones" },
+    { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja kopno" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
+    { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
     { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types" },
     { icon: Sun, label: t.nav.seasons, path: "/admin/seasons" },
     { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays" },

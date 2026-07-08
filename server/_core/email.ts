@@ -354,3 +354,28 @@ export async function sendNewMessageNotification(opts: {
     return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
+export async function sendLandSpotAvailable(opts: {
+    to: string;
+    userName: string;
+    zoneName: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? `Slobodno mjesto na kopnu — ${opts.zoneName}`
+        : `Dry Berth Spot Available — ${opts.zoneName}`;
+    const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr
+            ? `Slobodno mjesto na kopnu u zoni <strong>${opts.zoneName}</strong> je sada dostupno za Vaše plovilo.`
+            : `A dry berth slot in zone <strong>${opts.zoneName}</strong> is now available for your vessel.`
+        }</p>
+    <p>${isHr 
+            ? "Molimo kontaktirajte lučku kapetaniju ili posjetite aplikaciju kako biste potvrdili prihvaćanje." 
+            : "Please contact the harbor master or visit the application to confirm acceptance."
+        }</p>
+  `;
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+

@@ -37,6 +37,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [contactPhone, setContactPhone] = useState("");
 
     // Vessel state
+    const [selectedVesselId, setSelectedVesselId] = useState<string>("new");
+    const [saveToProfile, setSaveToProfile] = useState(true);
     const [vesselType, setVesselType] = useState("");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
@@ -52,7 +54,56 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const usersList = usersQuery.data?.data || [];
     const { data: cranes = [] } = trpc.crane.list.useQuery();
 
-    // ── Mutation ─────────────────────────────────────────────────────────
+    const { data: userVessels = [], isLoading: userVesselsLoading } =
+        trpc.vessel.listByUser.useQuery({ userId }, { enabled: !!userId });
+
+    // Handle user changes / auto-selection
+    const [lastLoadedUserId, setLastLoadedUserId] = useState("");
+    if (userId !== lastLoadedUserId) {
+        setLastLoadedUserId(userId);
+        setSelectedVesselId("new");
+        setVesselType("");
+        setVesselLength("");
+        setVesselWidth("");
+        setVesselDraft("");
+        setVesselWeight("");
+        setVesselRegistration("");
+    }
+
+    if (userVessels.length > 0 && selectedVesselId === "new" && !vesselRegistration && !userVesselsLoading) {
+        const v = userVessels[0];
+        setSelectedVesselId(v.id);
+        setVesselType(v.type || "");
+        setVesselLength(v.lengthM ? String(v.lengthM) : "");
+        setVesselWidth(v.beamM ? String(v.beamM) : "");
+        setVesselDraft(v.draftM ? String(v.draftM) : "");
+        setVesselWeight(v.weightTons ? String(v.weightTons) : "");
+        setVesselRegistration(v.registration || "");
+    }
+
+    const handleVesselSelect = (vesselId: string) => {
+        setSelectedVesselId(vesselId);
+        if (vesselId === "new") {
+            setVesselType("");
+            setVesselLength("");
+            setVesselWidth("");
+            setVesselDraft("");
+            setVesselWeight("");
+            setVesselRegistration("");
+        } else {
+            const v = userVessels.find(x => x.id === vesselId);
+            if (v) {
+                setVesselType(v.type || "");
+                setVesselLength(v.lengthM ? String(v.lengthM) : "");
+                setVesselWidth(v.beamM ? String(v.beamM) : "");
+                setVesselDraft(v.draftM ? String(v.draftM) : "");
+                setVesselWeight(v.weightTons ? String(v.weightTons) : "");
+                setVesselRegistration(v.registration || "");
+            }
+        }
+    };
+
+    // ── Mutations ────────────────────────────────────────────────────────
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
             toast.success("Rezervacija uspješno kreirana.");
@@ -61,10 +112,12 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         onError: (error: any) => toast.error(error.message),
     });
 
+    const vesselCreateMutation = trpc.vessel.create.useMutation();
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType || !contactPhone) {
-            toast.error("Molimo popunite sva obavezna polja (uključujući vrijeme, dizalicu i trajanje).");
+        if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType || !contactPhone || !vesselRegistration) {
+            toast.error("Molimo popunite sva obavezna polja (uključujući vrijeme, dizalicu, trajanje i registraciju).");
             return;
         }
 
@@ -72,24 +125,64 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         const scheduledStartDate = new Date(requestedDate);
         scheduledStartDate.setHours(hours, minutes, 0, 0);
 
-        createMutation.mutate({
-            userId,
-            isAutoApprove: true,
-            craneId,
-            scheduledStart: scheduledStartDate,
-            durationMin: Number(durationMin),
-            serviceTypeId,
-            requestedDate: formatToSqlDate(requestedDate),
-            requestedTimeSlot: "po_dogovoru",
-            userNote: userNote || undefined,
-            vesselType: vesselType as any,
-            vesselRegistration: vesselRegistration || undefined,
-            vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
-            vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
-            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
-            vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
-            contactPhone,
-        });
+        if (selectedVesselId === "new" && saveToProfile) {
+            // Save vessel to profile first
+            vesselCreateMutation.mutate({
+                name: vesselRegistration || "Plovilo",
+                type: vesselType as any,
+                lengthM: vesselLength ? Number(vesselLength) : undefined,
+                beamM: vesselWidth ? Number(vesselWidth) : undefined,
+                draftM: vesselDraft ? Number(vesselDraft) : undefined,
+                weightTons: vesselWeight ? Number(vesselWeight) : undefined,
+                registration: vesselRegistration || undefined,
+                ownerId: userId,
+            }, {
+                onSuccess: (newVessel) => {
+                    createMutation.mutate({
+                        userId,
+                        isAutoApprove: true,
+                        craneId,
+                        scheduledStart: scheduledStartDate,
+                        durationMin: Number(durationMin),
+                        serviceTypeId,
+                        requestedDate: formatToSqlDate(requestedDate),
+                        requestedTimeSlot: "po_dogovoru",
+                        userNote: userNote || undefined,
+                        vesselId: newVessel.id,
+                        vesselType: vesselType as any,
+                        vesselRegistration: vesselRegistration || undefined,
+                        vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
+                        vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
+                        vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
+                        vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
+                        contactPhone,
+                    });
+                },
+                onError: (err) => {
+                    toast.error("Greška pri kreiranju plovila: " + err.message);
+                }
+            });
+        } else {
+            createMutation.mutate({
+                userId,
+                isAutoApprove: true,
+                craneId,
+                scheduledStart: scheduledStartDate,
+                durationMin: Number(durationMin),
+                serviceTypeId,
+                requestedDate: formatToSqlDate(requestedDate),
+                requestedTimeSlot: "po_dogovoru",
+                userNote: userNote || undefined,
+                vesselId: selectedVesselId !== "new" ? selectedVesselId : undefined,
+                vesselType: vesselType as any,
+                vesselRegistration: vesselRegistration || undefined,
+                vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
+                vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
+                vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
+                vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
+                contactPhone,
+            });
+        }
     };
 
     const timeSlotOptions = [
@@ -206,10 +299,46 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                     <div className="space-y-4">
                         <h3 className="font-medium text-sm border-b pb-2">{t.form.vesselSection}</h3>
 
+                        {userId && (
+                            <div className="space-y-2 mb-4">
+                                <Label>{lang === "hr" ? "Odabir plovila" : "Select Vessel"}</Label>
+                                <Select value={selectedVesselId} onValueChange={handleVesselSelect}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={lang === "hr" ? "Odaberite plovilo" : "Select vessel"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="new">
+                                            🌟 {lang === "hr" ? "Novo plovilo (Unesi podatke)" : "New Vessel (Enter data)"}
+                                        </SelectItem>
+                                        {userVessels.map((v: any) => (
+                                            <SelectItem key={v.id} value={v.id}>
+                                                ⛵ {v.registration ? `[${v.registration}] ` : ""}{v.name || "Plovilo"}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+
+                        {selectedVesselId === "new" && (
+                            <div className="flex items-center gap-2 py-1 mb-2">
+                                <input
+                                    type="checkbox"
+                                    id="saveToProfile"
+                                    checked={saveToProfile}
+                                    onChange={(e) => setSaveToProfile(e.target.checked)}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                />
+                                <Label htmlFor="saveToProfile" className="text-xs text-muted-foreground cursor-pointer select-none">
+                                    {lang === "hr" ? "Spremi plovilo u profil korisnika" : "Save vessel to user profile"}
+                                </Label>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>{t.form.vesselType} *</Label>
-                                <Select value={vesselType} onValueChange={setVesselType}>
+                                <Select value={vesselType} onValueChange={setVesselType} disabled={selectedVesselId !== "new"}>
                                     <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
@@ -226,6 +355,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                     value={vesselWeight}
                                     onChange={(e) => setVesselWeight(e.target.value)}
                                     placeholder="t"
+                                    disabled={selectedVesselId !== "new"}
                                 />
                             </div>
                         </div>
@@ -237,21 +367,22 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                 onChange={(e) => setVesselRegistration(e.target.value)}
                                 placeholder={lang === "hr" ? "npr. ST-1234" : "e.g. ST-1234"}
                                 required
+                                disabled={selectedVesselId !== "new"}
                             />
                         </div>
 
                         <div className="grid grid-cols-3 gap-2">
                             <div className="space-y-1">
                                 <Label className="text-xs">{t.form.vesselLength} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} />
+                                <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} disabled={selectedVesselId !== "new"} />
                             </div>
                             <div className="space-y-1">
                                 <Label className="text-xs">{t.form.vesselWidth} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} />
+                                <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} disabled={selectedVesselId !== "new"} />
                             </div>
                             <div className="space-y-1">
                                 <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} />
+                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} disabled={selectedVesselId !== "new"} />
                             </div>
                         </div>
                     </div>

@@ -5,10 +5,10 @@ import { cn } from "@/lib/utils";
 
 export function BottomNav() {
   const [location, setLocation] = useLocation();
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   const navItems = [
-    { icon: Home, label: t.nav.calendar, path: "/" },
+    { icon: Home, label: lang === "hr" ? "Početna" : "Home", path: "/" },
     { icon: ClipboardList, label: t.nav.myReservations, path: "/my-reservations" },
     { icon: Plus, label: t.nav.newReservation, path: "/new-reservation", primary: true },
     { icon: User, label: t.nav.profile, path: "/profile" },

@@ -298,3 +298,89 @@ export type SelectAuditLog = typeof auditLog.$inferSelect;
 
 export type InsertPasswordReset = typeof passwordResets.$inferInsert;
 export type SelectPasswordReset = typeof passwordResets.$inferSelect;
+
+// ─── Dry Berths (Mjesta na kopnu) ───────────────────────────────────────
+export const landZoneStatusEnum = pgEnum("land_zone_status", ["active", "inactive"]);
+
+export const landZones = pgTable("land_zones", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 255 }).notNull(),
+    code: varchar("code", { length: 10 }).unique().notNull(),
+    totalSpots: integer("total_spots").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const landOccupancies = pgTable("land_occupancies", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    vesselId: uuid("vessel_id").notNull().references(() => vessels.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    zoneId: uuid("zone_id").notNull().references(() => landZones.id),
+    spotNumber: integer("spot_number"),              // opcijski: konkretno mjesto 1–N
+    reservationId: uuid("reservation_id").references(() => reservations.id),  // vađenje
+    returnReservationId: uuid("return_reservation_id").references(() => reservations.id),  // spuštanje
+    liftedAt: timestamp("lifted_at").notNull(),      // kad je brod podignut na kopno
+    returnedAt: timestamp("returned_at"),             // kad je brod vraćen u more (NULL = još na kopnu)
+    note: text("note"),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const landWaitingStatusEnum = pgEnum("land_waiting_status", [
+    "waiting",    // čeka slobodno mjesto
+    "offered",    // ponuđeno mjesto, čeka odgovor korisnika
+    "assigned",   // mjesto dodijeljeno
+    "declined",   // korisnik odbio ponudu (ali ostaje na listi)
+    "cancelled",  // obrisan s liste
+]);
+
+export const landWaitingList = pgTable("land_waiting_list", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    vesselId: uuid("vessel_id").references(() => vessels.id),
+    preferredZoneId: uuid("preferred_zone_id").references(() => landZones.id),
+    position: integer("position").default(0).notNull(),
+    status: landWaitingStatusEnum("status").default("waiting").notNull(),
+    note: text("note"),             // napomena korisnika
+    adminNote: text("admin_note"),  // interna napomena operatera
+    assignedOccupancyId: uuid("assigned_occupancy_id").references(() => landOccupancies.id),
+    offeredAt: timestamp("offered_at"),       // kad je ponuda poslana
+    declinedAt: timestamp("declined_at"),     // kad je korisnik odbio
+    declineCount: integer("decline_count").default(0).notNull(),  // koliko puta je odbio
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const craneOperationLog = pgTable("crane_operation_log", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    craneId: uuid("crane_id").notNull().references(() => cranes.id),
+    reservationId: uuid("reservation_id").references(() => reservations.id),
+    operationType: varchar("operation_type", { length: 50 }).notNull(), // 'lift' | 'lower' | 'move' | 'maintenance'
+    startTime: timestamp("start_time").notNull(),
+    endTime: timestamp("end_time").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    operatorId: uuid("operator_id").references(() => users.id),    // tko je upravljao
+    note: text("note"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type InsertLandZone = typeof landZones.$inferInsert;
+export type SelectLandZone = typeof landZones.$inferSelect;
+export type LandZone = SelectLandZone;
+
+export type InsertLandOccupancy = typeof landOccupancies.$inferInsert;
+export type SelectLandOccupancy = typeof landOccupancies.$inferSelect;
+export type LandOccupancy = SelectLandOccupancy;
+
+export type InsertLandWaitingList = typeof landWaitingList.$inferInsert;
+export type SelectLandWaitingList = typeof landWaitingList.$inferSelect;
+export type LandWaitingList = SelectLandWaitingList;
+
+export type InsertCraneOperationLog = typeof craneOperationLog.$inferInsert;
+export type SelectCraneOperationLog = typeof craneOperationLog.$inferSelect;
+export type CraneOperationLog = SelectCraneOperationLog;
+

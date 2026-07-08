@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { useLocation } from "wouter";
 import Calendar from "./Calendar";
+import LandingPage from "../components/LandingPage";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -19,7 +20,9 @@ import {
   ChevronRight,
   Clock,
   Anchor,
+  ListOrdered,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +58,11 @@ export default function Home() {
   const upcomingReservation = reservationsList.find(r => r.status === "approved" && r.scheduledStart && new Date(r.scheduledStart) > new Date());
   const pendingRequests = reservationsList.filter(r => r.status === "pending");
 
+  const { data: waitlistStatus } = trpc.landWaiting.getMyStatus.useQuery(
+    undefined,
+    { enabled: !!user && user.role === "user" }
+  );
+
   return (
     <div className="min-h-screen bg-background">
       {/* Top Navigation */}
@@ -71,16 +79,6 @@ export default function Home() {
           </div>
 
           <nav className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setLocation("/")}
-              className="text-sm"
-            >
-              <CalendarDays className="h-4 w-4 mr-1.5" />
-              Calendar
-            </Button>
-
             {user && (
               <>
                 <Button
@@ -196,7 +194,7 @@ export default function Home() {
               </p>
             </section>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className={`grid grid-cols-1 gap-6 ${waitlistStatus ? "md:grid-cols-2 lg:grid-cols-3" : "md:grid-cols-2"}`}>
               {/* Upcoming Appointment */}
               <Card className="relative overflow-hidden">
                 <CardHeader className="pb-2">
@@ -249,7 +247,7 @@ export default function Home() {
                       pendingRequests.slice(0, 3).map((r) => (
                         <div key={r.id} className="flex items-center justify-between text-sm py-1 border-b last:border-0">
                           <span className="truncate max-w-[150px] font-medium">
-                            {r.vessel?.name || (t as any).myReservations.stepper.request}
+                            {r.vesselName || (t as any).myReservations.stepper.request}
                           </span>
                           <StatusBadge status={r.status} />
                         </div>
@@ -262,6 +260,59 @@ export default function Home() {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Dry Berth Waitlist Status */}
+              {waitlistStatus && (
+                <Card className="relative overflow-hidden border-blue-100 bg-blue-50/5">
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                      <ListOrdered className="h-4 w-4 text-primary" />
+                      {lang === "hr" ? "Lista čekanja" : "Waitlist"}
+                    </CardTitle>
+                    {waitlistStatus.status === "offered" ? (
+                      <Badge className="bg-emerald-500 hover:bg-emerald-600 animate-pulse text-white">
+                        {lang === "hr" ? "Ponuđeno!" : "Offered!"}
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">
+                        {lang === "hr" ? "Na listi" : "Queued"}
+                      </Badge>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-2xl font-bold flex items-baseline gap-1">
+                          {waitlistStatus.position}
+                          <span className="text-xs text-muted-foreground font-normal">
+                            . {lang === "hr" ? "mjesto" : "position"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {lang === "hr"
+                            ? `Preferirana zona: ${waitlistStatus.preferredZoneName || "Bilo koja"}`
+                            : `Preferred zone: ${waitlistStatus.preferredZoneName || "Any"}`}
+                        </p>
+                      </div>
+                      
+                      {waitlistStatus.status === "offered" && (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 text-xs text-emerald-800 space-y-1">
+                          <p className="font-semibold">
+                            {lang === "hr" 
+                              ? "Lučka uprava Vam je ponudila slobodno mjesto!" 
+                              : "The harbor office has offered you a free spot!"}
+                          </p>
+                          <p>
+                            {lang === "hr"
+                              ? "Molimo javite se kapetanu na 021/385-122 radi rasporeda."
+                              : "Please contact the harbor captain at 021/385-122 to arrange allocation."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
             {/* Quick Actions */}
@@ -303,25 +354,9 @@ export default function Home() {
               </div>
             </section>
 
-            {/* Show calendar as secondary on dashboard */}
-            <section className="pt-8 border-t">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold">{t.calendar.title}</h3>
-                <Button variant="ghost" size="sm" onClick={() => {
-                  const el = document.getElementById('full-calendar');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}>
-                  {(t as any).dashboard.viewFullCalendar}
-                  <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-              <div id="full-calendar" className="rounded-xl border bg-card p-4">
-                <Calendar />
-              </div>
-            </section>
           </div>
         ) : (
-          <Calendar />
+          <LandingPage />
         )}
       </main>
       <Footer />

@@ -15,6 +15,10 @@ import {
   seasons,
   holidays,
   apiKeys,
+  landZones,
+  landOccupancies,
+  landWaitingList,
+  craneOperationLog,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -22,6 +26,10 @@ import {
   type InsertWaitingList,
   type InsertAuditLog,
   type InsertServiceType,
+  type InsertLandZone,
+  type InsertLandOccupancy,
+  type InsertLandWaitingList,
+  type InsertCraneOperationLog,
 } from "../drizzle/schema";
 
 // ─── DB Connection ────────────────────────────────────────────────────
@@ -488,6 +496,22 @@ export async function seedServiceTypes() {
   await db.insert(serviceTypes).values(defaults);
 }
 
+export async function seedLandZones() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(landZones).limit(1);
+  if (existing.length > 0) return; // already seeded
+  const defaultZones = [
+    { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+    { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
+    { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
+    { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
+    { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
+    { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
+  ];
+  await db.insert(landZones).values(defaultZones);
+}
+
 // ─── Email Verification ───────────────────────────────────────────────
 import crypto from "crypto";
 
@@ -812,3 +836,330 @@ export async function upsertUser(data: {
     });
   }
 }
+
+// ─── Dry Berths (Mjesta na kopnu) Queries ──────────────────────────────
+
+export async function listLandZones() {
+  const db = await getDb();
+  if (!db) return [];
+  const zones = await db.select().from(landZones).orderBy(landZones.sortOrder);
+  const occupancies = await db.select().from(landOccupancies).where(isNull(landOccupancies.returnedAt));
+  return zones.map(z => {
+    const activeCount = occupancies.filter(o => o.zoneId === z.id).length;
+    return {
+      ...z,
+      activeSpots: activeCount,
+    };
+  });
+}
+
+export async function createLandZone(data: InsertLandZone) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(landZones).values(data).returning({ id: landZones.id });
+  return res[0].id;
+}
+
+export async function updateLandZone(id: string, data: Partial<InsertLandZone>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landZones).set({ ...data, updatedAt: new Date() }).where(eq(landZones.id, id));
+}
+
+export async function deleteLandZone(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landZones).set({ isActive: false, updatedAt: new Date() }).where(eq(landZones.id, id));
+}
+
+export async function listActiveOccupancies(filters?: { zoneId?: string; userId?: string }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [isNull(landOccupancies.returnedAt)];
+  if (filters?.zoneId) conditions.push(eq(landOccupancies.zoneId, filters.zoneId));
+  if (filters?.userId) conditions.push(eq(landOccupancies.userId, filters.userId));
+
+  return db
+    .select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      reservationId: landOccupancies.reservationId,
+      returnReservationId: landOccupancies.returnReservationId,
+      liftedAt: landOccupancies.liftedAt,
+      returnedAt: landOccupancies.returnedAt,
+      note: landOccupancies.note,
+      createdBy: landOccupancies.createdBy,
+      createdAt: landOccupancies.createdAt,
+      updatedAt: landOccupancies.updatedAt,
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+        lengthM: vessels.lengthM,
+        beamM: vessels.beamM,
+        draftM: vessels.draftM,
+        weightTons: vessels.weightTons,
+      },
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      zone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(...conditions))
+    .orderBy(desc(landOccupancies.liftedAt));
+}
+
+export async function listOccupancyHistory(filters?: { zoneId?: string; userId?: string; limit?: number; offset?: number }) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const conditions = [sql`${landOccupancies.returnedAt} IS NOT NULL`];
+  if (filters?.zoneId) conditions.push(eq(landOccupancies.zoneId, filters.zoneId));
+  if (filters?.userId) conditions.push(eq(landOccupancies.userId, filters.userId));
+
+  const countRes = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(landOccupancies)
+    .where(and(...conditions));
+  
+  const data = await db
+    .select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      reservationId: landOccupancies.reservationId,
+      returnReservationId: landOccupancies.returnReservationId,
+      liftedAt: landOccupancies.liftedAt,
+      returnedAt: landOccupancies.returnedAt,
+      note: landOccupancies.note,
+      createdBy: landOccupancies.createdBy,
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+      },
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      },
+      zone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(...conditions))
+    .orderBy(desc(landOccupancies.returnedAt))
+    .limit(filters?.limit ?? 50)
+    .offset(filters?.offset ?? 0);
+     
+  return { data, total: Number(countRes[0]?.count ?? 0) };
+}
+
+export async function createLandOccupancy(data: InsertLandOccupancy) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(landOccupancies).values(data).returning({ id: landOccupancies.id });
+  return res[0].id;
+}
+
+export async function completeLandOccupancy(id: string, returnReservationId?: string, returnedAt = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landOccupancies).set({
+    returnedAt,
+    returnReservationId,
+    updatedAt: new Date()
+  }).where(eq(landOccupancies.id, id));
+}
+
+export async function getActiveOccupancyByVessel(vesselId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.vesselId, vesselId), isNull(landOccupancies.returnedAt)))
+    .limit(1);
+  return res[0];
+}
+
+export async function listLandWaitingList() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: landWaitingList.id,
+      userId: landWaitingList.userId,
+      vesselId: landWaitingList.vesselId,
+      preferredZoneId: landWaitingList.preferredZoneId,
+      position: landWaitingList.position,
+      status: landWaitingList.status,
+      note: landWaitingList.note,
+      adminNote: landWaitingList.adminNote,
+      assignedOccupancyId: landWaitingList.assignedOccupancyId,
+      offeredAt: landWaitingList.offeredAt,
+      declinedAt: landWaitingList.declinedAt,
+      declineCount: landWaitingList.declineCount,
+      createdAt: landWaitingList.createdAt,
+      updatedAt: landWaitingList.updatedAt,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+      },
+      preferredZone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landWaitingList)
+    .innerJoin(users, eq(landWaitingList.userId, users.id))
+    .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
+    .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+    .where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined")))
+    .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
+}
+
+export async function addLandWaitingListEntry(data: Omit<InsertLandWaitingList, "position">) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  
+  const existing = await db.select().from(landWaitingList)
+    .where(and(
+      eq(landWaitingList.userId, data.userId),
+      or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+    ));
+  if (existing.length > 0) return existing[0].id;
+
+  const maxPosRes = await db.select({ maxPos: sql<number>`max(position)` }).from(landWaitingList);
+  const nextPos = (maxPosRes[0]?.maxPos ?? 0) + 1;
+  
+  const res = await db.insert(landWaitingList).values({
+    ...data,
+    position: nextPos,
+  } as any).returning({ id: landWaitingList.id });
+  return res[0].id;
+}
+
+export async function updateLandWaitingListStatus(id: string, status: "waiting" | "offered" | "assigned" | "declined" | "cancelled", extra?: Partial<InsertLandWaitingList>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landWaitingList).set({
+    status,
+    ...extra,
+    updatedAt: new Date()
+  }).where(eq(landWaitingList.id, id));
+}
+
+export async function reorderWaitingList(ids: string[]) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  for (let i = 0; i < ids.length; i++) {
+    await db.update(landWaitingList).set({ position: i + 1, updatedAt: new Date() }).where(eq(landWaitingList.id, ids[i]));
+  }
+}
+
+export async function logCraneOperation(data: InsertCraneOperationLog) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(craneOperationLog).values(data).returning({ id: craneOperationLog.id });
+  return res[0].id;
+}
+
+export async function listCraneOps(filters?: { craneId?: string; limit?: number; offset?: number }) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const conditions = [];
+  if (filters?.craneId) conditions.push(eq(craneOperationLog.craneId, filters.craneId));
+  
+  const countRes = await db.select({ count: sql<number>`count(*)` })
+    .from(craneOperationLog)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+     
+  const data = await db
+    .select({
+      id: craneOperationLog.id,
+      craneId: craneOperationLog.craneId,
+      reservationId: craneOperationLog.reservationId,
+      operationType: craneOperationLog.operationType,
+      startTime: craneOperationLog.startTime,
+      endTime: craneOperationLog.endTime,
+      durationMinutes: craneOperationLog.durationMinutes,
+      operatorId: craneOperationLog.operatorId,
+      note: craneOperationLog.note,
+      createdAt: craneOperationLog.createdAt,
+      crane: {
+        id: cranes.id,
+        name: cranes.name,
+      },
+      operator: {
+        id: users.id,
+        name: users.name,
+      }
+    })
+    .from(craneOperationLog)
+    .innerJoin(cranes, eq(craneOperationLog.craneId, cranes.id))
+    .leftJoin(users, eq(craneOperationLog.operatorId, users.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(craneOperationLog.startTime))
+    .limit(filters?.limit ?? 50)
+    .offset(filters?.offset ?? 0);
+     
+  return { data, total: Number(countRes[0]?.count ?? 0) };
+}
+
+export async function getCraneStats() {
+  const db = await getDb();
+  if (!db) return [];
+  const stats = await db
+    .select({
+      craneId: craneOperationLog.craneId,
+      totalDuration: sql<number>`sum(${craneOperationLog.durationMinutes})::int`,
+      opsCount: sql<number>`count(*)::int`,
+    })
+    .from(craneOperationLog)
+    .groupBy(craneOperationLog.craneId);
+     
+  const allCranes = await db.select().from(cranes);
+  return allCranes.map(c => {
+    const crStat = stats.find(s => s.craneId === c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      location: c.location,
+      status: c.craneStatus,
+      totalHours: Number(((crStat?.totalDuration ?? 0) / 60).toFixed(1)),
+      opsCount: crStat?.opsCount ?? 0,
+    };
+  });
+}

@@ -16,6 +16,14 @@ export default function AuthPage() {
     const [, setLocation] = useLocation();
     const [mode, setMode] = useState<AuthMode>("login");
 
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const urlMode = params.get("mode");
+        if (urlMode === "register" || urlMode === "login") {
+            setMode(urlMode);
+        }
+    }, []);
+
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");

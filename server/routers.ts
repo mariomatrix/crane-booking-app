@@ -66,6 +66,22 @@ import {
   createApiKey,
   listApiKeys,
   revokeApiKey,
+  listLandZones,
+  createLandZone,
+  updateLandZone,
+  deleteLandZone,
+  listActiveOccupancies,
+  listOccupancyHistory,
+  createLandOccupancy,
+  completeLandOccupancy,
+  getActiveOccupancyByVessel,
+  listLandWaitingList,
+  addLandWaitingListEntry,
+  updateLandWaitingListStatus,
+  reorderWaitingList,
+  logCraneOperation,
+  listCraneOps,
+  getCraneStats,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -92,6 +108,9 @@ import {
   maintenanceBlocks,
   holidays,
   seasons,
+  landWaitingList,
+  landOccupancies,
+  landZones,
 } from "../drizzle/schema";
 import { and, eq, gte, isNull, or, lte, desc, sql } from "drizzle-orm";
 import crypto from "crypto";
@@ -361,6 +380,12 @@ export const appRouter = router({
       return listVesselsByUser(ctx.user.id);
     }),
 
+    listByUser: operatorProcedure
+      .input(z.object({ userId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return listVesselsByUser(input.userId);
+      }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.string().uuid() }))
       .query(async ({ input, ctx }) => {
@@ -380,11 +405,16 @@ export const appRouter = router({
         draftM: z.number().positive().optional(),
         weightTons: z.number().positive().optional(),
         registration: z.string().optional(),
+        ownerId: z.string().uuid().optional(),
       }))
       .mutation(async ({ input, ctx }: any) => {
+        const targetOwnerId = (input.ownerId && (ctx.user.role === "admin" || ctx.user.role === "operator"))
+          ? input.ownerId
+          : ctx.user.id;
+
         const id = await createVessel({
           ...input,
-          ownerId: ctx.user.id,
+          ownerId: targetOwnerId,
         } as any);
         await createAuditEntry({ actorId: ctx.user.id, action: "vessel_created", entityType: "vessel", entityId: id });
         return { id };
@@ -1181,11 +1211,27 @@ export const appRouter = router({
         scheduledStart: z.date(),
         durationMin: z.number().int().positive().default(60),
         adminNote: z.string().optional(),
+        ignoreNoSpace: z.boolean().optional().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju se mogu odobriti." });
+
+        // Check dry berth capacity if it is a haul-out (Vađenje)
+        const serviceType = reservation.serviceTypeId ? await getServiceTypeById(reservation.serviceTypeId) : null;
+        const isVadenje = serviceType?.name?.toLowerCase().includes("vađenje") || serviceType?.name?.toLowerCase().includes("vadenje");
+        if (isVadenje) {
+          const zones = await listLandZones();
+          const totalCapacity = zones.reduce((acc, z) => acc + (z.isActive ? z.totalSpots : 0), 0);
+          const totalOccupied = zones.reduce((acc, z) => acc + (z.isActive ? z.activeSpots : 0), 0);
+          if (totalOccupied >= totalCapacity && !input.ignoreNoSpace) {
+            throw new TRPCError({
+              code: "PRECONDITION_FAILED",
+              message: "Nema slobodnih mjesta na kopnu za vađenje plovila.",
+            });
+          }
+        }
 
         // Validate crane
         const crane = await getCraneById(input.craneId);
@@ -1342,13 +1388,75 @@ export const appRouter = router({
 
     // Mark reservation as completed
     complete: operatorProcedure
-      .input(z.object({ id: z.string().uuid() }))
+      .input(z.object({
+        id: z.string().uuid(),
+        zoneId: z.string().uuid().optional(),
+        spotNumber: z.number().int().positive().optional(),
+        note: z.string().optional(),
+      }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.status !== "approved") {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Samo odobrene rezervacije se mogu označiti kao završene." });
         }
+
+        const serviceType = reservation.serviceTypeId ? await getServiceTypeById(reservation.serviceTypeId) : null;
+        const isVadenje = serviceType?.name?.toLowerCase().includes("vađenje") || serviceType?.name?.toLowerCase().includes("vadenje");
+        const isSpustanje = serviceType?.name?.toLowerCase().includes("spuštanje") || serviceType?.name?.toLowerCase().includes("spustanje");
+
+        // 1. Dry Berth (Kopnene zone) logic
+        if (isVadenje && reservation.vesselId && reservation.userId) {
+          // Haul out: place boat on dry berth
+          let targetZoneId = input.zoneId;
+          if (!targetZoneId) {
+            // Find first zone with available capacity
+            const zones = await listLandZones();
+            const freeZone = zones.find(z => z.activeSpots < z.totalSpots && z.isActive);
+            if (freeZone) {
+              targetZoneId = freeZone.id;
+            } else if (zones.length > 0) {
+              targetZoneId = zones[0].id;
+            }
+          }
+          if (targetZoneId) {
+            await createLandOccupancy({
+              vesselId: reservation.vesselId,
+              userId: reservation.userId,
+              zoneId: targetZoneId,
+              spotNumber: input.spotNumber,
+              reservationId: reservation.id,
+              liftedAt: new Date(),
+              createdBy: ctx.user.id,
+              note: input.note,
+            });
+          }
+        } else if (isSpustanje && reservation.vesselId) {
+          // Launch: remove boat from dry berth
+          const activeOccupancy = await getActiveOccupancyByVessel(reservation.vesselId);
+          if (activeOccupancy) {
+            await completeLandOccupancy(activeOccupancy.id, reservation.id, new Date());
+          }
+        }
+
+        // 2. Log crane operation
+        if (reservation.craneId) {
+          const startTime = reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date();
+          const endTime = new Date();
+          const durationMinutes = reservation.durationMin ?? Math.max(1, Math.round((endTime.getTime() - startTime.getTime()) / 60000));
+          await logCraneOperation({
+            craneId: reservation.craneId,
+            reservationId: reservation.id,
+            operationType: isVadenje ? "lift" : isSpustanje ? "lower" : "move",
+            startTime,
+            endTime,
+            durationMinutes,
+            operatorId: ctx.user.id,
+            note: input.note,
+          });
+        }
+
+        // 3. Mark reservation completed
         const db = await getDb();
         if (db) {
           await db.update(reservations).set({
@@ -1357,12 +1465,15 @@ export const appRouter = router({
             updatedAt: new Date(),
           }).where(eq(reservations.id, input.id));
         }
+
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "reservation_completed",
           entityType: "reservation",
           entityId: input.id,
+          payload: { zoneId: input.zoneId, spotNumber: input.spotNumber }
         });
+
         return { success: true };
       }),
 
@@ -1536,7 +1647,7 @@ export const appRouter = router({
 
   // ─── Public Calendar ───────────────────────────────────────────────────
   calendar: router({
-    events: publicProcedure
+    events: operatorProcedure
       .input(z.object({
         scheduledStart: z.date().optional(),
         scheduledEnd: z.date().optional(),
@@ -1603,7 +1714,7 @@ export const appRouter = router({
         });
       }),
 
-    availableSlots: publicProcedure
+    availableSlots: operatorProcedure
       .input(z.object({
         craneId: z.string().uuid(),
         date: z.string(), // YYYY-MM-DD
@@ -2062,6 +2173,318 @@ export const appRouter = router({
           trendStats,
           serviceTypeStats,
         };
+      }),
+  }),
+
+  // ─── Land Zones (Kopnene zone) ────────────────────────────────────────
+  landZone: router({
+    list: operatorProcedure
+      .query(async () => {
+        return listLandZones();
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1).max(255),
+        code: z.string().min(1).max(10),
+        totalSpots: z.number().int().positive(),
+        description: z.string().optional(),
+        sortOrder: z.number().int().default(0),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await createLandZone(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_zone_created", entityType: "land_zone", entityId: id });
+        return { id };
+      }),
+
+    update: adminProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        name: z.string().min(1).max(255).optional(),
+        code: z.string().min(1).max(10).optional(),
+        totalSpots: z.number().int().positive().optional(),
+        description: z.string().optional(),
+        sortOrder: z.number().int().optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        await updateLandZone(id, data);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_zone_updated", entityType: "land_zone", entityId: id });
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteLandZone(input.id);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_zone_deleted", entityType: "land_zone", entityId: input.id });
+        return { success: true };
+      }),
+  }),
+
+  // ─── Land Occupancies (Boravak na kopnu) ──────────────────────────────────
+  landOccupancy: router({
+    listActive: operatorProcedure
+      .input(z.object({
+        zoneId: z.string().uuid().optional(),
+        userId: z.string().uuid().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return listActiveOccupancies(input);
+      }),
+
+    create: operatorProcedure
+      .input(z.object({
+        vesselId: z.string().uuid(),
+        userId: z.string().uuid(),
+        zoneId: z.string().uuid(),
+        spotNumber: z.number().int().positive().optional(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await createLandOccupancy({
+          ...input,
+          liftedAt: new Date(),
+          createdBy: ctx.user.id,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_occupancy_created", entityType: "land_occupancy", entityId: id });
+        return { id };
+      }),
+
+    complete: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        returnReservationId: z.string().uuid().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        await completeLandOccupancy(input.id, input.returnReservationId);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_occupancy_completed", entityType: "land_occupancy", entityId: input.id });
+        return { success: true };
+      }),
+
+    history: operatorProcedure
+      .input(z.object({
+        zoneId: z.string().uuid().optional(),
+        userId: z.string().uuid().optional(),
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(100).default(50),
+      }).optional().default({ page: 1, pageSize: 50 }))
+      .query(async ({ input }) => {
+        const { page, pageSize, ...filters } = input;
+        const offset = (page - 1) * pageSize;
+        return listOccupancyHistory({
+          ...filters,
+          limit: pageSize,
+          offset,
+        });
+      }),
+  }),
+
+  // ─── Land Waiting List (Lista čekanja za kopno) ─────────────────────────
+  landWaiting: router({
+    listAll: operatorProcedure
+      .query(async () => {
+        return listLandWaitingList();
+      }),
+
+    getMyStatus: protectedProcedure
+      .query(async ({ ctx }) => {
+        const db = await getDb();
+        if (!db) return null;
+
+        const entry = await db
+          .select({
+            id: landWaitingList.id,
+            position: landWaitingList.position,
+            status: landWaitingList.status,
+            createdAt: landWaitingList.createdAt,
+            preferredZoneName: landZones.name,
+          })
+          .from(landWaitingList)
+          .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+          .where(and(
+            eq(landWaitingList.userId, ctx.user.id),
+            or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+          ))
+          .limit(1);
+
+        if (entry.length === 0) return null;
+        return entry[0];
+      }),
+
+    add: operatorProcedure
+      .input(z.object({
+        userId: z.string().uuid(),
+        vesselId: z.string().uuid().optional(),
+        preferredZoneId: z.string().uuid().optional(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await addLandWaitingListEntry(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_added", entityType: "land_waiting_list", entityId: id });
+        return { id };
+      }),
+
+    offer: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const waitlistEntry = await db
+          .select({
+            id: landWaitingList.id,
+            userId: landWaitingList.userId,
+            userName: users.name,
+            userEmail: users.email,
+            userPhone: users.phone,
+            preferredZoneId: landWaitingList.preferredZoneId,
+            zoneName: landZones.name,
+          })
+          .from(landWaitingList)
+          .innerJoin(users, eq(landWaitingList.userId, users.id))
+          .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+          .where(eq(landWaitingList.id, input.id))
+          .limit(1);
+
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const row = waitlistEntry[0];
+
+        await updateLandWaitingListStatus(input.id, "offered", { offeredAt: new Date() });
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_offered", entityType: "land_waiting_list", entityId: input.id });
+
+        // Send notifications asynchronously
+        if (row.userEmail) {
+          const { sendLandSpotAvailable } = await import("./_core/email");
+          sendLandSpotAvailable({
+            to: row.userEmail,
+            userName: row.userName || row.userEmail,
+            zoneName: row.zoneName || "Slobodna zona",
+          }).catch(console.error);
+        }
+
+        if (row.userPhone) {
+          const { sendLandSpotAvailableSms } = await import("./_core/sms");
+          sendLandSpotAvailableSms({
+            phone: row.userPhone,
+            zoneName: row.zoneName || "Slobodna zona",
+          }).catch(console.error);
+        }
+
+        return { success: true };
+      }),
+
+    assignFromOffer: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        zoneId: z.string().uuid(),
+        spotNumber: z.number().int().positive().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const waitlistEntry = await db.select().from(landWaitingList).where(eq(landWaitingList.id, input.id)).limit(1);
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const entry = waitlistEntry[0];
+
+        if (!entry.vesselId) throw new TRPCError({ code: "BAD_REQUEST", message: "Zahtjev na listi čekanja nema povezano plovilo." });
+
+        const occupancyId = await createLandOccupancy({
+          vesselId: entry.vesselId,
+          userId: entry.userId,
+          zoneId: input.zoneId,
+          spotNumber: input.spotNumber,
+          createdBy: ctx.user.id,
+          liftedAt: new Date(),
+        });
+
+        await updateLandWaitingListStatus(input.id, "assigned", {
+          assignedOccupancyId: occupancyId,
+        });
+
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_assigned", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true, occupancyId };
+      }),
+
+    declineOffer: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const waitlistEntry = await db.select().from(landWaitingList).where(eq(landWaitingList.id, input.id)).limit(1);
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const entry = waitlistEntry[0];
+
+        await updateLandWaitingListStatus(input.id, "declined", {
+          declinedAt: new Date(),
+          declineCount: entry.declineCount + 1,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_declined", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true };
+      }),
+
+    remove: operatorProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await updateLandWaitingListStatus(input.id, "cancelled");
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_removed", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true };
+      }),
+
+    reorder: operatorProcedure
+      .input(z.array(z.string().uuid()))
+      .mutation(async ({ input, ctx }) => {
+        await reorderWaitingList(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_reordered", entityType: "land_waiting_list", payload: { ids: input } });
+        return { success: true };
+      }),
+  }),
+
+  // ─── Crane Operations (Rad dizalica) ───────────────────────────────────
+  craneOps: router({
+    log: operatorProcedure
+      .input(z.object({
+        craneId: z.string().uuid(),
+        reservationId: z.string().uuid().optional(),
+        operationType: z.string(),
+        startTime: z.date(),
+        endTime: z.date(),
+        durationMinutes: z.number().int().positive(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await logCraneOperation({
+          ...input,
+          operatorId: ctx.user.id,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "crane_operation_logged", entityType: "crane_operation_log", entityId: id });
+        return { id };
+      }),
+
+    stats: adminProcedure
+      .query(async () => {
+        return getCraneStats();
+      }),
+
+    listByCrane: operatorProcedure
+      .input(z.object({
+        craneId: z.string().uuid().optional(),
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(100).default(50),
+      }).optional().default({ page: 1, pageSize: 50 }))
+      .query(async ({ input }) => {
+        const { page, pageSize, ...filters } = input;
+        const offset = (page - 1) * pageSize;
+        return listCraneOps({
+          ...filters,
+          limit: pageSize,
+          offset,
+        });
       }),
   }),
 });
