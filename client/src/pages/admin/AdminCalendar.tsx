@@ -849,17 +849,30 @@ export default function AdminCalendar() {
                         datesSet={handleDatesSet}
                         events={calendarEvents as any}
                         dayHeaderContent={(arg: any) => {
-                            if (viewMode !== 'master') return undefined;
-                            const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
-                            const crane = activeCranes[diff];
-                            return crane ? (
-                                <div className="flex flex-col items-center">
-                                    <span className="text-xs font-bold">{crane.name}</span>
-                                    <span className="text-[10px] opacity-60 font-normal normal-case">
-                                        {format(arg.date, "eee dd.MM.", { locale: lang === 'hr' ? hr : enUS })}
-                                    </span>
-                                </div>
-                            ) : "";
+                            if (viewMode === 'master') {
+                                const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+                                const crane = activeCranes[diff];
+                                return crane ? (
+                                    <div className="flex flex-col items-center py-1">
+                                        <span className="text-xs font-bold">{crane.name}</span>
+                                        <span className="text-[10px] opacity-60 font-normal normal-case">
+                                            {format(viewDate, "eee dd.MM.", { locale: lang === 'hr' ? hr : enUS })}
+                                        </span>
+                                    </div>
+                                ) : "";
+                            }
+
+                            // Weekly view - show day name and date
+                            if (viewMode === 'timeGridWeek') {
+                                return (
+                                    <div className="flex flex-col items-center py-1">
+                                        <span className="text-xs font-bold uppercase">{format(arg.date, "eee", { locale: lang === 'hr' ? hr : enUS })}</span>
+                                        <span className="text-[10px] opacity-60 font-normal">{format(arg.date, "dd.MM.", { locale: lang === 'hr' ? hr : enUS })}</span>
+                                    </div>
+                                );
+                            }
+
+                            return undefined;
                         }}
                         eventContent={(arg: any) => {
                             const p = arg.event.extendedProps;
