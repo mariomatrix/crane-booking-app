@@ -36,7 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check } from "lucide-react";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check, MailCheck } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { isValidOib } from "@shared/oib";
@@ -151,6 +151,16 @@ export default function AdminUsers() {
         },
     });
 
+    const adminVerifyEmail = trpc.user.verifyEmail.useMutation({
+        onSuccess: () => {
+            toast.success("Email korisnika je verificiran.");
+            utils.user.list.invalidate();
+        },
+        onError: (err: any) => {
+            toast.error(err.message || "Greška pri verifikaciji.");
+        },
+    });
+
     const openEdit = (user: any) => {
         setEditUser(user);
         setEditFirstName(user.firstName || "");
@@ -243,7 +253,20 @@ export default function AdminUsers() {
                                             {user.name}
                                         </button>
                                     </TableCell>
-                                    <TableCell>{user.email}</TableCell>
+                                    <TableCell>
+                                        <div className="flex flex-col">
+                                            <span>{user.email}</span>
+                                            {(user as any).emailVerifiedAt ? (
+                                                <span className="text-[10px] text-green-600 font-semibold">
+                                                    Verificiran ✓
+                                                </span>
+                                            ) : (
+                                                <span className="text-[10px] text-amber-600 font-semibold">
+                                                    Nije verificiran ✗
+                                                </span>
+                                            )}
+                                        </div>
+                                    </TableCell>
                                     <TableCell>{user.phone || "-"}</TableCell>
                                     <TableCell>
                                         <Select
@@ -293,6 +316,18 @@ export default function AdminUsers() {
                                             >
                                                 <Edit2 className="h-4 w-4" />
                                             </Button>
+                                            {!(user as any).emailVerifiedAt && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                                    onClick={() => adminVerifyEmail.mutate({ id: user.id })}
+                                                    disabled={adminVerifyEmail.isPending}
+                                                    title="Verificiraj email klijenta"
+                                                >
+                                                    <MailCheck className="h-4 w-4" />
+                                                </Button>
+                                            )}
                                             <Button
                                                 variant="outline"
                                                 size="sm"

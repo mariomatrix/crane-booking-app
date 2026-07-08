@@ -627,6 +627,24 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    verifyEmail: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        await db.update(users)
+          .set({ emailVerifiedAt: new Date(), userStatus: "active", updatedAt: new Date() })
+          .where(eq(users.id, input.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "user_email_verified_admin",
+          entityType: "user",
+          entityId: input.id,
+        });
+        return { success: true };
+      }),
+
     delete: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
