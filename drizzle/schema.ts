@@ -40,6 +40,7 @@ export const users = pgTable("users", {
     lastName: varchar("last_name", { length: 100 }),
     name: text("name"),                                              // display name (full name)
     phone: varchar("phone", { length: 50 }),
+    oib: varchar("oib", { length: 11 }).unique(),                    // Osobni identifikacijski broj (HR)
     role: roleEnum("role").default("user").notNull(),
     userStatus: userStatusEnum("user_status").default("active").notNull(),
     emailVerifiedAt: timestamp("email_verified_at"),
@@ -113,6 +114,9 @@ export const reservations = pgTable("reservations", {
 
     // Status
     status: reservationStatusEnum("status").default("pending").notNull(),
+
+    // User snapshot (for historical accuracy)
+    userOib: varchar("user_oib", { length: 11 }),                   // OIB snapshot at time of reservation
 
     // Vessel snapshot (for safety reference, even if vessel profile changes)
     vesselName: varchar("vessel_name", { length: 255 }),

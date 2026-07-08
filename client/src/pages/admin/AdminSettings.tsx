@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
-import { Loader2, Save, Settings2, Key, Plus, Trash2, Eye, EyeOff } from "lucide-react";
+import { Loader2, Save, Settings2, Key, Plus, Trash2, Eye, EyeOff, Building2, Image as ImageIcon, Upload } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -22,6 +22,8 @@ export default function AdminSettings() {
     const [bufferMin, setBufferMin] = useState("15");
     const [workStart, setWorkStart] = useState("08:00");
     const [workEnd, setWorkEnd] = useState("16:00");
+    const [marinaName, setMarinaName] = useState("PŠD Špinut Marina");
+    const [marinaLogo, setMarinaLogo] = useState("");
 
     useEffect(() => {
         if (settings) {
@@ -29,6 +31,8 @@ export default function AdminSettings() {
             setBufferMin(settings.bufferMinutes ?? "15");
             setWorkStart(settings.workdayStart ?? "08:00");
             setWorkEnd(settings.workdayEnd ?? "16:00");
+            setMarinaName(settings.marinaName ?? "PŠD Špinut Marina");
+            setMarinaLogo(settings.marinaLogo ?? "");
         }
     }, [settings]);
 
@@ -155,6 +159,101 @@ export default function AdminSettings() {
                                     >
                                         <Save className="h-4 w-4" />
                                     </Button>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="md:col-span-2">
+                        <CardHeader>
+                            <CardTitle className="text-base flex items-center gap-2">
+                                <Building2 className="h-5 w-5" /> Identitet Marine (za izvještaje)
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            <div className="grid gap-6 md:grid-cols-2">
+                                <div className="space-y-2">
+                                    <Label htmlFor="marinaName">Naziv marine</Label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            id="marinaName"
+                                            value={marinaName}
+                                            onChange={(e) => setMarinaName(e.target.value)}
+                                            placeholder="PŠD Špinut Marina"
+                                        />
+                                        <Button
+                                            variant="outline"
+                                            disabled={isSaving}
+                                            onClick={() => handleSave("marinaName", marinaName)}
+                                        >
+                                            <Save className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    <p className="text-xs text-muted-foreground">
+                                        Naziv marine koji će se prikazivati u zaglavlju svih printanih i PDF izvještaja.
+                                    </p>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Logotip marine</Label>
+                                    <div className="flex flex-col gap-4">
+                                        <div className="flex items-center gap-4">
+                                            {marinaLogo ? (
+                                                <div className="relative border rounded p-2 bg-slate-50 flex items-center justify-center h-20 w-40 overflow-hidden">
+                                                    <img
+                                                        src={marinaLogo}
+                                                        alt="Logo Preview"
+                                                        className="max-h-full max-w-full object-contain"
+                                                    />
+                                                    <Button
+                                                        variant="destructive"
+                                                        size="icon"
+                                                        className="absolute top-1 right-1 h-6 w-6"
+                                                        onClick={() => {
+                                                            setMarinaLogo("");
+                                                            handleSave("marinaLogo", "");
+                                                        }}
+                                                    >
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
+                                            ) : (
+                                                <div className="border border-dashed rounded flex flex-col items-center justify-center h-20 w-40 text-muted-foreground bg-slate-50 text-xs">
+                                                    <ImageIcon className="h-5 w-5 mb-1" />
+                                                    Nema logotipa
+                                                </div>
+                                            )}
+                                            <div className="flex-1">
+                                                <Label
+                                                    htmlFor="logo-upload"
+                                                    className="flex items-center justify-center gap-2 border rounded-md px-3 py-2 bg-background hover:bg-muted cursor-pointer text-sm font-medium w-fit"
+                                                >
+                                                    <Upload className="h-4 w-4" /> Odaberi datoteku
+                                                </Label>
+                                                <input
+                                                    id="logo-upload"
+                                                    type="file"
+                                                    accept="image/*"
+                                                    className="hidden"
+                                                    onChange={(e) => {
+                                                        const file = e.target.files?.[0];
+                                                        if (file) {
+                                                            const reader = new FileReader();
+                                                            reader.onloadend = () => {
+                                                                const base64String = reader.result as string;
+                                                                setMarinaLogo(base64String);
+                                                                handleSave("marinaLogo", base64String);
+                                                            };
+                                                            reader.readAsDataURL(file);
+                                                        }
+                                                    }}
+                                                />
+                                                <p className="text-xs text-muted-foreground mt-2">
+                                                    Preporučeni format: PNG ili SVG s prozirnom pozadinom (maks. 500KB).
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </CardContent>

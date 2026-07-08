@@ -4,6 +4,8 @@ import { getJwtSecret, getRefreshSecret } from "./_core/context";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, operatorProcedure, router } from "./_core/trpc";
 import { z } from "zod";
+import { isValidOib } from "../shared/oib";
+import { reportsRouter } from "./reports.router";
 import {
   listCranes,
   getCraneById,
@@ -112,7 +114,7 @@ import {
   landOccupancies,
   landZones,
 } from "../drizzle/schema";
-import { and, eq, gte, isNull, or, lte, desc, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, or, lte, desc, sql, ne } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
@@ -207,11 +209,20 @@ export const appRouter = router({
         lastName: z.string().min(1).max(100),
         username: z.string().optional(),
         phone: z.string().min(1),
+        oib: z.string().length(11).refine(isValidOib, { message: "OIB nije ispravan." }),
       }))
       .mutation(async ({ input, ctx }) => {
         const existing = await getUserByEmail(input.email);
         if (existing) {
           throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        }
+        // Check OIB uniqueness
+        const db = await getDb();
+        if (db) {
+          const oibExists = await db.select({ id: users.id }).from(users).where(eq(users.oib, input.oib)).limit(1);
+          if (oibExists.length > 0) {
+            throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+          }
         }
         const passwordHash = await bcrypt.hash(input.password, 12);
         const userId = await createLocalUser({
@@ -221,6 +232,7 @@ export const appRouter = router({
           lastName: input.lastName,
           username: input.username,
           phone: input.phone,
+          oib: input.oib,
         });
         if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -466,12 +478,22 @@ export const appRouter = router({
         firstName: z.string().min(1),
         lastName: z.string().min(1),
         phone: z.string().optional(),
+        oib: z.string().length(11).refine(isValidOib, { message: "OIB nije ispravan." }),
         role: z.enum(["user", "operator", "admin"]).default("user"),
       }))
       .mutation(async ({ input, ctx }) => {
         const existing = await getUserByEmail(input.email);
         if (existing) {
           throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        }
+
+        // Check OIB uniqueness
+        const db = await getDb();
+        if (db) {
+          const oibExists = await db.select({ id: users.id }).from(users).where(eq(users.oib, input.oib)).limit(1);
+          if (oibExists.length > 0) {
+            throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+          }
         }
 
         // Generate random 10 char password
@@ -484,6 +506,7 @@ export const appRouter = router({
           firstName: input.firstName,
           lastName: input.lastName,
           phone: input.phone,
+          oib: input.oib,
           mustChangePassword: true,
         });
 
@@ -517,7 +540,7 @@ export const appRouter = router({
           payload: { email: input.email, role: input.role },
         });
 
-        return { success: true, tempPassword };
+        return { success: true, tempPassword, userId: String(userId) };
       }),
 
     setRole: adminProcedure
@@ -563,14 +586,28 @@ export const appRouter = router({
         lastName: z.string().optional(),
         name: z.string().optional(),
         phone: z.string().optional(),
+        oib: z.string().length(11).refine(isValidOib, { message: "OIB nije ispravan." }).optional(),
         role: z.enum(["user", "operator", "admin"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { updateUser: updateUserDb, updateUserRole } = await import("./db");
-        const { id, role, ...data } = input;
+        const { id, role, oib, ...data } = input;
 
-        if (Object.keys(data).length > 0) {
-          await updateUserDb(id, data);
+        // Check OIB uniqueness if being updated
+        if (oib) {
+          const db = await getDb();
+          if (db) {
+            const oibExists = await db.select({ id: users.id }).from(users)
+              .where(and(eq(users.oib, oib), ne(users.id, id)))
+              .limit(1);
+            if (oibExists.length > 0) {
+              throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+            }
+          }
+        }
+
+        if (Object.keys(data).length > 0 || oib) {
+          await updateUserDb(id, { ...data, ...(oib ? { oib } : {}) });
         }
 
         if (role) {
@@ -585,6 +622,7 @@ export const appRouter = router({
           action: "user_updated_admin",
           entityType: "user",
           entityId: id,
+          payload: oib ? { oib_updated: true } : undefined,
         });
         return { success: true };
       }),
@@ -1884,7 +1922,7 @@ export const appRouter = router({
 
     update: adminProcedure
       .input(z.object({
-        key: z.enum(["slotDurationMinutes", "bufferMinutes", "workdayStart", "workdayEnd"]),
+        key: z.enum(["slotDurationMinutes", "bufferMinutes", "workdayStart", "workdayEnd", "marinaName", "marinaLogo"]),
         value: z.string(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -2487,6 +2525,9 @@ export const appRouter = router({
         });
       }),
   }),
+
+  // ─── Reports ───────────────────────────────────────────────────────────
+  reports: reportsRouter,
 });
 
 export type AppRouter = typeof appRouter;

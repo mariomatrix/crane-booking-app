@@ -8,6 +8,7 @@ import { useLang } from "@/contexts/LangContext";
 import { Anchor, Loader2, ArrowLeft } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { isValidOib } from "@shared/oib";
 
 type AuthMode = "login" | "register" | "forgotPassword" | "resetPassword" | "verifyEmail";
 
@@ -31,6 +32,8 @@ export default function AuthPage() {
     const [lastName, setLastName] = useState("");
     const [username, setUsername] = useState("");
     const [phone, setPhone] = useState("");
+    const [oib, setOib] = useState("");
+    const [oibError, setOibError] = useState<string | null>(null);
     const [token, setToken] = useState("");
     const [verifyToken, setVerifyToken] = useState("");
     const [privacyAccepted, setPrivacyAccepted] = useState(false);
@@ -101,13 +104,18 @@ export default function AuthPage() {
                 toast.error("Morate prihvatiti Uvjete korištenja i Politiku privatnosti za registraciju.");
                 return;
             }
+            if (!oib || oib.length !== 11 || !isValidOib(oib)) {
+                setOibError("Unesite ispravan OIB (11 znamenki).");
+                return;
+            }
             registerMutation.mutate({
                 email,
                 password,
                 firstName,
                 lastName,
                 username: username || undefined,
-                phone: phone
+                phone,
+                oib,
             });
         } else if (mode === "forgotPassword") {
             forgotPasswordMutation.mutate({ email });
@@ -214,6 +222,27 @@ export default function AuthPage() {
                                     <div className="space-y-2">
                                         <Label>{t.auth.phone} *</Label>
                                         <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>OIB *</Label>
+                                        <Input
+                                            value={oib}
+                                            onChange={(e) => {
+                                                const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+                                                setOib(val);
+                                                if (val.length === 11) {
+                                                    setOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
+                                                } else {
+                                                    setOibError(null);
+                                                }
+                                            }}
+                                            placeholder="12345678901"
+                                            maxLength={11}
+                                            inputMode="numeric"
+                                            required
+                                        />
+                                        {oibError && <p className="text-xs text-destructive">{oibError}</p>}
+                                        {oib.length === 11 && !oibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}
                                     </div>
                                     <div className="flex items-center space-x-2 mt-4 text-sm">
                                         <Input

@@ -56,7 +56,7 @@ export function UserSearchCombobox({
                         variant="outline"
                         role="combobox"
                         aria-expanded={open}
-                        className="w-[240px] h-9 justify-between text-sm font-normal"
+                        className="w-full h-9 justify-between text-sm font-normal"
                     >
                         <span className="flex items-center gap-2 truncate">
                             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />

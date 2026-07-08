@@ -39,6 +39,7 @@ import { useLang } from "@/contexts/LangContext";
 import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { isValidOib } from "@shared/oib";
 
 export default function AdminUsers() {
     const { t } = useLang();
@@ -61,6 +62,8 @@ export default function AdminUsers() {
     const [editFirstName, setEditFirstName] = useState("");
     const [editLastName, setEditLastName] = useState("");
     const [editPhone, setEditPhone] = useState("");
+    const [editOib, setEditOib] = useState("");
+    const [editOibError, setEditOibError] = useState<string | null>(null);
     const [editRole, setEditRole] = useState<"user" | "admin" | "operator">("user");
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
@@ -70,6 +73,8 @@ export default function AdminUsers() {
     const [newFirstName, setNewFirstName] = useState("");
     const [newLastName, setNewLastName] = useState("");
     const [newPhone, setNewPhone] = useState("");
+    const [newOib, setNewOib] = useState("");
+    const [newOibError, setNewOibError] = useState<string | null>(null);
     const [newRole, setNewRole] = useState<"user" | "admin" | "operator">("user");
 
     const setRole = trpc.user.setRole.useMutation({
@@ -136,6 +141,8 @@ export default function AdminUsers() {
             setNewFirstName("");
             setNewLastName("");
             setNewPhone("");
+            setNewOib("");
+            setNewOibError(null);
             setNewRole("user");
             utils.user.list.invalidate();
         },
@@ -149,26 +156,38 @@ export default function AdminUsers() {
         setEditFirstName(user.firstName || "");
         setEditLastName(user.lastName || "");
         setEditPhone(user.phone || "");
+        setEditOib(user.oib || "");
+        setEditOibError(null);
         setEditRole(user.role);
     };
 
     const handleUpdate = () => {
         if (!editUser) return;
+        if (editOib && (editOib.length !== 11 || !isValidOib(editOib))) {
+            setEditOibError("OIB nije ispravan.");
+            return;
+        }
         adminUpdateUser.mutate({
             id: editUser.id,
             firstName: editFirstName,
             lastName: editLastName,
             phone: editPhone,
+            oib: editOib || undefined,
             role: editRole,
         });
     };
 
     const handleCreate = () => {
+        if (!newOib || newOib.length !== 11 || !isValidOib(newOib)) {
+            setNewOibError("Unesite ispravan OIB (11 znamenki).");
+            return;
+        }
         adminCreateUser.mutate({
             email: newEmail,
             firstName: newFirstName,
             lastName: newLastName,
             phone: newPhone,
+            oib: newOib,
             role: newRole,
         });
     };
@@ -198,6 +217,7 @@ export default function AdminUsers() {
                     <Table>
                         <TableHeader>
                             <TableRow>
+                                <TableHead>OIB</TableHead>
                                 <TableHead>{t.admin.userName}</TableHead>
                                 <TableHead>{t.admin.userEmail}</TableHead>
                                 <TableHead>{t.admin.userPhone}</TableHead>
@@ -209,6 +229,12 @@ export default function AdminUsers() {
                         <TableBody>
                             {users.map((user) => (
                                 <TableRow key={user.id}>
+                                    <TableCell className="font-mono text-sm">
+                                        {(user as any).oib
+                                            ? (user as any).oib
+                                            : <span className="text-xs bg-yellow-100 text-yellow-700 px-1 py-0.5 rounded">Nije unesen</span>
+                                        }
+                                    </TableCell>
                                     <TableCell className="font-medium">
                                         <button
                                             className="text-primary hover:underline text-left"
@@ -403,6 +429,27 @@ export default function AdminUsers() {
                             />
                         </div>
                         <div className="space-y-2">
+                            <Label htmlFor="editOib">OIB <span className="text-xs text-muted-foreground">(samo admin može mijenjati)</span></Label>
+                            <Input
+                                id="editOib"
+                                value={editOib}
+                                onChange={(e) => {
+                                    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+                                    setEditOib(val);
+                                    if (val.length === 11) {
+                                        setEditOibError(isValidOib(val) ? null : "OIB nije ispravan.");
+                                    } else {
+                                        setEditOibError(null);
+                                    }
+                                }}
+                                placeholder="12345678901"
+                                maxLength={11}
+                                inputMode="numeric"
+                            />
+                            {editOibError && <p className="text-xs text-destructive">{editOibError}</p>}
+                            {editOib.length === 11 && !editOibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}
+                        </div>
+                        <div className="space-y-2">
                             <Label htmlFor="editRole">{t.admin.userRole}</Label>
                             <Select
                                 value={editRole}
@@ -525,6 +572,28 @@ export default function AdminUsers() {
                                 value={newPhone}
                                 onChange={(e) => setNewPhone(e.target.value)}
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="newOib">OIB *</Label>
+                            <Input
+                                id="newOib"
+                                value={newOib}
+                                onChange={(e) => {
+                                    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+                                    setNewOib(val);
+                                    if (val.length === 11) {
+                                        setNewOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
+                                    } else {
+                                        setNewOibError(null);
+                                    }
+                                }}
+                                placeholder="12345678901"
+                                maxLength={11}
+                                inputMode="numeric"
+                                required
+                            />
+                            {newOibError && <p className="text-xs text-destructive">{newOibError}</p>}
+                            {newOib.length === 11 && !newOibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="newRole">{t.admin.userRole}</Label>

@@ -49,6 +49,7 @@ export async function createLocalUser(data: {
   lastName: string;
   username?: string;
   phone?: string;
+  oib?: string;
   mustChangePassword?: boolean;
 }) {
   const db = await getDb();
@@ -61,6 +62,7 @@ export async function createLocalUser(data: {
     lastName: data.lastName,
     name,
     phone: data.phone,
+    oib: data.oib,
     mustChangePassword: data.mustChangePassword ?? false,
     loginMethod: "email",
     lastSignedIn: new Date(),
@@ -376,6 +378,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   bufferMinutes: "15",
   workdayStart: "08:00",
   workdayEnd: "16:00",
+  marinaName: "PŠD Špinut Marina",
+  marinaLogo: "",
 };
 
 export async function getAllSettings(): Promise<Record<string, string>> {

@@ -41,6 +41,7 @@ import {
   History,
   Anchor,
   ListOrdered,
+  FileText,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -129,6 +130,8 @@ function DashboardLayoutContent({
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
 
+  const isOperator = user?.role === "operator";
+
   const allMenuItems = [
     { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
@@ -142,12 +145,15 @@ function DashboardLayoutContent({
     { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays" },
     { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
+    ...(isOperator
+      ? [{ icon: FileText, label: lang === "hr" ? "Plan rada dizalica" : "Crane Schedule", path: "/admin/reports/schedule" }]
+      : [{ icon: FileText, label: lang === "hr" ? "Izvještaji" : "Reports", path: "/admin/reports" }]
+    ),
     { icon: History, label: t.nav.auditLog, path: "/admin/audit-log", adminOnly: true },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
     { icon: Globe, label: t.nav.backToWeb, path: "/" },
   ];
 
-  const isOperator = user?.role === "operator";
   const menuItems = isOperator
     ? allMenuItems.filter(item => !(item as any).adminOnly)
     : allMenuItems;

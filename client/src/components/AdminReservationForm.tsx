@@ -15,8 +15,9 @@ import { formatToSqlDate } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Send, UserPlus } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
+import { CreateUserDialog } from "@/components/CreateUserDialog";
 
 interface AdminReservationFormProps {
     onSuccess?: () => void;
@@ -35,6 +36,9 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [craneId, setCraneId] = useState("");
     const [userNote, setUserNote] = useState("");
     const [contactPhone, setContactPhone] = useState("");
+    const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+
+    const utils = trpc.useUtils();
 
     // Vessel state
     const [selectedVesselId, setSelectedVesselId] = useState<string>("new");
@@ -196,13 +200,40 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             <div className="space-y-4">
                 <div className="space-y-2">
                     <Label>Korisnik (Vlasnik rezervacije) *</Label>
-                    <UserSearchCombobox
-                        users={usersList as any}
-                        value={userId}
-                        onChange={setUserId}
-                        placeholder="Odaberite korisnika..."
-                    />
+                    <div className="flex items-center gap-2">
+                        <UserSearchCombobox
+                            users={usersList as any}
+                            value={userId}
+                            onChange={setUserId}
+                            placeholder="Odaberite korisnika..."
+                            className="flex-1"
+                        />
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setIsCreateUserOpen(true)}
+                            title="Novi korisnik"
+                            className="h-9 w-9 shrink-0"
+                        >
+                            <UserPlus className="h-4 w-4" />
+                        </Button>
+                    </div>
                 </div>
+
+                <CreateUserDialog
+                    open={isCreateUserOpen}
+                    onOpenChange={setIsCreateUserOpen}
+                    onSuccess={(newUser) => {
+                        // Invalidate users list to fetch the newly created user
+                        utils.user.list.invalidate().then(() => {
+                            setUserId(newUser.id);
+                            if (newUser.phone) {
+                                setContactPhone(newUser.phone);
+                            }
+                        });
+                    }}
+                />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
