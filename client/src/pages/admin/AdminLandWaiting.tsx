@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ListOrdered, Loader2, ArrowUp, ArrowDown, UserPlus, CheckCircle, XCircle, Send, Ban, RefreshCw } from "lucide-react";
+import { ListOrdered, Loader2, ArrowUp, ArrowDown, UserPlus, CheckCircle, XCircle, Send, Ban, RefreshCw, Calendar } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
@@ -43,10 +43,20 @@ export default function AdminLandWaiting() {
   const [assignZoneId, setAssignZoneId] = useState("");
   const [assignSpotNumber, setAssignSpotNumber] = useState("");
 
+  // Direct assign (Bypass / calendar schedule) states
+  const [directAssignDialogOpen, setDirectAssignDialogOpen] = useState(false);
+  const [directAssignEntry, setDirectAssignEntry] = useState<any | null>(null);
+  const [directCraneId, setDirectCraneId] = useState("");
+  const [directDate, setDirectDate] = useState<Date | undefined>(undefined);
+  const [directTime, setDirectTime] = useState("08:00");
+  const [directDuration, setDirectDuration] = useState("60");
+  const [directAdminNote, setDirectAdminNote] = useState("");
+
   const utils = trpc.useUtils();
 
   const { data: waiting = [], isLoading: waitingLoading } = trpc.landWaiting.listAll.useQuery();
   const { data: zones = [] } = trpc.landZone.list.useQuery();
+  const { data: cranes = [] } = trpc.crane.list.useQuery();
   const { data: usersListRes } = trpc.user.list.useQuery({ pageSize: 1000 });
   const usersList = usersListRes?.data || [];
 
@@ -99,6 +109,21 @@ export default function AdminLandWaiting() {
     onError: (error) => toast.error(error.message),
   });
 
+  const directAssignMutation = trpc.landWaiting.directAssign.useMutation({
+    onSuccess: () => {
+      toast.success(isHr ? "Uspješno odobreno i raspoređeno na kalendar." : "Successfully approved and scheduled.");
+      utils.landWaiting.listAll.invalidate();
+      utils.landZone.list.invalidate();
+      setDirectAssignDialogOpen(false);
+      setDirectCraneId("");
+      setDirectDate(undefined);
+      setDirectTime("08:00");
+      setDirectDuration("60");
+      setDirectAdminNote("");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const reorderMutation = trpc.landWaiting.reorder.useMutation({
     onSuccess: () => {
       toast.success(isHr ? "Redoslijed liste je uspješno spremljen." : "Waitlist reordered.");
@@ -145,6 +170,25 @@ export default function AdminLandWaiting() {
       id: assignEntryId,
       zoneId: assignZoneId,
       spotNumber: assignSpotNumber ? Number(assignSpotNumber) : undefined,
+    });
+  };
+
+  const handleDirectAssignSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directAssignEntry || !directCraneId || !directDate || !directTime) {
+      toast.error(isHr ? "Molimo popunite sva polja." : "Please fill in all fields.");
+      return;
+    }
+    const [hours, minutes] = directTime.split(":").map(Number);
+    const scheduledStart = new Date(directDate);
+    scheduledStart.setHours(hours, minutes, 0, 0);
+
+    directAssignMutation.mutate({
+      id: directAssignEntry.id,
+      craneId: directCraneId,
+      scheduledStart,
+      durationMin: Number(directDuration),
+      adminNote: directAdminNote || undefined,
     });
   };
 
@@ -325,6 +369,26 @@ export default function AdminLandWaiting() {
                           </Button>
                         )}
 
+                        {entry.reservationId && (entry.status === "waiting" || entry.status === "offered" || entry.status === "declined") && (
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="h-8 rounded-lg text-purple-600 border-purple-200 hover:bg-purple-50"
+                            onClick={() => {
+                              setDirectAssignEntry(entry);
+                              setDirectCraneId("");
+                              setDirectDate(undefined);
+                              setDirectTime("08:00");
+                              setDirectDuration("60");
+                              setDirectAdminNote("");
+                              setDirectAssignDialogOpen(true);
+                            }}
+                          >
+                            <Calendar className="h-3 w-3 mr-1" />
+                            {isHr ? "Ugovori" : "Schedule"}
+                          </Button>
+                        )}
+
                         <Button 
                           size="sm" 
                           variant="ghost" 
@@ -443,6 +507,85 @@ export default function AdminLandWaiting() {
               <Button type="submit" disabled={assignMutation.isPending || !assignZoneId}>
                 {assignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {isHr ? "Potvrdi i dodijeli" : "Confirm & Assign"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      {/* Direct assign (Bypass / calendar schedule) dialog */}
+      <Dialog open={directAssignDialogOpen} onOpenChange={setDirectAssignDialogOpen}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold">
+              {isHr ? "Ugovori i odobri dizalicu (Bypass)" : "Direct Schedule & Approve (Bypass)"}
+            </DialogTitle>
+          </DialogHeader>
+          {directAssignEntry && (
+            <div className="bg-slate-50 dark:bg-slate-800/40 p-3 rounded-lg border text-xs space-y-1 my-2">
+              <p><strong>{isHr ? "Klijent:" : "Client:"}</strong> {directAssignEntry.user.name} ({directAssignEntry.user.email})</p>
+              <p><strong>{isHr ? "Plovilo:" : "Vessel:"}</strong> {directAssignEntry.vessel?.name || "—"} {directAssignEntry.vessel?.registration ? `[${directAssignEntry.vessel.registration}]` : ""}</p>
+              <p><strong>{isHr ? "Preferirana zona:" : "Preferred Zone:"}</strong> {directAssignEntry.preferredZone?.name || (isHr ? "Bilo koja" : "Any")}</p>
+            </div>
+          )}
+          <form onSubmit={handleDirectAssignSubmit} className="space-y-4 pt-2">
+            <div className="space-y-1">
+              <Label>{isHr ? "Datum dizanja" : "Date"} *</Label>
+              <Input
+                type="date"
+                value={directDate ? directDate.toISOString().split("T")[0] : ""}
+                onChange={e => setDirectDate(e.target.value ? new Date(e.target.value) : undefined)}
+                required
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>{isHr ? "Vrijeme" : "Time"} *</Label>
+                <Input
+                  type="time"
+                  value={directTime}
+                  onChange={e => setDirectTime(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>{isHr ? "Trajanje (min)" : "Duration (min)"} *</Label>
+                <Input
+                  type="number"
+                  value={directDuration}
+                  onChange={e => setDirectDuration(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label>{isHr ? "Dizalica" : "Crane"} *</Label>
+              <Select value={directCraneId} onValueChange={setDirectCraneId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={isHr ? "Odaberite dizalicu" : "Select crane"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {cranes.filter((c: any) => c.craneStatus === "active").map((c: any) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1">
+              <Label>{isHr ? "Napomena" : "Note"}</Label>
+              <Input
+                value={directAdminNote}
+                onChange={e => setDirectAdminNote(e.target.value)}
+                placeholder={isHr ? "Administrativna napomena (opcijski)" : "Admin note (optional)"}
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="ghost" onClick={() => setDirectAssignDialogOpen(false)}>{isHr ? "Odustani" : "Cancel"}</Button>
+              <Button type="submit" disabled={directAssignMutation.isPending || !directCraneId || !directDate}>
+                {directAssignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isHr ? "Ugovori i odobri" : "Schedule & Approve"}
               </Button>
             </DialogFooter>
           </form>

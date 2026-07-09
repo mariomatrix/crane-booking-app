@@ -848,11 +848,15 @@ export async function listLandZones() {
   if (!db) return [];
   const zones = await db.select().from(landZones).orderBy(landZones.sortOrder);
   const occupancies = await db.select().from(landOccupancies).where(isNull(landOccupancies.returnedAt));
+  const waitingListEntries = await db.select().from(landWaitingList).where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")));
+
   return zones.map(z => {
     const activeCount = occupancies.filter(o => o.zoneId === z.id).length;
+    const waitingCount = waitingListEntries.filter(w => w.preferredZoneId === z.id).length;
     return {
       ...z,
       activeSpots: activeCount,
+      waitingCount,
     };
   });
 }
@@ -1072,6 +1076,7 @@ export async function listLandWaitingList() {
       note: landWaitingList.note,
       adminNote: landWaitingList.adminNote,
       assignedOccupancyId: landWaitingList.assignedOccupancyId,
+      reservationId: landWaitingList.reservationId,
       offeredAt: landWaitingList.offeredAt,
       declinedAt: landWaitingList.declinedAt,
       declineCount: landWaitingList.declineCount,

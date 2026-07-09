@@ -115,7 +115,7 @@ import {
   landOccupancies,
   landZones,
 } from "../drizzle/schema";
-import { and, eq, gte, isNull, or, lte, desc, sql, ne } from "drizzle-orm";
+import { and, eq, gte, isNull, or, lte, desc, asc, sql, ne } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
@@ -914,6 +914,7 @@ export const appRouter = router({
         // Land zone
         landZoneId: z.string().uuid().optional(),
         overrideCapacityCheck: z.boolean().optional(),
+        status: z.enum(["pending", "waitlisted"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         // 0. Email verification check
@@ -959,8 +960,28 @@ export const appRouter = router({
 
         // Capacity check for lift_from_sea
         if (serviceType.operationCategory === "lift_from_sea" && input.landZoneId) {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
+
+          // Check if there is an active waiting list queue for this zone
+          const existingQueue = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(landWaitingList)
+            .where(and(
+              eq(landWaitingList.preferredZoneId, input.landZoneId),
+              or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"))
+            ));
+          const queueCount = Number(existingQueue[0]?.count ?? 0);
+
+          if (queueCount > 0 && !input.overrideCapacityCheck && input.status !== "waitlisted") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Upozorenje: Na listi čekanja za ovu zonu već čeka ${queueCount} klijenata. Želite li nastaviti i preskočiti listu čekanja? Potvrdite override za nastavak.`,
+            });
+          }
+
           const cap = await getLandZoneCapacity(input.landZoneId);
-          if (cap.isOver80 && !input.overrideCapacityCheck) {
+          if (cap.isOver80 && !input.overrideCapacityCheck && input.status !== "waitlisted") {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message: `Zona ${cap.name} (${cap.code}) je popunjena ${cap.percentFull}% (${cap.activeSpots}/${cap.totalSpots} mjesta). Molimo potvrdite override ako želite nastaviti.`,
@@ -1013,7 +1034,7 @@ export const appRouter = router({
         const targetUser = await getUserById(targetUserId);
         if (!targetUser) throw new TRPCError({ code: "BAD_REQUEST", message: "Korisnik nije pronađen." });
 
-        let finalStatus = "pending";
+        let finalStatus = input.status === "waitlisted" ? "waitlisted" : "pending";
         let finalCraneId = undefined;
         let finalScheduledStart = undefined;
         let finalScheduledEnd = undefined;
@@ -1022,7 +1043,7 @@ export const appRouter = router({
         let finalApprovedAt = undefined;
         let autoApproveCrane = null;
 
-        if (input.isAutoApprove && (ctx.user.role === 'admin' || ctx.user.role === 'operator')) {
+        if (finalStatus !== "waitlisted" && input.isAutoApprove && (ctx.user.role === 'admin' || ctx.user.role === 'operator')) {
           if (!input.craneId || !input.scheduledStart || !input.durationMin) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Nedostaju podaci za automatsko odobrenje." });
           }
@@ -1079,6 +1100,40 @@ export const appRouter = router({
 
         const resId = created[0]?.id;
         if (!resId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        if (finalStatus === "waitlisted") {
+          let nextPos = 1;
+          if (input.landZoneId) {
+            const maxPosRes = await db
+              .select({ maxPos: sql<number>`max(position)` })
+              .from(landWaitingList)
+              .where(eq(landWaitingList.preferredZoneId, input.landZoneId));
+            nextPos = (Number(maxPosRes[0]?.maxPos) || 0) + 1;
+          } else {
+            const maxPosRes = await db
+              .select({ maxPos: sql<number>`max(position)` })
+              .from(landWaitingList);
+            nextPos = (Number(maxPosRes[0]?.maxPos) || 0) + 1;
+          }
+
+          await db.insert(landWaitingList).values({
+            userId: targetUserId,
+            vesselId: input.vesselId,
+            preferredZoneId: input.landZoneId,
+            position: nextPos,
+            status: "waiting",
+            reservationId: resId,
+            note: input.userNote,
+          });
+
+          await createAuditEntry({
+            actorId: ctx.user.id,
+            action: "land_waiting_added_auto",
+            entityType: "land_waiting_list",
+            entityId: resId,
+            payload: { zoneId: input.landZoneId },
+          });
+        }
 
         await createAuditEntry({
           actorId: ctx.user.id,
@@ -1328,20 +1383,41 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
-        if (reservation.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju se mogu odobriti." });
+        if (reservation.status !== "pending" && reservation.status !== "waitlisted") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju ili na listi čekanja se mogu odobriti." });
+        }
 
-        // Check dry berth capacity if it is a haul-out (Vađenje)
+        // Check dry berth capacity if it is a haul-out (Dizanje iz mora)
         const serviceType = reservation.serviceTypeId ? await getServiceTypeById(reservation.serviceTypeId) : null;
-        const isVadenje = serviceType?.name?.toLowerCase().includes("vađenje") || serviceType?.name?.toLowerCase().includes("vadenje");
-        if (isVadenje) {
-          const zones = await listLandZones();
-          const totalCapacity = zones.reduce((acc, z) => acc + (z.isActive ? z.totalSpots : 0), 0);
-          const totalOccupied = zones.reduce((acc, z) => acc + (z.isActive ? z.activeSpots : 0), 0);
-          if (totalOccupied >= totalCapacity && !input.ignoreNoSpace) {
-            throw new TRPCError({
-              code: "PRECONDITION_FAILED",
-              message: "Nema slobodnih mjesta na kopnu za vađenje plovila.",
-            });
+        const isLiftFromSea = serviceType?.operationCategory === "lift_from_sea";
+        if (isLiftFromSea && reservation.landZoneId) {
+          const db = await getDb();
+          if (db) {
+            // Check if there is an active waiting list queue for this zone that contains other entries
+            const existingQueue = await db
+              .select({ count: sql<number>`count(*)` })
+              .from(landWaitingList)
+              .where(and(
+                eq(landWaitingList.preferredZoneId, reservation.landZoneId),
+                or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")),
+                ne(landWaitingList.reservationId, input.id)
+              ));
+            const queueCount = Number(existingQueue[0]?.count ?? 0);
+
+            if (queueCount > 0 && !input.ignoreNoSpace) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Upozorenje: Na listi čekanja za ovu zonu već čeka ${queueCount} drugih klijenata. Potvrdite ignoriranje limita ako želite preskočiti listu.`,
+              });
+            }
+
+            const cap = await getLandZoneCapacity(reservation.landZoneId);
+            if (cap.isOver80 && !input.ignoreNoSpace) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: `Zona ${cap.name} (${cap.code}) je popunjena ${cap.percentFull}% (${cap.activeSpots}/${cap.totalSpots} mjesta). Potvrdite ignoriranje limita za nastavak.`,
+              });
+            }
           }
         }
 
@@ -1380,6 +1456,14 @@ export const appRouter = router({
             approvedAt: new Date(),
             updatedAt: new Date(),
           }).where(eq(reservations.id, input.id));
+
+          // Update linked waiting list entry to assigned
+          await db.update(landWaitingList)
+            .set({
+              status: "assigned",
+              updatedAt: new Date()
+            })
+            .where(eq(landWaitingList.reservationId, input.id));
         }
 
         await createAuditEntry({ actorId: ctx.user.id, action: "reservation_approved", entityType: "reservation", entityId: input.id });
@@ -2610,12 +2694,127 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    reorder: operatorProcedure
+     reorder: operatorProcedure
       .input(z.array(z.string().uuid()))
       .mutation(async ({ input, ctx }) => {
         await reorderWaitingList(input);
         await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_reordered", entityType: "land_waiting_list", payload: { ids: input } });
         return { success: true };
+      }),
+
+    directAssign: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        craneId: z.string().uuid(),
+        scheduledStart: z.date(),
+        durationMin: z.number().int().positive().default(60),
+        adminNote: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const waitlistEntry = await db
+          .select().from(landWaitingList)
+          .where(eq(landWaitingList.id, input.id))
+          .limit(1);
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const entry = waitlistEntry[0];
+
+        if (!entry.reservationId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ovaj unos na listi nema povezanu rezervaciju dizalice." });
+        }
+
+        const reservation = await getReservationById(entry.reservationId);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND", message: "Povezana rezervacija nije pronađena." });
+
+        // Validate crane
+        const crane = await getCraneById(input.craneId);
+        if (!crane || crane.craneStatus !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+        }
+
+        const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
+        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, scheduledEnd, entry.reservationId);
+        if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+
+        // Update reservation to approved
+        await db.update(reservations).set({
+          craneId: input.craneId,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd,
+          durationMin: input.durationMin,
+          status: "approved",
+          adminNote: input.adminNote || reservation.adminNote,
+          approvedBy: ctx.user.id,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(reservations.id, entry.reservationId));
+
+        // Update waitlist entry to assigned
+        await updateLandWaitingListStatus(input.id, "assigned");
+
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_assigned_direct", entityType: "land_waiting_list", entityId: input.id });
+
+        // Send confirmation email
+        const user = await getUserById(entry.userId);
+        if (user?.email) {
+          const { sendReservationConfirmation } = await import("./_core/email");
+          sendReservationConfirmation({
+            to: user.email,
+            userName: user.name || user.email,
+            craneName: crane.name,
+            startDate: input.scheduledStart,
+            endDate: scheduledEnd,
+            craneLocation: crane.location || "",
+            adminNotes: input.adminNote,
+          }).catch(console.error);
+        }
+
+        return { success: true };
+      }),
+
+    listByZone: operatorProcedure
+      .input(z.object({
+        zoneId: z.string().uuid(),
+      }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+        return db
+          .select({
+            id: landWaitingList.id,
+            userId: landWaitingList.userId,
+            vesselId: landWaitingList.vesselId,
+            preferredZoneId: landWaitingList.preferredZoneId,
+            position: landWaitingList.position,
+            status: landWaitingList.status,
+            note: landWaitingList.note,
+            adminNote: landWaitingList.adminNote,
+            reservationId: landWaitingList.reservationId,
+            createdAt: landWaitingList.createdAt,
+            user: {
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              phone: users.phone,
+              oib: users.oib,
+            },
+            vessel: {
+              id: vessels.id,
+              name: vessels.name,
+              type: vessels.type,
+              registration: vessels.registration,
+            },
+          })
+          .from(landWaitingList)
+          .innerJoin(users, eq(landWaitingList.userId, users.id))
+          .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
+          .where(and(
+            eq(landWaitingList.preferredZoneId, input.zoneId),
+            or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+          ))
+          .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
       }),
   }),
 

@@ -40,6 +40,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
     const [landZoneId, setLandZoneId] = useState("");
     const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
+    const [isWaitlisted, setIsWaitlisted] = useState(false);
 
     const utils = trpc.useUtils();
 
@@ -140,14 +141,47 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType || !contactPhone || !vesselRegistration) {
-            toast.error("Molimo popunite sva obavezna polja (uključujući vrijeme, dizalicu, trajanje i registraciju).");
-            return;
+        
+        if (isWaitlisted) {
+            if (!userId || !serviceTypeId || !requestedDate || !vesselType || !contactPhone || !vesselRegistration) {
+                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, registraciju i telefon).");
+                return;
+            }
+        } else {
+            if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType || !contactPhone || !vesselRegistration) {
+                toast.error("Molimo popunite sva obavezna polja (uključujući vrijeme, dizalicu, trajanje i registraciju).");
+                return;
+            }
         }
 
-        const [hours, minutes] = scheduledTime.split(":").map(Number);
-        const scheduledStartDate = new Date(requestedDate);
-        scheduledStartDate.setHours(hours, minutes, 0, 0);
+        let scheduledStartDate: Date | undefined = undefined;
+        if (!isWaitlisted) {
+            const [hours, minutes] = scheduledTime.split(":").map(Number);
+            scheduledStartDate = new Date(requestedDate);
+            scheduledStartDate.setHours(hours, minutes, 0, 0);
+        }
+
+        const commonPayload = {
+            userId,
+            serviceTypeId,
+            requestedDate: formatToSqlDate(requestedDate),
+            requestedTimeSlot: "po_dogovoru" as any,
+            userNote: userNote || undefined,
+            vesselType: vesselType as any,
+            vesselRegistration: vesselRegistration || undefined,
+            vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
+            vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
+            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
+            vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
+            contactPhone,
+            landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
+            overrideCapacityCheck: overrideCapacityCheck || undefined,
+            status: isWaitlisted ? ("waitlisted" as const) : undefined,
+            isAutoApprove: !isWaitlisted ? true : undefined,
+            craneId: !isWaitlisted ? craneId : undefined,
+            scheduledStart: !isWaitlisted ? scheduledStartDate : undefined,
+            durationMin: !isWaitlisted ? Number(durationMin) : undefined,
+        };
 
         if (selectedVesselId === "new" && saveToProfile) {
             // Save vessel to profile first
@@ -163,25 +197,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             }, {
                 onSuccess: (newVessel) => {
                     createMutation.mutate({
-                        userId,
-                        isAutoApprove: true,
-                        craneId,
-                        scheduledStart: scheduledStartDate,
-                        durationMin: Number(durationMin),
-                        serviceTypeId,
-                        requestedDate: formatToSqlDate(requestedDate),
-                        requestedTimeSlot: "po_dogovoru",
-                        userNote: userNote || undefined,
+                        ...commonPayload,
                         vesselId: newVessel.id,
-                        vesselType: vesselType as any,
-                        vesselRegistration: vesselRegistration || undefined,
-                        vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
-                        vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
-                        vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
-                        vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
-                        contactPhone,
-                        landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
-                        overrideCapacityCheck: overrideCapacityCheck || undefined,
                     });
                 },
                 onError: (err) => {
@@ -190,25 +207,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             });
         } else {
             createMutation.mutate({
-                userId,
-                isAutoApprove: true,
-                craneId,
-                scheduledStart: scheduledStartDate,
-                durationMin: Number(durationMin),
-                serviceTypeId,
-                requestedDate: formatToSqlDate(requestedDate),
-                requestedTimeSlot: "po_dogovoru",
-                userNote: userNote || undefined,
+                ...commonPayload,
                 vesselId: selectedVesselId !== "new" ? selectedVesselId : undefined,
-                vesselType: vesselType as any,
-                vesselRegistration: vesselRegistration || undefined,
-                vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
-                vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
-                vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
-                vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
-                contactPhone,
-                landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
-                overrideCapacityCheck: overrideCapacityCheck || undefined,
             });
         }
     };
@@ -345,28 +345,44 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                     </Select>
                                 </div>
 
-                                {zoneCapacity?.isOver80 && (
-                                    <div className="bg-amber-50 border border-amber-300 rounded-md p-2.5 space-y-1.5">
+                                {zoneCapacity?.isOver80 && !isWaitlisted && (
+                                    <div className="bg-amber-50 border border-amber-300 rounded-md p-2.5 space-y-2">
                                         <p className="text-amber-800 font-semibold text-[11px] flex items-center gap-1.5">
                                             ⚠ {lang === "hr"
                                                 ? `Zona je popunjena preko 80% (${zoneCapacity.percentFull}%)`
                                                 : `Zone is over 80% full (${zoneCapacity.percentFull}%)`
                                             }
                                         </p>
-                                        <label className="flex items-center gap-2 text-[10px] text-amber-900 cursor-pointer select-none">
-                                            <input
-                                                type="checkbox"
-                                                checked={overrideCapacityCheck}
-                                                onChange={(e) => setOverrideCapacityCheck(e.target.checked)}
-                                                className="h-3.5 w-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
-                                            />
-                                            <span>
-                                                {lang === "hr"
-                                                    ? "Dopusti kreiranje rezervacije (ručni override)"
-                                                    : "Allow creating reservation (manual override)"
+                                        <div className="flex flex-col gap-2">
+                                            <label className="flex items-center gap-2 text-[10px] text-amber-900 cursor-pointer select-none">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={overrideCapacityCheck}
+                                                    onChange={(e) => setOverrideCapacityCheck(e.target.checked)}
+                                                    className="h-3.5 w-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                                />
+                                                <span>
+                                                    {lang === "hr"
+                                                        ? "Dopusti kreiranje rezervacije (ručni override)"
+                                                        : "Allow creating reservation (manual override)"
+                                                    }
+                                                </span>
+                                            </label>
+                                            <div className="border-t border-amber-200/60 my-0.5" />
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setIsWaitlisted(true);
+                                                    setOverrideCapacityCheck(false);
+                                                }}
+                                                className="text-left text-[10px] text-amber-700 font-semibold hover:underline flex items-center gap-1 focus:outline-none"
+                                            >
+                                                📋 {lang === "hr"
+                                                    ? "Umjesto toga, stavi klijenta na listu čekanja za kopno"
+                                                    : "Instead, place client on dry berth waiting list"
                                                 }
-                                            </span>
-                                        </label>
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
@@ -396,47 +412,78 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                             </div>
                         )}
 
+                        <div className="flex items-center gap-4 bg-gray-50 dark:bg-gray-800/40 p-3 rounded-lg border border-gray-200 dark:border-gray-800">
+                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none text-gray-700 dark:text-gray-300">
+                                <input
+                                    type="checkbox"
+                                    checked={isWaitlisted}
+                                    onChange={(e) => {
+                                        setIsWaitlisted(e.target.checked);
+                                        if (e.target.checked) {
+                                            setOverrideCapacityCheck(false);
+                                        }
+                                    }}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                />
+                                <span>
+                                    {lang === "hr"
+                                        ? "Stavi klijenta na listu čekanja (bez fiksnog termina dizalice)"
+                                        : "Place client on waiting list (no fixed crane schedule)"
+                                    }
+                                </span>
+                            </label>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                                <Label>{lang === "hr" ? "Datum odobrenja" : "Approved Date"} *</Label>
+                                <Label>
+                                    {isWaitlisted
+                                        ? (lang === "hr" ? "Početak čekanja" : "Start of Wait")
+                                        : (lang === "hr" ? "Datum odobrenja" : "Approved Date")
+                                    } *
+                                </Label>
                                 <DatePicker
                                     date={requestedDate}
                                     onChange={setRequestedDate}
                                     placeholder={lang === "hr" ? "Datum" : "Date"}
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <Label>{lang === "hr" ? "Točno vrijeme" : "Exact Time"} *</Label>
-                                <Input
-                                    type="time"
-                                    value={scheduledTime}
-                                    onChange={(e) => setScheduledTime(e.target.value)}
-                                    required
-                                />
-                            </div>
+                            {!isWaitlisted && (
+                                <div className="space-y-2">
+                                    <Label>{lang === "hr" ? "Točno vrijeme" : "Exact Time"} *</Label>
+                                    <Input
+                                        type="time"
+                                        value={scheduledTime}
+                                        onChange={(e) => setScheduledTime(e.target.value)}
+                                        required
+                                    />
+                                </div>
+                            )}
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>{lang === "hr" ? "Dizalica" : "Crane"} *</Label>
-                                <Select value={craneId} onValueChange={setCraneId}>
-                                    <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
-                                    <SelectContent>
-                                        {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
-                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                        {!isWaitlisted && (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>{lang === "hr" ? "Dizalica" : "Crane"} *</Label>
+                                    <Select value={craneId} onValueChange={setCraneId}>
+                                        <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
+                                        <SelectContent>
+                                            {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
+                                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
+                                    <Input
+                                        type="number"
+                                        value={durationMin}
+                                        onChange={(e) => setDurationMin(e.target.value)}
+                                        required
+                                    />
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
-                                <Input
-                                    type="number"
-                                    value={durationMin}
-                                    onChange={(e) => setDurationMin(e.target.value)}
-                                    required
-                                />
-                            </div>
-                        </div>
+                        )}
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Napomena" : "Note"}</Label>
                             <Textarea
@@ -570,13 +617,15 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                         !userId || 
                         !serviceTypeId || 
                         !requestedDate || 
-                        !craneId || 
-                        !scheduledTime || 
-                        !durationMin || 
                         !vesselType || 
                         !contactPhone || 
                         !vesselRegistration ||
-                        (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
+                        (!isWaitlisted && (
+                            !craneId || 
+                            !scheduledTime || 
+                            !durationMin || 
+                            (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
+                        ))
                     }
                     className="min-w-[120px]"
                 >

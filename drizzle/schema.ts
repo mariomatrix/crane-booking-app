@@ -365,6 +365,7 @@ export const landWaitingList = pgTable("land_waiting_list", {
     note: text("note"),             // napomena korisnika
     adminNote: text("admin_note"),  // interna napomena operatera
     assignedOccupancyId: uuid("assigned_occupancy_id").references(() => landOccupancies.id),
+    reservationId: uuid("reservation_id").references(() => reservations.id),
     offeredAt: timestamp("offered_at"),       // kad je ponuda poslana
     declinedAt: timestamp("declined_at"),     // kad je korisnik odbio
     declineCount: integer("decline_count").default(0).notNull(),  // koliko puta je odbio

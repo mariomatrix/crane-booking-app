@@ -1,11 +1,15 @@
 import { Badge } from "@/components/ui/badge";
 
-type Status = "pending" | "approved" | "rejected" | "cancelled" | "completed";
+type Status = "pending" | "approved" | "rejected" | "cancelled" | "completed" | "waitlisted";
 
 const statusConfig: Record<Status, { label: string; className: string }> = {
   pending: {
     label: "Na čekanju",
     className: "status-badge-pending border-0 font-medium",
+  },
+  waitlisted: {
+    label: "Lista čekanja",
+    className: "bg-amber-600 text-white dark:bg-amber-600 dark:text-white border-0 font-medium",
   },
   approved: {
     label: "Odobreno",

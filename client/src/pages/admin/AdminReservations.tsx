@@ -66,7 +66,7 @@ export default function AdminReservations() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("status");
-    if (status && ["pending", "approved", "rejected", "cancelled", "completed", "all"].includes(status)) {
+    if (status && ["pending", "approved", "waitlisted", "rejected", "cancelled", "completed", "all"].includes(status)) {
       setStatusFilter(status);
     }
   }, []);
@@ -204,6 +204,7 @@ export default function AdminReservations() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="pending">Na čekanju</SelectItem>
+              <SelectItem value="waitlisted">Lista čekanja</SelectItem>
               <SelectItem value="approved">Odobreni</SelectItem>
               <SelectItem value="completed">Završeni</SelectItem>
               <SelectItem value="rejected">Odbijeni</SelectItem>
@@ -323,7 +324,7 @@ export default function AdminReservations() {
                   </div>
 
                   <div className="flex gap-2 shrink-0">
-                    {reservation.status === "pending" && (
+                    {(reservation.status === "pending" || reservation.status === "waitlisted") && (
                       <>
                         <Button
                           size="sm"
