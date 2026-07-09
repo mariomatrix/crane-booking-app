@@ -130,7 +130,7 @@ export default function ReportLandOccupancy() {
                     />
 
                     {/* Printable Preview */}
-                    <div className="border rounded-lg bg-card p-8 shadow-sm max-w-[21cm] mx-auto report-print-container">
+                    <div className="border rounded-lg bg-card p-6 shadow-sm w-full report-print-container">
                         <ReportHeader title={reportTitle} />
 
                         <div className="space-y-4">
