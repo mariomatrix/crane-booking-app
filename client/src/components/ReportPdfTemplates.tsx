@@ -1,12 +1,22 @@
 import { Document, Page, Text, View, StyleSheet, Image, Font } from "@react-pdf/renderer";
 import { format } from "date-fns";
 
+// Register custom font to support Latin diacritics in PDF
+Font.register({
+    family: "Roboto",
+    src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf"
+});
+Font.register({
+    family: "Roboto-Bold",
+    src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf"
+});
+
 // Stylesheet for A4 documents in PDF
 const styles = StyleSheet.create({
     page: {
         padding: 40,
         fontSize: 9,
-        fontFamily: "Helvetica",
+        fontFamily: "Roboto",
         color: "#333333",
         lineHeight: 1.4,
     },
@@ -33,7 +43,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 16,
-        fontFamily: "Helvetica-Bold",
+        fontFamily: "Roboto-Bold",
         color: "#0f172a",
         marginBottom: 5,
     },
@@ -43,7 +53,7 @@ const styles = StyleSheet.create({
     },
     metaTitle: {
         fontSize: 9,
-        fontFamily: "Helvetica-Bold",
+        fontFamily: "Roboto-Bold",
         color: "#334155",
         marginBottom: 3,
     },
@@ -66,12 +76,12 @@ const styles = StyleSheet.create({
         gap: 4,
     },
     summaryLabel: {
-        fontFamily: "Helvetica-Bold",
+        fontFamily: "Roboto-Bold",
         color: "#334155",
     },
     summaryValue: {
         color: "#0284c7",
-        fontFamily: "Helvetica-Bold",
+        fontFamily: "Roboto-Bold",
     },
     table: {
         width: "auto",
@@ -87,6 +97,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
     },
     tableHeaderRow: {
+        flexDirection: "row",
         backgroundColor: "#f1f5f9",
         borderBottomWidth: 1,
         borderBottomColor: "#94a3b8",
@@ -94,7 +105,7 @@ const styles = StyleSheet.create({
         alignItems: "center",
     },
     tableCellHeader: {
-        fontFamily: "Helvetica-Bold",
+        fontFamily: "Roboto-Bold",
         color: "#1e293b",
         padding: 4,
     },
@@ -103,7 +114,7 @@ const styles = StyleSheet.create({
         color: "#334155",
     },
     boldCell: {
-        fontFamily: "Helvetica-Bold",
+        fontFamily: "Roboto-Bold",
     },
     footerContainer: {
         position: "absolute",
@@ -256,7 +267,7 @@ export function CraneUtilizationPdf({ data, summaries, dateFrom, dateTo, marinaN
                 </View>
                 {summaries.map((s, idx) => (
                     <View key={idx} style={styles.tableRow}>
-                        <Text style={[styles.tableCell, { width: "40%", fontFamily: "Helvetica-Bold" }]}>{s.craneName || "—"}</Text>
+                        <Text style={[styles.tableCell, { width: "40%", fontFamily: "Roboto-Bold" }]}>{s.craneName || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "20%" }]}>{s.totalOperations}</Text>
                         <Text style={[styles.tableCell, { width: "20%" }]}>{(s.totalMinutes / 60).toFixed(1)} h</Text>
                         <Text style={[styles.tableCell, { width: "20%" }]}>{s.avgMinutes} min</Text>
@@ -322,7 +333,7 @@ export function UserActivityPdf({ data, summaries, dateFrom, dateTo, marinaName,
                 </View>
                 {summaries.map((s, idx) => (
                     <View key={idx} style={styles.tableRow}>
-                        <Text style={[styles.tableCell, { width: "15%", fontFamily: "Helvetica-Bold" }]}>{s.oib || "—"}</Text>
+                        <Text style={[styles.tableCell, { width: "15%", fontFamily: "Roboto-Bold" }]}>{s.oib || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "25%" }]}>{s.clientName || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "25%" }]}>{s.email || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "10%" }]}>{s.totalRequests}</Text>
@@ -360,7 +371,7 @@ export function OperationTypesPdf({ data, summaries, dateFrom, dateTo, marinaNam
                 </View>
                 {summaries.map((s, idx) => (
                     <View key={idx} style={styles.tableRow}>
-                        <Text style={[styles.tableCell, { width: "40%", fontFamily: "Helvetica-Bold" }]}>{s.serviceTypeName || "—"}</Text>
+                        <Text style={[styles.tableCell, { width: "40%", fontFamily: "Roboto-Bold" }]}>{s.serviceTypeName || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "20%" }]}>{s.count}</Text>
                         <Text style={[styles.tableCell, { width: "20%" }]}>{(s.totalMinutes / 60).toFixed(1)} h</Text>
                         <Text style={[styles.tableCell, { width: "20%" }]}>{s.avgMinutes} min</Text>
@@ -406,8 +417,8 @@ export function LandOccupancyPdf({ data, statusLabel, marinaName, marinaLogo }: 
                             </Text>
                             <Text style={[styles.tableCell, { width: "12%" }]}>{item.zoneName || "—"} ({item.spotNumber || "—"})</Text>
                             <Text style={[styles.tableCell, { width: "12%" }]}>{format(new Date(item.liftedAt), "dd.MM.yy")}</Text>
-                            <Text style={[styles.tableCell, { width: "12%" }]}>{item.returnedAt ? format(new Date(item.returnedAt), "dd.MM.yy") : "Na kopnu"}</Text>
-                            <Text style={[styles.tableCell, { width: "10%", fontFamily: "Helvetica-Bold" }]}>{days} d</Text>
+                            <Text style={[styles.tableCell, { width: "12%" }]}>{item.returnedAt ? format(new Date(item.returnedAt), "dd.MM.yy") : item.hasLaunchReservation ? "Najava spuštanja" : "Na kopnu"}</Text>
+                            <Text style={[styles.tableCell, { width: "10%", fontFamily: "Roboto-Bold" }]}>{days} d</Text>
                         </View>
                     );
                 })}
@@ -438,7 +449,7 @@ export function WaitingListPdf({ data, statusLabel, marinaName, marinaLogo }: { 
                 </View>
                 {data.map((item, idx) => (
                     <View key={idx} style={styles.tableRow}>
-                        <Text style={[styles.tableCell, { width: "8%", fontFamily: "Helvetica-Bold", color: "#0284c7" }]}>#{item.position}</Text>
+                        <Text style={[styles.tableCell, { width: "8%", fontFamily: "Roboto-Bold", color: "#0284c7" }]}>#{item.position}</Text>
                         <Text style={[styles.tableCell, { width: "14%" }]}>{item.clientOib || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "22%" }]}>{item.clientName || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "22%" }]}>

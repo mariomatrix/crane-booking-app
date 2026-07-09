@@ -59,7 +59,7 @@ export const reportsRouter = router({
                     scheduledStart: reservations.scheduledStart,
                     scheduledEnd: reservations.scheduledEnd,
                     durationMin: reservations.durationMin,
-                    userOib: reservations.userOib,
+                    userOib: sql<string | null>`coalesce(${reservations.userOib}, ${users.oib})`,
                     vesselName: reservations.vesselName,
                     vesselRegistration: reservations.vesselRegistration,
                     userNote: reservations.userNote,
@@ -143,7 +143,7 @@ export const reportsRouter = router({
                     reservationNumber: reservations.reservationNumber,
                     scheduledStart: reservations.scheduledStart,
                     durationMin: reservations.durationMin,
-                    userOib: reservations.userOib,
+                    userOib: sql<string | null>`coalesce(${reservations.userOib}, ${users.oib})`,
                     clientName: sql<string>`${users.firstName} || ' ' || ${users.lastName}`,
                     vesselRegistration: reservations.vesselRegistration,
                     serviceTypeName: serviceTypes.name,
@@ -279,7 +279,7 @@ export const reportsRouter = router({
                     reservationNumber: reservations.reservationNumber,
                     scheduledStart: reservations.scheduledStart,
                     durationMin: reservations.durationMin,
-                    userOib: reservations.userOib,
+                    userOib: sql<string | null>`coalesce(${reservations.userOib}, ${users.oib})`,
                     clientName: sql<string>`${users.firstName} || ' ' || ${users.lastName}`,
                     vesselRegistration: reservations.vesselRegistration,
                     serviceTypeName: serviceTypes.name,
@@ -366,6 +366,13 @@ export const reportsRouter = router({
                     vesselRegistration: vessels.registration,
                     vesselType: vessels.type,
                     zoneName: landZones.name,
+                    hasLaunchReservation: sql<boolean>`EXISTS (
+                        SELECT 1 FROM ${reservations} r 
+                        JOIN ${serviceTypes} st ON r.service_type_id = st.id
+                        WHERE r.vessel_id = ${landOccupancies.vesselId} 
+                          AND st.operation_category = 'lower_to_sea'
+                          AND r.status IN ('pending', 'approved')
+                    )`,
                 })
                 .from(landOccupancies)
                 .leftJoin(vessels, eq(landOccupancies.vesselId, vessels.id))

@@ -83,6 +83,32 @@
   --sidebar-ring: oklch(0.42 0.12 250);
 }
 
+.dark {
+  --background: oklch(0.145 0.015 250);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0.015 250);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0.015 250);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.65 0.15 250);
+  --primary-foreground: oklch(0.145 0.015 250);
+  --secondary: oklch(0.2 0.015 250);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.2 0.015 250);
+  --muted-foreground: oklch(0.65 0.01 250);
+  --accent: oklch(0.2 0.015 250);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.25 0.015 250);
+  --input: oklch(0.25 0.015 250);
+  --ring: oklch(0.65 0.15 250);
+  --sidebar: oklch(0.125 0.015 250);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.2 0.015 250);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.2 0.015 250);
+  --sidebar-ring: oklch(0.65 0.15 250);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -222,7 +248,6 @@
     font-size: 11pt !important;
   }
 
-  /* Hide navigation, sidebars, buttons, and settings */
   nav, 
   aside, 
   header:not(.print-header), 
@@ -233,8 +258,7 @@
   .export-buttons,
   .sidebar-trigger,
   [data-sidebar="sidebar"],
-  .report-filters-card,
-  [class*="sidebar-"] {
+  .report-filters-card {
     display: none !important;
   }
 

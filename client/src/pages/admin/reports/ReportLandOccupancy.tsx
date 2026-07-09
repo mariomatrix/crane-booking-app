@@ -29,6 +29,11 @@ export default function ReportLandOccupancy() {
         oib: oib.trim() !== "" ? oib : undefined,
     });
 
+    const selectedZone = landZones.find(lz => lz.id === zoneId);
+    const zoneSuffix = selectedZone ? ` — ${selectedZone.name}` : "";
+    const statusLabel = status === "active" ? "Aktivno na kopnu" : status === "history" ? "Vraćeni u more" : "Sve evidencije";
+    const reportTitle = `Plovila na kopnu (${statusLabel})${zoneSuffix}`;
+
     const excelExportData = reportData.map(item => {
         const days = item.returnedAt 
             ? Math.ceil((new Date(item.returnedAt).getTime() - new Date(item.liftedAt).getTime()) / (1000 * 60 * 60 * 24))
@@ -41,12 +46,14 @@ export default function ReportLandOccupancy() {
             "Zona": item.zoneName || "",
             "Mjesto": item.spotNumber || "",
             "Datum dizanja": format(new Date(item.liftedAt), "dd.MM.yyyy"),
-            "Datum povratka": item.returnedAt ? format(new Date(item.returnedAt), "dd.MM.yyyy") : "Na kopnu",
+            "Datum povratka": item.returnedAt 
+                ? format(new Date(item.returnedAt), "dd.MM.yyyy") 
+                : (item as any).hasLaunchReservation 
+                    ? "Najava spuštanja u more" 
+                    : "Na kopnu",
             "Broj dana boravka": days,
         };
     });
-
-    const statusLabel = status === "active" ? "Aktivno na kopnu" : status === "history" ? "Vraćeni u more" : "Sve evidencije";
 
     return (
         <div className="space-y-6">
@@ -118,13 +125,13 @@ export default function ReportLandOccupancy() {
                     <ExportActions 
                         excelData={excelExportData}
                         excelFileName="Plovila_na_kopnu"
-                        pdfDocument={<LandOccupancyPdf data={reportData} statusLabel={statusLabel} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<LandOccupancyPdf data={reportData} statusLabel={`${statusLabel}${zoneSuffix}`} marinaName="PŠD Špinut Marina" />}
                         pdfFileName="Plovila_na_kopnu"
                     />
 
                     {/* Printable Preview */}
                     <div className="border rounded-lg bg-card p-8 shadow-sm max-w-[21cm] mx-auto report-print-container">
-                        <ReportHeader title={`Plovila na kopnu (${statusLabel})`} />
+                        <ReportHeader title={reportTitle} />
 
                         <div className="space-y-4">
                             <Table>
@@ -158,14 +165,18 @@ export default function ReportLandOccupancy() {
                                                 </TableCell>
                                                 <TableCell className="font-mono">{format(new Date(item.liftedAt), "dd.MM.yyyy")}</TableCell>
                                                 <TableCell className="font-mono">
-                                                    {item.returnedAt ? (
-                                                        format(new Date(item.returnedAt), "dd.MM.yyyy")
-                                                    ) : (
-                                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] uppercase font-bold">
-                                                            Na kopnu
-                                                        </Badge>
-                                                    )}
-                                                </TableCell>
+                                                     {item.returnedAt ? (
+                                                         format(new Date(item.returnedAt), "dd.MM.yyyy")
+                                                     ) : (item as any).hasLaunchReservation ? (
+                                                         <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] uppercase font-bold">
+                                                             Najava spuštanja
+                                                         </Badge>
+                                                     ) : (
+                                                         <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] uppercase font-bold">
+                                                             Na kopnu
+                                                         </Badge>
+                                                     )}
+                                                 </TableCell>
                                                 <TableCell className="text-right font-mono font-bold">{days} dana</TableCell>
                                             </TableRow>
                                         );
