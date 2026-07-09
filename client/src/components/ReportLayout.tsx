@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { format } from "date-fns";
-import { Printer, FileSpreadsheet, FileText, Loader2, ArrowLeft } from "lucide-react";
+import { FileSpreadsheet, FileText, Loader2, ArrowLeft } from "lucide-react";
 import * as XLSX from "xlsx";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { toast } from "sonner";
@@ -102,15 +102,6 @@ export function ExportActions({ excelData, excelFileName, pdfDocument, pdfFileNa
 
     return (
         <div className="flex flex-wrap gap-2 mb-6 no-print justify-end items-center">
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.print()}
-                className="flex items-center gap-1.5"
-            >
-                <Printer className="h-4 w-4" /> Ispiši (Print)
-            </Button>
-
             <Button
                 variant="outline"
                 size="sm"

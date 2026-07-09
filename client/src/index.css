@@ -301,6 +301,16 @@
     background-color: white !important;
   }
 
+  /* Un-wrap overflow containers for printing */
+  .overflow-x-auto, 
+  [class*="overflow-"],
+  div, 
+  main, 
+  section {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
   /* Tables formatting for print */
   table {
     width: 100% !important;
