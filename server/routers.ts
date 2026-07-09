@@ -69,6 +69,7 @@ import {
   listApiKeys,
   revokeApiKey,
   listLandZones,
+  getLandZoneCapacity,
   createLandZone,
   updateLandZone,
   deleteLandZone,
@@ -910,6 +911,9 @@ export const appRouter = router({
         vesselWeightTons: z.number().nonnegative().optional(),
         // Contact
         contactPhone: z.string().min(6),
+        // Land zone
+        landZoneId: z.string().uuid().optional(),
+        overrideCapacityCheck: z.boolean().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         // 0. Email verification check
@@ -951,6 +955,17 @@ export const appRouter = router({
         const serviceType = await getServiceTypeById(input.serviceTypeId);
         if (!serviceType || !serviceType.isActive) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrani tip operacije nije dostupan." });
+        }
+
+        // Capacity check for lift_from_sea
+        if (serviceType.operationCategory === "lift_from_sea" && input.landZoneId) {
+          const cap = await getLandZoneCapacity(input.landZoneId);
+          if (cap.isOver80 && !input.overrideCapacityCheck) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Zona ${cap.name} (${cap.code}) je popunjena ${cap.percentFull}% (${cap.activeSpots}/${cap.totalSpots} mjesta). Molimo potvrdite override ako želite nastaviti.`,
+            });
+          }
         }
 
         // 3. Build vessel snapshot
@@ -1059,6 +1074,7 @@ export const appRouter = router({
           vesselWeightTons: vesselSnapshot.vesselWeightTons,
           contactPhone: input.contactPhone,
           userNote: input.userNote,
+          landZoneId: input.landZoneId,
         }).returning({ id: resTable.id });
 
         const resId = created[0]?.id;
@@ -1129,7 +1145,40 @@ export const appRouter = router({
         }
         const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
         const user = await getUserById(reservation.userId);
-        return { ...reservation, crane, user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null };
+
+        let landZone = null;
+        if (reservation.landZoneId) {
+          const db = await getDb();
+          if (db) {
+            const [lz] = await db.select().from(landZones).where(eq(landZones.id, reservation.landZoneId)).limit(1);
+            if (lz) landZone = { id: lz.id, name: lz.name, code: lz.code };
+          }
+        }
+
+        let activeLandOccupancy = null;
+        if (reservation.vesselId) {
+          const occ = await getActiveOccupancyByVessel(reservation.vesselId);
+          if (occ) {
+            const db = await getDb();
+            let occZone = null;
+            if (db) {
+              const [lz] = await db.select().from(landZones).where(eq(landZones.id, occ.zoneId)).limit(1);
+              if (lz) occZone = { id: lz.id, name: lz.name, code: lz.code };
+            }
+            activeLandOccupancy = {
+              ...occ,
+              zone: occZone,
+            };
+          }
+        }
+
+        return {
+          ...reservation,
+          crane,
+          user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null,
+          landZone,
+          activeLandOccupancy,
+        };
       }),
 
     cancel: protectedProcedure
@@ -1237,11 +1286,17 @@ export const appRouter = router({
               id: sql<string>`approver_users.id`,
               name: sql<string>`approver_users.name`,
             },
+            landZone: {
+              id: landZones.id,
+              name: landZones.name,
+              code: landZones.code,
+            },
             unreadCount: sql<number>`COALESCE(${unreadCountSubquery.count}, 0)`
           })
           .from(reservations)
           .leftJoin(users, eq(reservations.userId, users.id))
           .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .leftJoin(landZones, eq(reservations.landZoneId, landZones.id))
           .leftJoin(sql`${users} as approver_users`, eq(reservations.approvedBy, sql`approver_users.id`))
           .leftJoin(unreadCountSubquery, eq(reservations.id, unreadCountSubquery.reservationId))
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1254,6 +1309,7 @@ export const appRouter = router({
             crane: row.crane?.id ? row.crane : null,
             user: row.user?.id ? row.user : null,
             approver: row.approver?.id ? row.approver : null,
+            landZone: row.landZone?.id ? row.landZone : null,
             unreadCount: row.unreadCount
         }));
 
@@ -1458,13 +1514,13 @@ export const appRouter = router({
         }
 
         const serviceType = reservation.serviceTypeId ? await getServiceTypeById(reservation.serviceTypeId) : null;
-        const isVadenje = serviceType?.name?.toLowerCase().includes("vađenje") || serviceType?.name?.toLowerCase().includes("vadenje");
-        const isSpustanje = serviceType?.name?.toLowerCase().includes("spuštanje") || serviceType?.name?.toLowerCase().includes("spustanje");
+        const isLiftFromSea = serviceType?.operationCategory === "lift_from_sea";
+        const isLowerToSea = serviceType?.operationCategory === "lower_to_sea";
 
         // 1. Dry Berth (Kopnene zone) logic
-        if (isVadenje && reservation.vesselId && reservation.userId) {
+        if (isLiftFromSea && reservation.vesselId && reservation.userId) {
           // Haul out: place boat on dry berth
-          let targetZoneId = input.zoneId;
+          let targetZoneId = input.zoneId || reservation.landZoneId;
           if (!targetZoneId) {
             // Find first zone with available capacity
             const zones = await listLandZones();
@@ -1487,7 +1543,7 @@ export const appRouter = router({
               note: input.note,
             });
           }
-        } else if (isSpustanje && reservation.vesselId) {
+        } else if (isLowerToSea && reservation.vesselId) {
           // Launch: remove boat from dry berth
           const activeOccupancy = await getActiveOccupancyByVessel(reservation.vesselId);
           if (activeOccupancy) {
@@ -1503,7 +1559,7 @@ export const appRouter = router({
           await logCraneOperation({
             craneId: reservation.craneId,
             reservationId: reservation.id,
-            operationType: isVadenje ? "lift" : isSpustanje ? "lower" : "move",
+            operationType: isLiftFromSea ? "lift" : isLowerToSea ? "lower" : "move",
             startTime,
             endTime,
             durationMinutes,
@@ -1566,6 +1622,44 @@ export const appRouter = router({
 
         const { notifyStatusChange } = await import("./services/notifications");
         notifyStatusChange(input.id).catch(console.error);
+
+        return { success: true };
+      }),
+
+    updateLandZone: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        landZoneId: z.string().uuid().nullable(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        await db.update(reservations)
+          .set({ landZoneId: input.landZoneId, updatedAt: new Date() })
+          .where(eq(reservations.id, input.id));
+
+        // Update corresponding active land occupancy if it exists
+        const { landOccupancies } = await import("../drizzle/schema");
+        const active = await db.select().from(landOccupancies)
+          .where(and(eq(landOccupancies.reservationId, input.id), isNull(landOccupancies.returnedAt)))
+          .limit(1);
+        if (active.length > 0 && input.landZoneId) {
+          await db.update(landOccupancies)
+            .set({ zoneId: input.landZoneId, updatedAt: new Date() })
+            .where(eq(landOccupancies.id, active[0].id));
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_land_zone_updated",
+          entityType: "reservation",
+          entityId: input.id,
+          payload: { landZoneId: input.landZoneId },
+        });
 
         return { success: true };
       }),
@@ -1661,6 +1755,7 @@ export const appRouter = router({
         name: z.string().min(1).max(255),
         description: z.string().optional(),
         defaultDurationMin: z.number().int().positive().default(60),
+        operationCategory: z.enum(["lift_from_sea", "lower_to_sea", "move", "maintenance", "other"]).default("other"),
         isActive: z.boolean().default(true),
         sortOrder: z.number().int().default(0),
       }))
@@ -1676,6 +1771,7 @@ export const appRouter = router({
         name: z.string().min(1).max(255).optional(),
         description: z.string().optional(),
         defaultDurationMin: z.number().int().positive().optional(),
+        operationCategory: z.enum(["lift_from_sea", "lower_to_sea", "move", "maintenance", "other"]).optional(),
         isActive: z.boolean().optional(),
         sortOrder: z.number().int().optional(),
       }))
@@ -2237,6 +2333,28 @@ export const appRouter = router({
     list: operatorProcedure
       .query(async () => {
         return listLandZones();
+      }),
+
+    checkCapacity: operatorProcedure
+      .input(z.object({ zoneId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return getLandZoneCapacity(input.zoneId);
+      }),
+
+    getActiveOccupancy: operatorProcedure
+      .input(z.object({ vesselId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        const occ = await getActiveOccupancyByVessel(input.vesselId);
+        if (!occ) return null;
+        const db = await getDb();
+        if (db) {
+          const [lz] = await db.select().from(landZones).where(eq(landZones.id, occ.zoneId)).limit(1);
+          return {
+            ...occ,
+            zone: lz ? { id: lz.id, name: lz.name, code: lz.code } : null,
+          };
+        }
+        return { ...occ, zone: null };
       }),
 
     create: adminProcedure

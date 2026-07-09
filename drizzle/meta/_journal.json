@@ -15,6 +15,13 @@
       "when": 1783539367396,
       "tag": "0001_orange_praxagora",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783595828022,
+      "tag": "0002_hard_photon",
+      "breakpoints": true
     }
   ]
 }

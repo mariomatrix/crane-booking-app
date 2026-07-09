@@ -40,13 +40,31 @@ async function runMigration() {
     if (existingServiceTypes.length === 0) {
         console.log("Seeding service types...");
         await db.insert(serviceTypes).values([
-            { name: "Spuštanje u more", description: "Spuštanje plovila s kopna ili brodogradilišta u more", defaultDurationMin: 60, sortOrder: 1 },
-            { name: "Vađenje iz mora", description: "Vađenje plovila iz mora na kopno ili brodogradilište", defaultDurationMin: 60, sortOrder: 2 },
-            { name: "Premještanje unutar marine", description: "Premještanje plovila unutar prostora marine", defaultDurationMin: 45, sortOrder: 3 },
-            { name: "Zimovanje (dugotrajna pohrana)", description: "Izvlačenje plovila za zimsko odlaganje", defaultDurationMin: 90, sortOrder: 4 },
-            { name: "Ostalo", description: "Ostale operacije — opis u napomeni", defaultDurationMin: 60, sortOrder: 5 },
+            { name: "Spuštanje u more", description: "Spuštanje plovila s kopna ili brodogradilišta u more", defaultDurationMin: 60, sortOrder: 1, operationCategory: "lower_to_sea" },
+            { name: "Vađenje iz mora", description: "Vađenje plovila iz mora na kopno ili brodogradilište", defaultDurationMin: 60, sortOrder: 2, operationCategory: "lift_from_sea" },
+            { name: "Premještanje unutar marine", description: "Premještanje plovila unutar prostora marine", defaultDurationMin: 45, sortOrder: 3, operationCategory: "move" },
+            { name: "Zimovanje (dugotrajna pohrana)", description: "Izvlačenje plovila za zimsko odlaganje", defaultDurationMin: 90, sortOrder: 4, operationCategory: "lift_from_sea" },
+            { name: "Ostalo", description: "Ostale operacije — opis u napomeni", defaultDurationMin: 60, sortOrder: 5, operationCategory: "other" },
         ]);
         console.log("Service types seeded.");
+    } else {
+        // Upgrade existing ones
+        console.log("Updating existing service types with operation categories...");
+        for (const st of existingServiceTypes) {
+            let cat: "lift_from_sea" | "lower_to_sea" | "move" | "maintenance" | "other" = "other";
+            const nameLower = st.name.toLowerCase();
+            if (nameLower.includes("vađenje") || nameLower.includes("vadenje") || nameLower.includes("zimovanje")) {
+                cat = "lift_from_sea";
+            } else if (nameLower.includes("spuštanje") || nameLower.includes("spustanje")) {
+                cat = "lower_to_sea";
+            } else if (nameLower.includes("premještanje") || nameLower.includes("premjestanje")) {
+                cat = "move";
+            } else if (nameLower.includes("održavanje") || nameLower.includes("odrzavanje") || nameLower.includes("servis")) {
+                cat = "maintenance";
+            }
+            await db.update(serviceTypes).set({ operationCategory: cat }).where(eq(serviceTypes.id, st.id));
+        }
+        console.log("Service types updated.");
     }
 
     // ─── Seed: Cranes ────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { Loader2, Send, UserPlus } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { CreateUserDialog } from "@/components/CreateUserDialog";
+import { cn } from "@/lib/utils";
 
 interface AdminReservationFormProps {
     onSuccess?: () => void;
@@ -37,6 +38,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [userNote, setUserNote] = useState("");
     const [contactPhone, setContactPhone] = useState("");
     const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+    const [landZoneId, setLandZoneId] = useState("");
+    const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
 
     const utils = trpc.useUtils();
 
@@ -53,6 +56,23 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     // ── Queries ──────────────────────────────────────────────────────────
     const { data: serviceTypes = [], isLoading: serviceTypesLoading } =
         trpc.serviceType.list.useQuery({ onlyActive: true });
+
+    const selectedServiceType = (serviceTypes as any[]).find(st => st.id === serviceTypeId);
+    const isLiftFromSea = selectedServiceType?.operationCategory === "lift_from_sea";
+    const isLowerToSea = selectedServiceType?.operationCategory === "lower_to_sea";
+
+    const { data: landZones = [] } = trpc.landZone.list.useQuery();
+
+    const { data: zoneCapacity } = trpc.landZone.checkCapacity.useQuery(
+        { zoneId: landZoneId },
+        { enabled: !!landZoneId && landZoneId !== "none" && isLiftFromSea }
+    );
+
+    const { data: activeOccupancy } = trpc.landZone.getActiveOccupancy.useQuery(
+        { vesselId: selectedVesselId },
+        { enabled: !!selectedVesselId && selectedVesselId !== "new" && isLowerToSea }
+    );
+
 
     const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
     const usersList = usersQuery.data?.data || [];
@@ -160,6 +180,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                         vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
                         vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
                         contactPhone,
+                        landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
+                        overrideCapacityCheck: overrideCapacityCheck || undefined,
                     });
                 },
                 onError: (err) => {
@@ -185,6 +207,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                 vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
                 vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
                 contactPhone,
+                landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
+                overrideCapacityCheck: overrideCapacityCheck || undefined,
             });
         }
     };
@@ -269,6 +293,108 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                 </SelectContent>
                             </Select>
                         </div>
+
+                        {/* Land zone display and selection */}
+                        {isLiftFromSea && (
+                            <div className="space-y-4 pt-2 pb-2 bg-gray-50/50 p-3 rounded-lg border border-gray-100">
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-muted-foreground">{lang === "hr" ? "Popunjenost kopnenih zona" : "Dry Berth Occupancy"}</Label>
+                                    <div className="grid grid-cols-3 gap-1.5">
+                                        {(landZones as any[]).map((lz: any) => {
+                                            const percent = lz.totalSpots > 0 ? Math.round((lz.activeSpots / lz.totalSpots) * 100) : 0;
+                                            const isOver80 = percent >= 80;
+                                            return (
+                                                <div
+                                                    key={lz.id}
+                                                    className={cn(
+                                                        "p-1.5 rounded border text-[10px] flex flex-col justify-between bg-white",
+                                                        isOver80 ? "border-amber-300 bg-amber-50/20" : "border-gray-200"
+                                                    )}
+                                                >
+                                                    <span className="font-semibold truncate text-gray-700">{lz.name} ({lz.code})</span>
+                                                    <div className="flex justify-between items-center mt-0.5 text-muted-foreground text-[9px]">
+                                                        <span>{lz.activeSpots}/{lz.totalSpots}</span>
+                                                        <span className={cn(isOver80 && "text-amber-700 font-medium")}>{percent}%</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="text-xs">{lang === "hr" ? "Odredišna zona na kopnu" : "Destination Land Zone"}</Label>
+                                    <Select value={landZoneId} onValueChange={(val) => {
+                                        setLandZoneId(val);
+                                        setOverrideCapacityCheck(false);
+                                    }}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue placeholder={lang === "hr" ? "Odaberite zonu (opcionalno)" : "Select zone (optional)"} />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="none">{lang === "hr" ? "Nije odabrano" : "Not selected"}</SelectItem>
+                                            {(landZones as any[]).map((lz: any) => {
+                                                const percent = lz.totalSpots > 0 ? Math.round((lz.activeSpots / lz.totalSpots) * 100) : 0;
+                                                return (
+                                                    <SelectItem key={lz.id} value={lz.id} className="text-xs">
+                                                        {lz.name} ({lz.code}) — {lz.activeSpots}/{lz.totalSpots} ({percent}%)
+                                                    </SelectItem>
+                                                );
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                {zoneCapacity?.isOver80 && (
+                                    <div className="bg-amber-50 border border-amber-300 rounded-md p-2.5 space-y-1.5">
+                                        <p className="text-amber-800 font-semibold text-[11px] flex items-center gap-1.5">
+                                            ⚠ {lang === "hr"
+                                                ? `Zona je popunjena preko 80% (${zoneCapacity.percentFull}%)`
+                                                : `Zone is over 80% full (${zoneCapacity.percentFull}%)`
+                                            }
+                                        </p>
+                                        <label className="flex items-center gap-2 text-[10px] text-amber-900 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={overrideCapacityCheck}
+                                                onChange={(e) => setOverrideCapacityCheck(e.target.checked)}
+                                                className="h-3.5 w-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                                            />
+                                            <span>
+                                                {lang === "hr"
+                                                    ? "Dopusti kreiranje rezervacije (ručni override)"
+                                                    : "Allow creating reservation (manual override)"
+                                                }
+                                            </span>
+                                        </label>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Current land placement for launch (lower_to_sea) */}
+                        {isLowerToSea && selectedVesselId !== "new" && (
+                            <div className="pt-2 pb-2 bg-blue-50/50 p-3 rounded-lg border border-blue-100 space-y-2">
+                                <Label className="text-xs text-blue-800 font-semibold flex items-center gap-1.5">
+                                    📍 {lang === "hr" ? "Lokacija plovila na kopnu" : "Vessel Land Location"}
+                                </Label>
+                                {activeOccupancy ? (
+                                    <p className="text-xs text-blue-900">
+                                        {lang === "hr"
+                                            ? `Brod se trenutno nalazi u zoni: ${activeOccupancy.zone?.name || "Nepoznato"} (${activeOccupancy.zone?.code || "N/A"})`
+                                            : `Vessel is currently placed in zone: ${activeOccupancy.zone?.name || "Unknown"} (${activeOccupancy.zone?.code || "N/A"})`
+                                        }
+                                    </p>
+                                ) : (
+                                    <p className="text-xs text-amber-800">
+                                        ⚠ {lang === "hr"
+                                            ? "Plovilo trenutno nije registrirano na kopnu u sustavu."
+                                            : "Vessel is currently not registered on land in the system."
+                                        }
+                                    </p>
+                                )}
+                            </div>
+                        )}
 
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
@@ -439,7 +565,19 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !userId || !serviceTypeId || !requestedDate || !craneId || !scheduledTime || !durationMin || !vesselType || !contactPhone || !vesselRegistration}
+                    disabled={
+                        createMutation.isPending || 
+                        !userId || 
+                        !serviceTypeId || 
+                        !requestedDate || 
+                        !craneId || 
+                        !scheduledTime || 
+                        !durationMin || 
+                        !vesselType || 
+                        !contactPhone || 
+                        !vesselRegistration ||
+                        (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
+                    }
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (

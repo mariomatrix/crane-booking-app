@@ -857,6 +857,33 @@ export async function listLandZones() {
   });
 }
 
+export async function getLandZoneCapacity(zoneId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [zone] = await db.select().from(landZones).where(eq(landZones.id, zoneId)).limit(1);
+  if (!zone) throw new Error(`Kopnena zona s ID-em ${zoneId} ne postoji.`);
+
+  const occupancies = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  
+  const activeSpots = occupancies.length;
+  const totalSpots = zone.totalSpots;
+  const availableSpots = Math.max(0, totalSpots - activeSpots);
+  const percentFull = totalSpots > 0 ? Math.round((activeSpots / totalSpots) * 100) : 0;
+  const isOver80 = percentFull >= 80;
+
+  return {
+    id: zone.id,
+    name: zone.name,
+    code: zone.code,
+    totalSpots,
+    activeSpots,
+    availableSpots,
+    percentFull,
+    isOver80,
+  };
+}
+
 export async function createLandZone(data: InsertLandZone) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");

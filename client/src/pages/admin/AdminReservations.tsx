@@ -293,6 +293,15 @@ export default function AdminReservations() {
                       </div>
                     )}
 
+                    {reservation.landZone && (
+                      <div className="text-sm text-muted-foreground flex items-center gap-1.5">
+                        <span className="font-medium">Kopnena zona:</span>{" "}
+                        <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-xs">
+                          {reservation.landZone.name} ({reservation.landZone.code})
+                        </span>
+                      </div>
+                    )}
+
                     {reservation.userNote && (
                       <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                         <span className="font-medium">Napomena korisnika:</span> {reservation.userNote}

@@ -105,6 +105,7 @@ export default function AdminCalendar() {
     const waitingListQuery = trpc.waitingList.listAll.useQuery({ pageSize: 200 });
     const waitingList = waitingListQuery.data?.data || [];
     const { data: sysSettings } = trpc.settings.get.useQuery();
+    const { data: landZones = [] } = trpc.landZone.list.useQuery();
     const utils = trpc.useUtils();
 
     const workStart = sysSettings?.workdayStart ?? "08:00";
@@ -125,6 +126,9 @@ export default function AdminCalendar() {
     const [editStart, setEditStart] = useState("");
     const [editEnd, setEditEnd] = useState("");
     const [editCraneId, setEditCraneId] = useState("");
+    const [editLandZoneId, setEditLandZoneId] = useState("none");
+
+    const updateLandZoneMutation = trpc.reservation.updateLandZone.useMutation();
 
     // Edit Waiting List Form State
     const [isWaitingEditOpen, setIsWaitingEditOpen] = useState(false);
@@ -260,6 +264,7 @@ export default function AdminCalendar() {
             setEditStart(format(new Date(String(res.scheduledStart)), "HH:mm"));
             setEditEnd(format(new Date(String(res.scheduledEnd)), "HH:mm"));
             setEditCraneId(String(res.craneId));
+            setEditLandZoneId(res.landZoneId || "none");
             setIsEditOpen(true);
         }
     };
@@ -280,7 +285,22 @@ export default function AdminCalendar() {
             scheduledEnd: endDate,
             craneId: editCraneId
         }, {
-            onSuccess: () => setIsEditOpen(false)
+            onSuccess: () => {
+                const finalZoneId = editLandZoneId === "none" ? null : editLandZoneId;
+                if (finalZoneId !== (editingRes.landZoneId || null)) {
+                    updateLandZoneMutation.mutate({
+                        id: editingRes.id,
+                        landZoneId: finalZoneId,
+                    }, {
+                        onSuccess: () => {
+                            utils.reservation.listAll.invalidate();
+                            setIsEditOpen(false);
+                        }
+                    });
+                } else {
+                    setIsEditOpen(false);
+                }
+            }
         });
     };
 
@@ -322,7 +342,7 @@ export default function AdminCalendar() {
                 id: String(r.id),
                 title: r.isMaintenance
                     ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselRegistration || "Plovilo"} - ${r.vesselWeightKg} t`,
+                    : `${r.vesselRegistration || "Plovilo"}${r.landZone ? ` (${r.landZone.code})` : ""} - ${r.vesselWeightKg} t`,
                 start,
                 end,
                 backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
@@ -642,6 +662,18 @@ export default function AdminCalendar() {
                                                 <SelectContent>
                                                     {cranesList.map((c: any) => (
                                                         <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label>Kopnena zona (Mjesto na kopnu)</Label>
+                                            <Select value={editLandZoneId} onValueChange={setEditLandZoneId}>
+                                                <SelectTrigger><SelectValue placeholder="Odaberi zonu (opcionalno)" /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">Nije odabrano</SelectItem>
+                                                    {landZones.map((lz: any) => (
+                                                        <SelectItem key={lz.id} value={String(lz.id)}>{lz.name} ({lz.code})</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>

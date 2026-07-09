@@ -20,6 +20,7 @@ export interface UserOption {
     id: string;
     name: string | null;
     email: string;
+    oib?: string | null;
 }
 
 interface UserSearchComboboxProps {
@@ -45,7 +46,7 @@ export function UserSearchCombobox({
 
     const selectedUser = value !== "all" ? users.find((u) => u.id === value) : null;
     const displayLabel = selectedUser
-        ? (selectedUser.name || selectedUser.email)
+        ? (selectedUser.name || selectedUser.email) + (selectedUser.oib ? ` (${selectedUser.oib})` : "")
         : allLabel;
 
     return (
@@ -94,6 +95,7 @@ export function UserSearchCombobox({
                                         keywords={[
                                             user.name || "",
                                             user.email,
+                                            user.oib || "",
                                         ]}
                                         onSelect={() => {
                                             onChange(user.id);
@@ -111,7 +113,7 @@ export function UserSearchCombobox({
                                                 {user.name || "—"}
                                             </span>
                                             <span className="truncate text-xs text-muted-foreground">
-                                                {user.email}
+                                                {user.oib ? `${user.oib} · ` : ""}{user.email}
                                             </span>
                                         </div>
                                     </CommandItem>

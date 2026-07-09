@@ -29,6 +29,13 @@ export const craneStatusEnum = pgEnum("crane_status", ["active", "inactive", "ma
 export const craneTypeEnum = pgEnum("crane_type", ["travelift", "portalna", "mobilna", "ostalo"]);
 export const vesselTypeEnum = pgEnum("vessel_type", ["jedrilica", "motorni", "katamaran", "ostalo"]);
 export const waitingListStatusEnum = pgEnum("waiting_list_status", ["waiting", "notified", "accepted", "expired", "cancelled"]);
+export const operationCategoryEnum = pgEnum("operation_category", [
+    "lift_from_sea",   // Dizanje iz mora → brod ide na kopno
+    "lower_to_sea",    // Spuštanje u more → brod napušta kopno
+    "move",            // Premještanje
+    "maintenance",     // Tehničko održavanje
+    "other",           // Ostale operacije
+]);
 
 // ─── Users ───────────────────────────────────────────────────────────
 export const users = pgTable("users", {
@@ -58,6 +65,7 @@ export const serviceTypes = pgTable("service_types", {
     name: varchar("name", { length: 255 }).notNull(),
     description: text("description"),
     defaultDurationMin: integer("default_duration_min").default(60).notNull(),
+    operationCategory: operationCategoryEnum("operation_category").default("other").notNull(),
     isActive: boolean("is_active").default(true).notNull(),
     sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -133,6 +141,9 @@ export const reservations = pgTable("reservations", {
     rejectionReason: text("rejection_reason"),
     cancelReason: text("cancel_reason"),
     cancelledByType: varchar("cancelled_by_type", { length: 20 }), // 'user' | 'admin'
+
+    // Land zone (Kopno) — zona na kopnu za operacije Dizanje/Spuštanje
+    landZoneId: uuid("land_zone_id"),  // forward-ref resolved at runtime
 
     // Admin actions
     approvedBy: uuid("approved_by").references(() => users.id),
@@ -267,6 +278,8 @@ export const emailVerificationTokens = pgTable("email_verification_tokens", {
 });
 
 // ─── Types ────────────────────────────────────────────────────────────
+export type OperationCategory = typeof operationCategoryEnum.enumValues[number];
+
 export type InsertUser = typeof users.$inferInsert;
 export type SelectUser = typeof users.$inferSelect;
 export type User = SelectUser;
