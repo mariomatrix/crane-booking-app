@@ -35,7 +35,7 @@ export default function ReportLandOccupancy() {
     const reportTitle = `Plovila na kopnu (${statusLabel})${zoneSuffix}`;
 
     const excelExportData = reportData.map(item => {
-        const days = item.returnedAt 
+        const days = item.returnedAt
             ? Math.ceil((new Date(item.returnedAt).getTime() - new Date(item.liftedAt).getTime()) / (1000 * 60 * 60 * 24))
             : Math.ceil((new Date().getTime() - new Date(item.liftedAt).getTime()) / (1000 * 60 * 60 * 24));
         return {
@@ -46,10 +46,10 @@ export default function ReportLandOccupancy() {
             "Zona": item.zoneName || "",
             "Mjesto": item.spotNumber || "",
             "Datum dizanja": format(new Date(item.liftedAt), "dd.MM.yyyy"),
-            "Datum povratka": item.returnedAt 
-                ? format(new Date(item.returnedAt), "dd.MM.yyyy") 
-                : (item as any).hasLaunchReservation 
-                    ? "Najava spuštanja u more" 
+            "Datum povratka": item.returnedAt
+                ? format(new Date(item.returnedAt), "dd.MM.yyyy")
+                : (item as any).hasLaunchReservation
+                    ? "Najava spuštanja u more"
                     : "Na kopnu",
             "Broj dana boravka": days,
         };
@@ -57,7 +57,7 @@ export default function ReportLandOccupancy() {
 
     return (
         <div className="space-y-6">
-            <ReportPageNav title="Plovila na kopnu (Suhovezan)" />
+            <ReportPageNav title="Plovila na kopnu" />
 
             <Card className="no-print report-filters-card">
                 <CardHeader className="py-4">
@@ -104,11 +104,11 @@ export default function ReportLandOccupancy() {
                         </div>
                         <div className="space-y-2">
                             <Label>Pretraga po OIB-u</Label>
-                            <Input 
-                                type="text" 
-                                placeholder="Upišite OIB..." 
-                                value={oib} 
-                                onChange={(e) => setOib(e.target.value.replace(/\D/g, "").slice(0, 11))} 
+                            <Input
+                                type="text"
+                                placeholder="Upišite OIB..."
+                                value={oib}
+                                onChange={(e) => setOib(e.target.value.replace(/\D/g, "").slice(0, 11))}
                                 maxLength={11}
                             />
                         </div>
@@ -122,7 +122,7 @@ export default function ReportLandOccupancy() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <ExportActions 
+                    <ExportActions
                         excelData={excelExportData}
                         excelFileName="Plovila_na_kopnu"
                         pdfDocument={<LandOccupancyPdf data={reportData} statusLabel={`${statusLabel}${zoneSuffix}`} marinaName="PŠD Špinut Marina" />}
@@ -148,7 +148,7 @@ export default function ReportLandOccupancy() {
                                 </TableHeader>
                                 <TableBody>
                                     {reportData.map((item, idx) => {
-                                        const days = item.returnedAt 
+                                        const days = item.returnedAt
                                             ? Math.ceil((new Date(item.returnedAt).getTime() - new Date(item.liftedAt).getTime()) / (1000 * 60 * 60 * 24))
                                             : Math.ceil((new Date().getTime() - new Date(item.liftedAt).getTime()) / (1000 * 60 * 60 * 24));
                                         return (
@@ -165,18 +165,18 @@ export default function ReportLandOccupancy() {
                                                 </TableCell>
                                                 <TableCell className="font-mono">{format(new Date(item.liftedAt), "dd.MM.yyyy")}</TableCell>
                                                 <TableCell className="font-mono">
-                                                     {item.returnedAt ? (
-                                                         format(new Date(item.returnedAt), "dd.MM.yyyy")
-                                                     ) : (item as any).hasLaunchReservation ? (
-                                                         <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] uppercase font-bold">
-                                                             Najava spuštanja
-                                                         </Badge>
-                                                     ) : (
-                                                         <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] uppercase font-bold">
-                                                             Na kopnu
-                                                         </Badge>
-                                                     )}
-                                                 </TableCell>
+                                                    {item.returnedAt ? (
+                                                        format(new Date(item.returnedAt), "dd.MM.yyyy")
+                                                    ) : (item as any).hasLaunchReservation ? (
+                                                        <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 text-[10px] uppercase font-bold">
+                                                            Najava spuštanja
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[10px] uppercase font-bold">
+                                                            Na kopnu
+                                                        </Badge>
+                                                    )}
+                                                </TableCell>
                                                 <TableCell className="text-right font-mono font-bold">{days} dana</TableCell>
                                             </TableRow>
                                         );
@@ -192,7 +192,7 @@ export default function ReportLandOccupancy() {
                             </Table>
                         </div>
 
-                        <ReportFooter 
+                        <ReportFooter
                             summaryItems={[
                                 { label: "Ukupno plovila na popisu", value: reportData.length }
                             ]}

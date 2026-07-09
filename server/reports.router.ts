@@ -1,14 +1,14 @@
 import { router, adminProcedure, operatorProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
-import { 
-    reservations, 
-    users, 
-    vessels, 
-    cranes, 
-    serviceTypes, 
-    landOccupancies, 
-    landZones, 
+import {
+    reservations,
+    users,
+    vessels,
+    cranes,
+    serviceTypes,
+    landOccupancies,
+    landZones,
     waitingList,
     maintenanceBlocks
 } from "../drizzle/schema";
@@ -311,7 +311,7 @@ export const reportsRouter = router({
             };
         }),
 
-    // 🏗️ REP-05: Plovila na kopnu (Suhovezan) (Admin only)
+    // 🏗️ REP-05: Plovila na kopnu (Admin only)
     landOccupancy: adminProcedure
         .input(z.object({
             status: z.enum(["active", "history", "all"]).default("all"),
@@ -337,7 +337,7 @@ export const reportsRouter = router({
                 startDate.setHours(0, 0, 0, 0);
                 const endDate = new Date(input.to);
                 endDate.setHours(23, 59, 59, 999);
-                
+
                 const dateFilter = or(
                     and(gte(landOccupancies.liftedAt, startDate), lte(landOccupancies.liftedAt, endDate)),
                     and(gte(landOccupancies.returnedAt, startDate), lte(landOccupancies.returnedAt, endDate))

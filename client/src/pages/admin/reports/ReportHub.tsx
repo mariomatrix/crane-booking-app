@@ -1,14 +1,14 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
-import { 
-    CalendarDays, 
-    BarChart3, 
-    Users, 
-    Layers, 
-    Anchor, 
-    ListOrdered, 
-    ArrowRight 
+import {
+    CalendarDays,
+    BarChart3,
+    Users,
+    Layers,
+    Anchor,
+    ListOrdered,
+    ArrowRight
 } from "lucide-react";
 
 export default function ReportHub() {
@@ -44,7 +44,7 @@ export default function ReportHub() {
             color: "text-amber-600 border-amber-100 bg-amber-50/50 dark:bg-amber-950/10 dark:border-amber-950/20",
         },
         {
-            title: "Plovila na kopnu (Suhovezan)",
+            title: "Plovila na kopnu",
             description: "Evidencija plovila koja se nalaze na kopnu u suhom vezu. Prikazuje vlasnika (OIB), zonu, mjesto i duljinu boravka.",
             path: "/admin/reports/land-occupancy",
             icon: Anchor,
@@ -81,7 +81,7 @@ export default function ReportHub() {
                                 <CardDescription className="text-sm text-muted-foreground line-clamp-3">
                                     {report.description}
                                 </CardDescription>
-                                <Button 
+                                <Button
                                     className="w-full mt-4 flex items-center justify-center gap-1.5"
                                     variant="outline"
                                     onClick={() => setLocation(report.path)}
