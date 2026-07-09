@@ -30,6 +30,7 @@ import {
   Home,
   Layers,
   Sun,
+  Moon,
   CalendarOff,
   LogOut,
   PanelLeft,
@@ -130,6 +131,23 @@ function DashboardLayoutContent({
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
 
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved === "light" || saved === "dark") return saved;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(prev => prev === "light" ? "dark" : "light");
+
   const isOperator = user?.role === "operator";
 
   const allMenuItems = [
@@ -137,7 +155,7 @@ function DashboardLayoutContent({
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
-    { icon: Anchor, label: lang === "hr" ? "Kopnena mjesta" : "Dry Berths", path: "/admin/land-zones" },
+    { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
     { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja kopno" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
     { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types" },
@@ -151,7 +169,7 @@ function DashboardLayoutContent({
     ),
     { icon: History, label: t.nav.auditLog, path: "/admin/audit-log", adminOnly: true },
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
-    { icon: Globe, label: t.nav.backToWeb, path: "/" },
+    { icon: Globe, label: lang === "hr" ? "Početna stranica" : "Home Page", path: "/" },
   ];
 
   const menuItems = isOperator
@@ -222,7 +240,11 @@ function DashboardLayoutContent({
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
               {!isCollapsed ? (
-                <div className="flex flex-col min-w-0 shrink justify-center">
+                <div 
+                  className="flex flex-col min-w-0 shrink justify-center cursor-pointer hover:opacity-85 transition-opacity"
+                  onClick={() => setLocation("/")}
+                  title={lang === "hr" ? "Početna stranica" : "Home Page"}
+                >
                   <img src="/logo.png" alt="Logo" className="h-8 w-auto object-contain max-w-[120px]" />
                   <span className="font-semibold text-xs text-muted-foreground tracking-tight truncate mt-1">
                     {t.nav.adminPanel}
@@ -230,7 +252,20 @@ function DashboardLayoutContent({
                 </div>
               ) : null}
               {!isCollapsed && (
-                <div className="ml-auto">
+                <div className="ml-auto flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={toggleTheme}
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 focus-visible:ring-0"
+                    title={theme === "light" ? (lang === "hr" ? "Tamni način" : "Dark Mode") : (lang === "hr" ? "Svijetli način" : "Light Mode")}
+                  >
+                    {theme === "light" ? (
+                      <Moon className="h-4 w-4" />
+                    ) : (
+                      <Sun className="h-4 w-4" />
+                    )}
+                  </Button>
                   <LanguageSelector variant="ghost" showLabel={false} />
                 </div>
               )}
@@ -291,6 +326,22 @@ function DashboardLayoutContent({
                 >
                   <User className="mr-2 h-4 w-4" />
                   <span>{t.nav.profile}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={toggleTheme}
+                  className="cursor-pointer"
+                >
+                  {theme === "light" ? (
+                    <>
+                      <Moon className="mr-2 h-4 w-4" />
+                      <span>{lang === "hr" ? "Tamni način" : "Dark Mode"}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sun className="mr-2 h-4 w-4" />
+                      <span>{lang === "hr" ? "Svijetli način" : "Light Mode"}</span>
+                    </>
+                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={logout}

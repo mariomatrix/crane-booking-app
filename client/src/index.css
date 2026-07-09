@@ -242,12 +242,36 @@
 
 /* ─── Print Media Styles ────────────────────────────────────────────── */
 @media print {
-  body {
+  html, body, :root, .dark {
     background: white !important;
+    background-color: white !important;
     color: black !important;
-    font-size: 11pt !important;
+    --background: oklch(1 0 0) !important;
+    --foreground: oklch(0.18 0.02 250) !important;
+    --card: oklch(1 0 0) !important;
+    --card-foreground: oklch(0.18 0.02 250) !important;
+    --popover: oklch(1 0 0) !important;
+    --popover-foreground: oklch(0.18 0.02 250) !important;
+    --primary: oklch(0.42 0.12 250) !important;
+    --primary-foreground: oklch(0.98 0 0) !important;
+    --secondary: oklch(0.96 0.005 250) !important;
+    --secondary-foreground: oklch(0.35 0.02 250) !important;
+    --muted: oklch(0.96 0.005 250) !important;
+    --muted-foreground: oklch(0.5 0.02 250) !important;
+    --accent: oklch(0.94 0.01 250) !important;
+    --accent-foreground: oklch(0.18 0.02 250) !important;
+    --border: oklch(0.91 0.005 250) !important;
+    --input: oklch(0.91 0.005 250) !important;
   }
 
+  /* Force background colors and texts to look normal for printing */
+  * {
+    color: black !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Hide navigation, sidebars, buttons, and settings */
   nav, 
   aside, 
   header:not(.print-header), 
@@ -273,6 +297,8 @@
     margin: 0 !important;
     border: none !important;
     box-shadow: none !important;
+    background: white !important;
+    background-color: white !important;
   }
 
   /* Tables formatting for print */
@@ -292,6 +318,7 @@
     border: 1px solid #ddd !important;
     font-size: 9pt !important;
     color: black !important;
+    background: transparent !important;
   }
 
   th {
@@ -301,10 +328,22 @@
     print-color-adjust: exact !important;
   }
 
-  /* Force colors and backgrounds to render when printing */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+  /* Preserve colors/backgrounds for badges in print */
+  .status-badge-pending {
+    background-color: #fef3c7 !important;
+    color: #d97706 !important;
+  }
+  .status-badge-approved {
+    background-color: #dcfce7 !important;
+    color: #15803d !important;
+  }
+  .status-badge-rejected {
+    background-color: #fee2e2 !important;
+    color: #b91c1c !important;
+  }
+  .status-badge-cancelled {
+    background-color: #f3f4f6 !important;
+    color: #4b5563 !important;
   }
 
   /* Page margins and layout */
