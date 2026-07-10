@@ -615,7 +615,7 @@ export function CalendarSchedulePdf({
                                             );
                                         })}
                                         {slotRes.length === 0 && (
-                                            <Text style={{ fontSize: 7, color: "#cbd5e1", fontStyle: "italic", paddingTop: 6 }}>
+                                            <Text style={{ fontSize: 7, color: "#cbd5e1", paddingTop: 6 }}>
                                                 Slobodno
                                             </Text>
                                         )}
