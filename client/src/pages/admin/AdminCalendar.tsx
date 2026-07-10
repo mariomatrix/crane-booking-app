@@ -344,7 +344,7 @@ export default function AdminCalendar() {
                 id: String(r.id),
                 title: r.isMaintenance
                     ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselRegistration || "Plovilo"}${r.landZone ? ` (${r.landZone.code})` : ""} - ${r.vesselWeightKg} t`,
+                    : `${r.vesselRegistration || "Plovilo"}${r.landZone ? ` (${r.landZone.code})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
                 start,
                 end,
                 backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
