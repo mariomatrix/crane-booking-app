@@ -19,16 +19,16 @@ interface ReportHeaderProps {
 export function ReportHeader({ title, dateFrom, dateTo }: ReportHeaderProps) {
     const { data: settings } = trpc.settings.get.useQuery();
     const logo = settings?.marinaLogo || "";
-    const name = settings?.marinaName || "PŠD Špinut Marina";
+    const name = settings?.marinaName || "PŠD Špinut";
 
     return (
         <div className="border-b pb-6 mb-6 flex items-start justify-between print-header">
             <div className="space-y-1">
                 {logo ? (
-                    <img 
-                        src={logo} 
-                        alt="Logo" 
-                        className="h-14 w-auto object-contain mb-3 max-w-[200px]" 
+                    <img
+                        src={logo}
+                        alt="Logo"
+                        className="h-14 w-auto object-contain mb-3 max-w-[200px]"
                     />
                 ) : (
                     <div className="text-xl font-bold tracking-tight text-primary mb-2">⚓ {name}</div>
@@ -36,7 +36,7 @@ export function ReportHeader({ title, dateFrom, dateTo }: ReportHeaderProps) {
                 <h1 className="text-2xl font-bold tracking-tight text-foreground">{title}</h1>
                 {(dateFrom || dateTo) && (
                     <p className="text-sm text-muted-foreground">
-                        Razdoblje: {dateFrom ? format(new Date(dateFrom), "dd.MM.yyyy") : ""} 
+                        Razdoblje: {dateFrom ? format(new Date(dateFrom), "dd.MM.yyyy") : ""}
                         {dateTo ? ` – ${format(new Date(dateTo), "dd.MM.yyyy")}` : ""}
                     </p>
                 )}

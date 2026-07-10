@@ -114,6 +114,7 @@ import {
   landWaitingList,
   landOccupancies,
   landZones,
+  vessels,
 } from "../drizzle/schema";
 import { and, eq, gte, isNull, or, lte, desc, asc, sql, ne } from "drizzle-orm";
 import crypto from "crypto";
@@ -1337,6 +1338,10 @@ export const appRouter = router({
               name: cranes.name,
               location: cranes.location,
             },
+            serviceType: {
+              id: serviceTypes.id,
+              name: serviceTypes.name,
+            },
             approver: {
               id: sql<string>`approver_users.id`,
               name: sql<string>`approver_users.name`,
@@ -1351,6 +1356,7 @@ export const appRouter = router({
           .from(reservations)
           .leftJoin(users, eq(reservations.userId, users.id))
           .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
           .leftJoin(landZones, eq(reservations.landZoneId, landZones.id))
           .leftJoin(sql`${users} as approver_users`, eq(reservations.approvedBy, sql`approver_users.id`))
           .leftJoin(unreadCountSubquery, eq(reservations.id, unreadCountSubquery.reservationId))
@@ -1363,6 +1369,7 @@ export const appRouter = router({
             ...row.reservation,
             crane: row.crane?.id ? row.crane : null,
             user: row.user?.id ? row.user : null,
+            serviceType: row.serviceType?.id ? row.serviceType : null,
             approver: row.approver?.id ? row.approver : null,
             landZone: row.landZone?.id ? row.landZone : null,
             unreadCount: row.unreadCount

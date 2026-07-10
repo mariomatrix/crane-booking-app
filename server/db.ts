@@ -98,17 +98,17 @@ export async function getUserById(id: string) {
 export async function listAllUsers(limit = 100, offset = 0) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
-  
+
   const [countRes] = await db.select({ count: sql<number>`count(*)` })
     .from(users)
     .where(isNull(users.anonymizedAt));
-    
+
   const data = await db.select().from(users)
     .where(isNull(users.anonymizedAt))
     .orderBy(users.name, users.email)
     .limit(limit)
     .offset(offset);
-    
+
   return { data, total: Number(countRes.count) };
 }
 
@@ -240,18 +240,18 @@ export async function listReservationsByUser(userId: string) {
 export async function listAllReservations(status?: string, limit = 50, offset = 0) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
-  
+
   let countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
   let dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(limit).offset(offset);
-  
+
   if (status) {
     countQuery.where(eq(reservations.status, status as any));
     dataQuery.where(eq(reservations.status, status as any));
   }
-  
+
   const [countRes] = await countQuery;
   const data = await dataQuery;
-  
+
   return { data, total: Number(countRes.count) };
 }
 
@@ -339,10 +339,10 @@ export async function listWaitingListByUser(userId: string) {
 export async function listAllWaiting(limit = 50, offset = 0) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
-  
+
   const [countRes] = await db.select({ count: sql<number>`count(*)` }).from(waitingList);
   const data = await db.select().from(waitingList).orderBy(desc(waitingList.createdAt)).limit(limit).offset(offset);
-  
+
   return { data, total: Number(countRes.count) };
 }
 
@@ -378,7 +378,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   bufferMinutes: "15",
   workdayStart: "08:00",
   workdayEnd: "16:00",
-  marinaName: "PŠD Špinut Marina",
+  marinaName: "PŠD Špinut",
   marinaLogo: "",
 };
 
@@ -507,11 +507,11 @@ export async function seedLandZones() {
   if (existing.length > 0) return; // already seeded
   const defaultZones = [
     { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
-    { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
-    { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
-    { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
-    { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
-    { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
+    { name: "Arla 1", code: "A1", totalSpots: 18, sortOrder: 1 },
+    { name: "Arla 2", code: "A2", totalSpots: 30, sortOrder: 2 },
+    { name: "Arla 3", code: "A3", totalSpots: 50, sortOrder: 3 },
+    { name: "Zapadna obala", code: "ZO", totalSpots: 16, sortOrder: 4 },
+    { name: "Lukobran", code: "LB", totalSpots: 50, sortOrder: 5 },
   ];
   await db.insert(landZones).values(defaultZones);
 }
@@ -869,7 +869,7 @@ export async function getLandZoneCapacity(zoneId: string) {
 
   const occupancies = await db.select().from(landOccupancies)
     .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
-  
+
   const activeSpots = occupancies.length;
   const totalSpots = zone.totalSpots;
   const availableSpots = Math.max(0, totalSpots - activeSpots);
@@ -993,7 +993,7 @@ export async function listOccupancyHistory(filters?: { zoneId?: string; userId?:
     .select({ count: sql<number>`count(*)` })
     .from(landOccupancies)
     .where(and(...conditions));
-  
+
   const data = await db
     .select({
       id: landOccupancies.id,
@@ -1032,7 +1032,7 @@ export async function listOccupancyHistory(filters?: { zoneId?: string; userId?:
     .orderBy(desc(landOccupancies.returnedAt))
     .limit(filters?.limit ?? 50)
     .offset(filters?.offset ?? 0);
-     
+
   return { data, total: Number(countRes[0]?.count ?? 0) };
 }
 
@@ -1111,7 +1111,7 @@ export async function listLandWaitingList() {
 export async function addLandWaitingListEntry(data: Omit<InsertLandWaitingList, "position">) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  
+
   const existing = await db.select().from(landWaitingList)
     .where(and(
       eq(landWaitingList.userId, data.userId),
@@ -1121,7 +1121,7 @@ export async function addLandWaitingListEntry(data: Omit<InsertLandWaitingList, 
 
   const maxPosRes = await db.select({ maxPos: sql<number>`max(position)` }).from(landWaitingList);
   const nextPos = (maxPosRes[0]?.maxPos ?? 0) + 1;
-  
+
   const res = await db.insert(landWaitingList).values({
     ...data,
     position: nextPos,
@@ -1159,11 +1159,11 @@ export async function listCraneOps(filters?: { craneId?: string; limit?: number;
   if (!db) return { data: [], total: 0 };
   const conditions = [];
   if (filters?.craneId) conditions.push(eq(craneOperationLog.craneId, filters.craneId));
-  
+
   const countRes = await db.select({ count: sql<number>`count(*)` })
     .from(craneOperationLog)
     .where(conditions.length > 0 ? and(...conditions) : undefined);
-     
+
   const data = await db
     .select({
       id: craneOperationLog.id,
@@ -1192,7 +1192,7 @@ export async function listCraneOps(filters?: { craneId?: string; limit?: number;
     .orderBy(desc(craneOperationLog.startTime))
     .limit(filters?.limit ?? 50)
     .offset(filters?.offset ?? 0);
-     
+
   return { data, total: Number(countRes[0]?.count ?? 0) };
 }
 
@@ -1207,7 +1207,7 @@ export async function getCraneStats() {
     })
     .from(craneOperationLog)
     .groupBy(craneOperationLog.craneId);
-     
+
   const allCranes = await db.select().from(cranes);
   return allCranes.map(c => {
     const crStat = stats.find(s => s.craneId === c.id);
@@ -1221,4 +1221,4 @@ export async function getCraneStats() {
       opsCount: crStat?.opsCount ?? 0,
     };
   });
-}
+}

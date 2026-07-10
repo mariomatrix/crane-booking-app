@@ -93,10 +93,10 @@ export default function ReportWaitingList() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <ExportActions 
+                    <ExportActions
                         excelData={excelExportData}
                         excelFileName="Pregled_liste_cekanja"
-                        pdfDocument={<WaitingListPdf data={reportData} statusLabel={statusLabel} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<WaitingListPdf data={reportData} statusLabel={statusLabel} marinaName="PŠD Špinut" />}
                         pdfFileName="Pregled_liste_cekanja"
                     />
 
@@ -150,7 +150,7 @@ export default function ReportWaitingList() {
                             </Table>
                         </div>
 
-                        <ReportFooter 
+                        <ReportFooter
                             summaryItems={[
                                 { label: "Ukupno na listi", value: reportData.length }
                             ]}

@@ -80,7 +80,7 @@ export default function ReportSchedule() {
                         <TableHead>Dizalica</TableHead>
                         {days.map((day, idx) => (
                             <TableHead key={idx} className="text-center font-medium">
-                                {format(day, "EEEE")}<br/>
+                                {format(day, "EEEE")}<br />
                                 <span className="text-xs text-muted-foreground">{format(day, "dd.MM.yyyy")}</span>
                             </TableHead>
                         ))}
@@ -92,9 +92,9 @@ export default function ReportSchedule() {
                             <TableCell className="font-semibold">{crane.name}</TableCell>
                             {days.map((day, dIdx) => {
                                 const dayStr = format(day, "yyyy-MM-dd");
-                                const dayReservations = reservationsList.filter(r => 
-                                    r.craneId === crane.id && 
-                                    r.scheduledStart && 
+                                const dayReservations = reservationsList.filter(r =>
+                                    r.craneId === crane.id &&
+                                    r.scheduledStart &&
                                     format(new Date(r.scheduledStart), "yyyy-MM-dd") === dayStr
                                 );
                                 return (
@@ -102,8 +102,8 @@ export default function ReportSchedule() {
                                         <div className="space-y-1">
                                             {dayReservations.map((r, rIdx) => (
                                                 <div key={rIdx} className="text-[11px] p-1.5 border rounded bg-slate-50 dark:bg-slate-900 leading-tight">
-                                                    <span className="font-bold">{format(new Date(r.scheduledStart!), "HH:mm")}</span> - {r.clientName}<br/>
-                                                    <span className="text-muted-foreground">{r.vesselName} ({r.vesselRegistration})</span><br/>
+                                                    <span className="font-bold">{format(new Date(r.scheduledStart!), "HH:mm")}</span> - {r.clientName}<br />
+                                                    <span className="text-muted-foreground">{r.vesselName} ({r.vesselRegistration})</span><br />
                                                     <span className="text-[10px] text-blue-600 font-medium">{r.serviceTypeName}</span>
                                                 </div>
                                             ))}
@@ -175,10 +175,10 @@ export default function ReportSchedule() {
 
                     <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
                         <div className="flex items-center space-x-2">
-                            <Checkbox 
-                                id="maint-checkbox" 
-                                checked={includeMaintenance} 
-                                onCheckedChange={(v) => setIncludeMaintenance(!!v)} 
+                            <Checkbox
+                                id="maint-checkbox"
+                                checked={includeMaintenance}
+                                onCheckedChange={(v) => setIncludeMaintenance(!!v)}
                             />
                             <Label htmlFor="maint-checkbox" className="text-sm font-normal cursor-pointer">
                                 Prikaži planirana održavanja/blokade
@@ -193,22 +193,22 @@ export default function ReportSchedule() {
                     </div>
 
                     <div className="flex flex-wrap gap-2 border-t pt-4">
-                        <Button 
-                            variant={viewMode === "daily-hours" ? "default" : "outline"} 
+                        <Button
+                            variant={viewMode === "daily-hours" ? "default" : "outline"}
                             size="sm"
                             onClick={() => setViewMode("daily-hours")}
                         >
                             Dnevni (po satima)
                         </Button>
-                        <Button 
-                            variant={viewMode === "daily-cranes" ? "default" : "outline"} 
+                        <Button
+                            variant={viewMode === "daily-cranes" ? "default" : "outline"}
                             size="sm"
                             onClick={() => setViewMode("daily-cranes")}
                         >
                             Dnevni (po dizalicama)
                         </Button>
-                        <Button 
-                            variant={viewMode === "weekly" ? "default" : "outline"} 
+                        <Button
+                            variant={viewMode === "weekly" ? "default" : "outline"}
                             size="sm"
                             onClick={() => setViewMode("weekly")}
                         >
@@ -225,10 +225,10 @@ export default function ReportSchedule() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <ExportActions 
+                    <ExportActions
                         excelData={excelExportData}
                         excelFileName="Plan_rada_dizalica"
-                        pdfDocument={<CraneSchedulePdf data={reservationsList} dateFrom={from} dateTo={to} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<CraneSchedulePdf data={reservationsList} dateFrom={from} dateTo={to} marinaName="PŠD Špinut" />}
                         pdfFileName="Plan_rada_dizalica"
                     />
 
@@ -345,7 +345,7 @@ export default function ReportSchedule() {
                             </div>
                         )}
 
-                        <ReportFooter 
+                        <ReportFooter
                             summaryItems={[
                                 { label: "Ukupno zahtjeva", value: reservationsList.length },
                                 { label: "Kumulativno vrijeme", value: (reservationsList.reduce((acc, curr) => acc + (curr.durationMin || 0), 0) / 60).toFixed(1) + " h" }

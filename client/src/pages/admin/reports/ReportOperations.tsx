@@ -84,10 +84,10 @@ export default function ReportOperations() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <ExportActions 
+                    <ExportActions
                         excelData={excelExportData}
                         excelFileName="Analitika_tipova_operacija"
-                        pdfDocument={<OperationTypesPdf data={details} summaries={summaries} dateFrom={from} dateTo={to} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<OperationTypesPdf data={details} summaries={summaries} dateFrom={from} dateTo={to} marinaName="PŠD Špinut" />}
                         pdfFileName="Analitika_tipova_operacija"
                     />
 
@@ -173,7 +173,7 @@ export default function ReportOperations() {
                             </Table>
                         </div>
 
-                        <ReportFooter 
+                        <ReportFooter
                             summaryItems={[
                                 { label: "Ukupno odrađeno operacija", value: grandTotalOperations },
                                 { label: "Sveukupno radnih sati", value: (details.reduce((acc, curr) => acc + (curr.durationMin || 0), 0) / 60).toFixed(1) + " h" }

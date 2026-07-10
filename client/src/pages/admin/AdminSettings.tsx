@@ -22,7 +22,7 @@ export default function AdminSettings() {
     const [bufferMin, setBufferMin] = useState("15");
     const [workStart, setWorkStart] = useState("08:00");
     const [workEnd, setWorkEnd] = useState("16:00");
-    const [marinaName, setMarinaName] = useState("PŠD Špinut Marina");
+    const [marinaName, setMarinaName] = useState("PŠD Špinut");
     const [marinaLogo, setMarinaLogo] = useState("");
 
     useEffect(() => {
@@ -31,7 +31,7 @@ export default function AdminSettings() {
             setBufferMin(settings.bufferMinutes ?? "15");
             setWorkStart(settings.workdayStart ?? "08:00");
             setWorkEnd(settings.workdayEnd ?? "16:00");
-            setMarinaName(settings.marinaName ?? "PŠD Špinut Marina");
+            setMarinaName(settings.marinaName ?? "PŠD Špinut");
             setMarinaLogo(settings.marinaLogo ?? "");
         }
     }, [settings]);
@@ -179,7 +179,7 @@ export default function AdminSettings() {
                                             id="marinaName"
                                             value={marinaName}
                                             onChange={(e) => setMarinaName(e.target.value)}
-                                            placeholder="PŠD Špinut Marina"
+                                            placeholder="PŠD Špinut"
                                         />
                                         <Button
                                             variant="outline"

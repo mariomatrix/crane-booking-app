@@ -51,7 +51,7 @@ export default function ReportUtilization() {
 
     return (
         <div className="space-y-6">
-            <ReportPageNav title="Korištenje dizalica (Utilizacija)" />
+            <ReportPageNav title="Korištenje dizalica" />
 
             <Card className="no-print report-filters-card">
                 <CardHeader className="py-4">
@@ -93,10 +93,10 @@ export default function ReportUtilization() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <ExportActions 
+                    <ExportActions
                         excelData={excelExportData}
                         excelFileName="Korištenje_dizalica"
-                        pdfDocument={<CraneUtilizationPdf data={details} summaries={summaries} dateFrom={from} dateTo={to} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<CraneUtilizationPdf data={details} summaries={summaries} dateFrom={from} dateTo={to} marinaName="PŠD Špinut" />}
                         pdfFileName="Koristenje_dizalica"
                     />
 
@@ -123,7 +123,7 @@ export default function ReportUtilization() {
 
                     {/* Printable Preview */}
                     <div className="border rounded-lg bg-card p-8 shadow-sm max-w-[21cm] mx-auto report-print-container">
-                        <ReportHeader title="Korištenje dizalica (Utilizacija)" dateFrom={from} dateTo={to} />
+                        <ReportHeader title="Korištenje dizalica" dateFrom={from} dateTo={to} />
 
                         {/* Summary table */}
                         <div className="space-y-4 mb-6">
@@ -198,7 +198,7 @@ export default function ReportUtilization() {
                             </Table>
                         </div>
 
-                        <ReportFooter 
+                        <ReportFooter
                             summaryItems={[
                                 { label: "Ukupno dovršenih", value: details.length },
                                 { label: "Sveukupno radnih sati", value: (details.reduce((acc, curr) => acc + (curr.durationMin || 0), 0) / 60).toFixed(1) + " h" }

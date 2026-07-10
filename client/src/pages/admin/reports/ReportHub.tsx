@@ -23,7 +23,7 @@ export default function ReportHub() {
             color: "text-blue-600 border-blue-100 bg-blue-50/50 dark:bg-blue-950/10 dark:border-blue-950/20",
         },
         {
-            title: "Korištenje dizalica (Utilizacija)",
+            title: "Korištenje dizalica",
             description: "Kumulativni radni sati i statistika za svaku dizalicu. Pomaže u analizi zauzetosti dizalica u određenom periodu.",
             path: "/admin/reports/utilization",
             icon: BarChart3,

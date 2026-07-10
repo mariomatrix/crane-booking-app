@@ -125,7 +125,7 @@ export default function ReportLandOccupancy() {
                     <ExportActions
                         excelData={excelExportData}
                         excelFileName="Plovila_na_kopnu"
-                        pdfDocument={<LandOccupancyPdf data={reportData} statusLabel={`${statusLabel}${zoneSuffix}`} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<LandOccupancyPdf data={reportData} statusLabel={`${statusLabel}${zoneSuffix}`} marinaName="PŠD Špinut" />}
                         pdfFileName="Plovila_na_kopnu"
                     />
 

@@ -511,6 +511,7 @@ export default function AdminLandWaiting() {
             </DialogFooter>
           </form>
         </DialogContent>
+      </Dialog>
       {/* Direct assign (Bypass / calendar schedule) dialog */}
       <Dialog open={directAssignDialogOpen} onOpenChange={setDirectAssignDialogOpen}>
         <DialogContent className="rounded-2xl max-w-md">

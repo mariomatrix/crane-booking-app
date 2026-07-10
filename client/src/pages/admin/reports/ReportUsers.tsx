@@ -66,11 +66,11 @@ export default function ReportUsers() {
                         </div>
                         <div className="space-y-2">
                             <Label>OIB klijenta</Label>
-                            <Input 
-                                type="text" 
-                                placeholder="Pretraga po OIB-u..." 
-                                value={oib} 
-                                onChange={(e) => setOib(e.target.value.replace(/\D/g, "").slice(0, 11))} 
+                            <Input
+                                type="text"
+                                placeholder="Pretraga po OIB-u..."
+                                value={oib}
+                                onChange={(e) => setOib(e.target.value.replace(/\D/g, "").slice(0, 11))}
                                 maxLength={11}
                             />
                         </div>
@@ -84,10 +84,10 @@ export default function ReportUsers() {
                 </div>
             ) : (
                 <div className="space-y-4">
-                    <ExportActions 
+                    <ExportActions
                         excelData={excelExportData}
                         excelFileName="Aktivnost_korisnika"
-                        pdfDocument={<UserActivityPdf data={details} summaries={summaries} dateFrom={from} dateTo={to} marinaName="PŠD Špinut Marina" />}
+                        pdfDocument={<UserActivityPdf data={details} summaries={summaries} dateFrom={from} dateTo={to} marinaName="PŠD Špinut" />}
                         pdfFileName="Aktivnost_korisnika"
                     />
 
@@ -139,7 +139,7 @@ export default function ReportUsers() {
                                                         </Button>
                                                     </TableCell>
                                                 </TableRow>
-                                                
+
                                                 {/* Collapsible details for screen & automatically printed on paper print */}
                                                 {(isExpanded || window.matchMedia("print").matches) && (
                                                     <TableRow className="bg-slate-50/50 dark:bg-slate-900/30">
@@ -199,7 +199,7 @@ export default function ReportUsers() {
                             </Table>
                         </div>
 
-                        <ReportFooter 
+                        <ReportFooter
                             summaryItems={[
                                 { label: "Ukupno aktivnih klijenata", value: summaries.length },
                                 { label: "Sveukupno zahtjeva", value: summaries.reduce((acc, curr) => acc + (curr.totalRequests || 0), 0) }

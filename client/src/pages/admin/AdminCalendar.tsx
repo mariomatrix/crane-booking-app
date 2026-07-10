@@ -8,6 +8,8 @@ import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { PDFDownloadLink } from "@react-pdf/renderer";
+import { CalendarSchedulePdf } from "@/components/ReportPdfTemplates";
 import {
     Dialog,
     DialogContent,
@@ -730,10 +732,31 @@ export default function AdminCalendar() {
                             </form>
                         </DialogContent>
                     </Dialog>
-                    <Button variant="secondary" onClick={() => window.print()} className="gap-2">
-                        <Printer className="h-4 w-4" />
-                        <span className="hidden sm:inline">Ispiši plan</span>
-                    </Button>
+                    <PDFDownloadLink
+                        document={
+                            <CalendarSchedulePdf
+                                date={viewDate}
+                                cranes={cranesList}
+                                reservations={allReservations}
+                                workStart={workStart}
+                                workEnd={workEnd}
+                                marinaName={sysSettings?.marinaName || "PŠD Špinut"}
+                                marinaLogo={sysSettings?.marinaLogo || undefined}
+                            />
+                        }
+                        fileName={`Plan_rada_dizalica_${format(viewDate, "yyyy-MM-dd")}.pdf`}
+                    >
+                        {({ loading }: { loading: boolean }) => (
+                            <Button variant="secondary" disabled={loading} className="gap-2">
+                                {loading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Printer className="h-4 w-4" />
+                                )}
+                                <span className="hidden sm:inline">Ispiši plan</span>
+                            </Button>
+                        )}
+                    </PDFDownloadLink>
                 </div>
             </div>
 

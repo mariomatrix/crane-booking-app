@@ -464,3 +464,150 @@ export function WaitingListPdf({ data, statusLabel, marinaName, marinaLogo }: { 
         </PdfShell>
     );
 }
+
+// 📅 Daily Calendar schedule PDF Document template
+export function CalendarSchedulePdf({
+    date,
+    cranes,
+    reservations,
+    workStart = "08:00",
+    workEnd = "16:00",
+    marinaName,
+    marinaLogo
+}: {
+    date: Date;
+    cranes: any[];
+    reservations: any[];
+    workStart?: string;
+    workEnd?: string;
+    marinaName: string;
+    marinaLogo?: string;
+}) {
+    const formattedDate = format(date, "yyyy-MM-dd");
+    
+    // Get the first 3 cranes
+    const activeCranes = cranes.slice(0, 3);
+    
+    // Filter reservations for this day
+    const dayReservations = reservations.filter((r: any) => {
+        if (!r.scheduledStart) return false;
+        const rDate = new Date(r.scheduledStart);
+        return format(rDate, "yyyy-MM-dd") === formattedDate;
+    });
+
+    // Prepare hour slots
+    const startHour = parseInt(workStart.split(":")[0]) || 8;
+    const endHour = parseInt(workEnd.split(":")[0]) || 16;
+    const hours = [];
+    for (let h = startHour; h < endHour; h++) {
+        hours.push(h);
+    }
+
+    // Width definitions: 16% for Time, 28% for each of the 3 cranes
+    const timeColWidth = "16%";
+    const craneColWidth = "28%";
+
+    return (
+        <PdfShell
+            title={`Plan rada dizalica na dan ${format(date, "dd.MM.yyyy.")}`}
+            dateFrom={formattedDate}
+            dateTo={formattedDate}
+            marinaName={marinaName}
+            marinaLogo={marinaLogo}
+            summaryItems={[
+                { label: "Ukupno operacija", value: dayReservations.filter(r => !r.isMaintenance).length },
+                { label: "Održavanje", value: dayReservations.filter(r => r.isMaintenance).length }
+            ]}
+        >
+            <View style={styles.table}>
+                {/* Header Row */}
+                <View style={styles.tableHeaderRow}>
+                    <Text style={[styles.tableCellHeader, { width: timeColWidth, fontSize: 8 }]}>Termin</Text>
+                    {activeCranes.map((crane, idx) => (
+                        <Text key={crane.id || idx} style={[styles.tableCellHeader, { width: craneColWidth, fontSize: 8 }]}>
+                            {crane.name}
+                        </Text>
+                    ))}
+                    {activeCranes.length < 3 && 
+                        Array.from({ length: 3 - activeCranes.length }).map((_, idx) => (
+                            <Text key={`empty-col-${idx}`} style={[styles.tableCellHeader, { width: craneColWidth, fontSize: 8 }]}>
+                                Dizalica {activeCranes.length + idx + 1}
+                            </Text>
+                        ))
+                    }
+                </View>
+
+                {/* Hour Slots */}
+                {hours.map((hour) => {
+                    const timeStr = `${String(hour).padStart(2, "0")}:00 - ${String(hour + 1).padStart(2, "0")}:00`;
+                    
+                    return (
+                        <View key={hour} style={[styles.tableRow, { minHeight: 48, alignItems: "flex-start", paddingTop: 4, paddingBottom: 4 }]}>
+                            {/* Time column */}
+                            <Text style={[styles.tableCell, { width: timeColWidth, fontFamily: "Roboto-Bold", fontSize: 8, paddingTop: 6 }]}>
+                                {timeStr}
+                            </Text>
+
+                            {/* Crane columns */}
+                            {Array.from({ length: 3 }).map((_, colIdx) => {
+                                const crane = activeCranes[colIdx];
+                                if (!crane) {
+                                    return <View key={`empty-cell-${colIdx}`} style={{ width: craneColWidth }} />;
+                                }
+
+                                // Get reservations starting in this hour slot for this crane
+                                const slotRes = dayReservations.filter((r: any) => {
+                                    if (r.craneId !== crane.id) return false;
+                                    const startH = new Date(r.scheduledStart).getHours();
+                                    return startH === hour;
+                                });
+
+                                return (
+                                    <View key={crane.id} style={{ width: craneColWidth, paddingRight: 4 }}>
+                                        {slotRes.map((r: any, rIdx) => {
+                                            const statusColor = r.isMaintenance 
+                                                ? "#f97316" 
+                                                : (r.status === "approved" ? "#059669" : r.status === "completed" ? "#16a34a" : r.status === "pending" ? "#f59e0b" : "#4b5563");
+                                            
+                                            const clientName = r.user?.name || r.clientName || "Korisnik";
+                                            const reg = r.vesselRegistration || "—";
+                                            const action = r.isMaintenance ? "ODRŽAVANJE" : (r.serviceType?.name || r.serviceTypeName || "—");
+
+                                            return (
+                                                <View 
+                                                    key={r.id || rIdx} 
+                                                    style={{ 
+                                                        borderLeftWidth: 2, 
+                                                        borderLeftColor: statusColor, 
+                                                        paddingLeft: 4, 
+                                                        marginBottom: 4, 
+                                                        marginTop: rIdx > 0 ? 4 : 0 
+                                                    }}
+                                                >
+                                                    <Text style={{ fontFamily: "Roboto-Bold", fontSize: 8, color: "#1e293b" }}>
+                                                        {clientName}
+                                                    </Text>
+                                                    <Text style={{ fontSize: 7, color: "#64748b", marginTop: 1 }}>
+                                                        Reg: {reg}
+                                                    </Text>
+                                                    <Text style={{ fontSize: 7, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 1 }}>
+                                                        {action}
+                                                    </Text>
+                                                </View>
+                                            );
+                                        })}
+                                        {slotRes.length === 0 && (
+                                            <Text style={{ fontSize: 7, color: "#cbd5e1", fontStyle: "italic", paddingTop: 6 }}>
+                                                Slobodno
+                                            </Text>
+                                        )}
+                                    </View>
+                                );
+                            })}
+                        </View>
+                    );
+                })}
+            </View>
+        </PdfShell>
+    );
+}
