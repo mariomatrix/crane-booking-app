@@ -733,6 +733,7 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <PDFDownloadLink
+                        key={`${viewDate.toISOString()}-${allReservations.length}-${allReservations.map(r => r.id + '-' + r.status).join(',')}`}
                         document={
                             <CalendarSchedulePdf
                                 date={viewDate}

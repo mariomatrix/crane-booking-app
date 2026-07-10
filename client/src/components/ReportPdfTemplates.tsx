@@ -465,6 +465,23 @@ export function WaitingListPdf({ data, statusLabel, marinaName, marinaLogo }: { 
     );
 }
 
+// Helper to safely parse dates in different browsers/environments (handles Safari space issue)
+const safeParseDate = (d: any): Date => {
+    if (!d) return new Date(NaN);
+    if (d instanceof Date) return d;
+    if (typeof d === "string") {
+        return new Date(d.replace(" ", "T"));
+    }
+    return new Date(d);
+};
+
+// Helper to check if two dates fall on the exact same day in local timezone
+const isSameDay = (d1: Date, d2: Date) => {
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+};
+
 // 📅 Daily Calendar schedule PDF Document template
 export function CalendarSchedulePdf({
     date,
@@ -488,11 +505,12 @@ export function CalendarSchedulePdf({
     // Get the first 3 cranes
     const activeCranes = cranes.slice(0, 3);
     
-    // Filter reservations for this day
+    // Filter reservations for this day using local-date-safe comparison
     const dayReservations = reservations.filter((r: any) => {
         if (!r.scheduledStart) return false;
-        const rDate = new Date(r.scheduledStart);
-        return format(rDate, "yyyy-MM-dd") === formattedDate;
+        const rDate = safeParseDate(r.scheduledStart);
+        const dDate = safeParseDate(date);
+        return isSameDay(rDate, dDate);
     });
 
     // Prepare hour slots
@@ -558,7 +576,7 @@ export function CalendarSchedulePdf({
                                 // Get reservations starting in this hour slot for this crane
                                 const slotRes = dayReservations.filter((r: any) => {
                                     if (r.craneId !== crane.id) return false;
-                                    const startH = new Date(r.scheduledStart).getHours();
+                                    const startH = safeParseDate(r.scheduledStart).getHours();
                                     return startH === hour;
                                 });
 
