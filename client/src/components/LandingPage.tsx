@@ -15,7 +15,7 @@ export default function LandingPage() {
         {/* Background Image */}
         <div 
           className="absolute inset-0 bg-cover bg-center transition-transform duration-700 hover:scale-105" 
-          style={{ backgroundImage: "url('/lucica_spinut.png')" }}
+          style={{ backgroundImage: "url('/psd-spinut-panorama-3.png')" }}
         />
         {/* Dark Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/70 to-transparent" />
