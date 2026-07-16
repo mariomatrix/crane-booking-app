@@ -54,7 +54,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Features Grid */}
+      {/* Features Grid
       <section className="space-y-6">
         <div className="text-center max-w-xl mx-auto space-y-2">
           <h2 className="text-3xl font-bold tracking-tight text-foreground">
@@ -105,6 +105,7 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      */}
 
       {/* Info: Radno Vrijeme & Kontakt */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
