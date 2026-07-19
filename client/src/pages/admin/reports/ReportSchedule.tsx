@@ -25,9 +25,25 @@ export default function ReportSchedule() {
     // Fetch cranes for the filter dropdown
     const { data: cranes = [] } = trpc.crane.list.useQuery();
 
+    let effectiveFrom = from;
+    let effectiveTo = to;
+    try {
+        if (from && !isNaN(Date.parse(from))) {
+            if (viewMode === "weekly") {
+                effectiveFrom = format(startOfWeek(new Date(from), { weekStartsOn: 1 }), "yyyy-MM-dd");
+                effectiveTo = format(endOfWeek(new Date(from), { weekStartsOn: 1 }), "yyyy-MM-dd");
+            } else if (viewMode === "monthly") {
+                effectiveFrom = format(startOfMonth(new Date(from)), "yyyy-MM-dd");
+                effectiveTo = format(endOfMonth(new Date(from)), "yyyy-MM-dd");
+            }
+        }
+    } catch (e) {
+        console.error(e);
+    }
+
     const { data: reportData, isLoading, refetch } = trpc.reports.craneSchedule.useQuery({
-        from,
-        to,
+        from: effectiveFrom,
+        to: effectiveTo,
         craneId: craneId === "all" ? undefined : craneId,
         status: status === "all" ? undefined : status,
         includeMaintenance,
@@ -140,7 +156,15 @@ export default function ReportSchedule() {
                         </div>
                         <div className="space-y-2">
                             <Label>Datum do</Label>
-                            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                            <Input 
+                                type="date" 
+                                value={to} 
+                                onChange={(e) => setTo(e.target.value)} 
+                                disabled={viewMode === "weekly" || viewMode === "monthly"}
+                            />
+                            {(viewMode === "weekly" || viewMode === "monthly") && (
+                                <span className="text-[10px] text-muted-foreground block italic">Automatski izračunato prema 'Datum od'</span>
+                            )}
                         </div>
                         <div className="space-y-2">
                             <Label>Dizalica</Label>
@@ -228,13 +252,13 @@ export default function ReportSchedule() {
                     <ExportActions
                         excelData={excelExportData}
                         excelFileName="Plan_rada_dizalica"
-                        pdfDocument={<CraneSchedulePdf data={reservationsList} dateFrom={from} dateTo={to} marinaName="PŠD Špinut" />}
+                        pdfDocument={<CraneSchedulePdf data={reservationsList} dateFrom={effectiveFrom} dateTo={effectiveTo} marinaName="PŠD Špinut" />}
                         pdfFileName="Plan_rada_dizalica"
                     />
 
                     {/* Preview Page */}
                     <div className="border rounded-lg bg-card p-8 shadow-sm max-w-[21cm] mx-auto report-print-container">
-                        <ReportHeader title="Plan rada dizalica" dateFrom={from} dateTo={to} />
+                        <ReportHeader title="Plan rada dizalica" dateFrom={effectiveFrom} dateTo={effectiveTo} />
 
                         {/* Rendering View Options */}
                         {viewMode === "daily-hours" && (
