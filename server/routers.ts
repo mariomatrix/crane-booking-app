@@ -598,7 +598,29 @@ export const appRouter = router({
             const fullName = cleanCols[1];
             const rawEmail = cleanCols[2];
             const phone = cleanCols[3];
-            const vesselName = cleanCols[4];
+
+            let oib: string | null = null;
+            let vesselName: string | null = null;
+            let vesselRegistration: string | null = null;
+
+            // Dynamically detect column layout (up to 7 columns)
+            if (cleanCols.length >= 7) {
+              oib = cleanCols[4] || null;
+              vesselName = cleanCols[5] || null;
+              vesselRegistration = cleanCols[6] || null;
+            } else if (cleanCols.length === 6) {
+              const col4 = cleanCols[4];
+              // Heuristic check: is 5th column an 11-digit OIB?
+              if (col4 && /^\d{11}$/.test(col4)) {
+                oib = col4;
+                vesselName = cleanCols[5] || null;
+              } else {
+                vesselName = col4 || null;
+                vesselRegistration = cleanCols[5] || null;
+              }
+            } else {
+              vesselName = cleanCols[4] || null;
+            }
 
             if (!id || !fullName) {
               skippedCount++;
@@ -617,19 +639,53 @@ export const appRouter = router({
               email = email.toLowerCase();
             }
 
-            const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+            // OIB validation
+            const cleanOib = oib ? oib.trim() : null;
+            const validOib = cleanOib && isValidOib(cleanOib) ? cleanOib : null;
+
+            let existingUser: any = null;
+
+            // 1. Try matching by valid OIB first
+            if (validOib) {
+              const byOib = await db.select().from(users).where(eq(users.oib, validOib)).limit(1);
+              if (byOib.length > 0) {
+                existingUser = byOib[0];
+              }
+            }
+
+            // 2. Fallback to matching by Email
+            if (!existingUser) {
+              const byEmail = await db.select().from(users).where(eq(users.email, email)).limit(1);
+              if (byEmail.length > 0) {
+                existingUser = byEmail[0];
+              }
+            }
+
             let userId: string;
 
-            if (existingUser.length > 0) {
-              userId = existingUser[0].id;
+            if (existingUser) {
+              userId = existingUser.id;
+              
+              // Handle email change safety if matched by OIB
+              let finalEmail = email;
+              if (existingUser.email !== email) {
+                const emailConflict = await db.select().from(users).where(eq(users.email, email)).limit(1);
+                if (emailConflict.length > 0) {
+                  finalEmail = existingUser.email; // Fallback to avoid constraint error
+                }
+              }
+
               await db.update(users).set({
                 name: fullName,
                 firstName,
                 lastName,
-                phone: phone || existingUser[0].phone,
+                email: finalEmail,
+                phone: phone || existingUser.phone,
+                oib: validOib || existingUser.oib,
                 updatedAt: new Date(),
               }).where(eq(users.id, userId));
             } else {
+              // Create new user
               const newUserRows = await db.insert(users).values({
                 email,
                 passwordHash: defaultPasswordHash,
@@ -637,6 +693,7 @@ export const appRouter = router({
                 firstName,
                 lastName,
                 phone: phone || null,
+                oib: validOib || null,
                 role: "user",
                 userStatus: "active",
                 mustChangePassword: true,
@@ -645,16 +702,23 @@ export const appRouter = router({
               successCount++;
             }
 
-            if (vesselName) {
+            // 3. Process vessel (supports multiple vessels per user)
+            if (vesselName || vesselRegistration) {
+              const finalVesselName = vesselName || vesselRegistration || "Plovilo";
+              const finalVesselReg = vesselRegistration || vesselName || null;
+
               const existingVessels = await db.select().from(vessels).where(eq(vessels.ownerId, userId));
-              const hasVessel = existingVessels.some(v => v.name.toLowerCase() === vesselName.toLowerCase());
+              const hasVessel = existingVessels.some(v => 
+                (vesselName && v.name.toLowerCase() === vesselName.toLowerCase()) ||
+                (vesselRegistration && v.registration && v.registration.toLowerCase() === vesselRegistration.toLowerCase())
+              );
 
               if (!hasVessel) {
                 await db.insert(vessels).values({
                   ownerId: userId,
-                  name: vesselName,
+                  name: finalVesselName,
                   type: "ostalo",
-                  registration: vesselName,
+                  registration: finalVesselReg,
                 });
                 vesselCount++;
               }
