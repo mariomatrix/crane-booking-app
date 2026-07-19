@@ -59,7 +59,7 @@ export default function AdminUserCard() {
     const [editingVessel, setEditingVessel] = useState<any>(null);
     const [vesselForm, setVesselForm] = useState({
         name: "",
-        type: "ostalo" as "jedrilica" | "motorni" | "katamaran" | "ostalo",
+        type: "jedrilica" as "jedrilica" | "motorni" | "katamaran" | "ostalo",
         registration: "",
         lengthM: "",
         beamM: "",
@@ -103,7 +103,7 @@ export default function AdminUserCard() {
         setEditingVessel(null);
         setVesselForm({
             name: "",
-            type: "ostalo",
+            type: "jedrilica",
             registration: "",
             lengthM: "",
             beamM: "",

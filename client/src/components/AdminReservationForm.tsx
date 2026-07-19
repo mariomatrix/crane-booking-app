@@ -47,7 +47,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     // Vessel state
     const [selectedVesselId, setSelectedVesselId] = useState<string>("new");
     const [saveToProfile, setSaveToProfile] = useState(true);
-    const [vesselType, setVesselType] = useState("");
+    const [vesselType, setVesselType] = useState("jedrilica");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
     const [vesselDraft, setVesselDraft] = useState("");
@@ -87,7 +87,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     if (userId !== lastLoadedUserId) {
         setLastLoadedUserId(userId);
         setSelectedVesselId("new");
-        setVesselType("");
+        setVesselType("jedrilica");
         setVesselLength("");
         setVesselWidth("");
         setVesselDraft("");
@@ -98,7 +98,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     if (userVessels.length > 0 && selectedVesselId === "new" && !vesselRegistration && !userVesselsLoading) {
         const v = userVessels[0];
         setSelectedVesselId(v.id);
-        setVesselType(v.type || "");
+        setVesselType(v.type || "jedrilica");
         setVesselLength(v.lengthM ? String(v.lengthM) : "");
         setVesselWidth(v.beamM ? String(v.beamM) : "");
         setVesselDraft(v.draftM ? String(v.draftM) : "");
@@ -109,7 +109,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const handleVesselSelect = (vesselId: string) => {
         setSelectedVesselId(vesselId);
         if (vesselId === "new") {
-            setVesselType("");
+            setVesselType("jedrilica");
             setVesselLength("");
             setVesselWidth("");
             setVesselDraft("");

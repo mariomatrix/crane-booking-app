@@ -2,7 +2,7 @@ import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
 import { ReportPageNav, ReportHeader, ReportFooter, ExportActions } from "@/components/ReportLayout";
-import { CraneSchedulePdf } from "@/components/ReportPdfTemplates";
+import { CraneSchedulePdf, CalendarSchedulePdf } from "@/components/ReportPdfTemplates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +24,7 @@ export default function ReportSchedule() {
 
     // Fetch cranes for the filter dropdown
     const { data: cranes = [] } = trpc.crane.list.useQuery();
+    const { data: sysSettings } = trpc.settings.get.useQuery();
 
     let effectiveFrom = from;
     let effectiveTo = to;
@@ -66,6 +67,24 @@ export default function ReportSchedule() {
 
     const reservationsList = reportData?.reservations || [];
     const maintenanceList = reportData?.maintenance || [];
+
+    const mergedList = [
+        ...reservationsList.map(r => ({ ...r, isMaintenance: false })),
+        ...(includeMaintenance ? maintenanceList.map(m => ({
+            id: m.id,
+            isMaintenance: true,
+            scheduledStart: m.startAt,
+            scheduledEnd: m.endAt,
+            craneId: m.craneId,
+            craneName: m.craneName,
+            clientName: "BLOKADA / ODRŽAVANJE",
+            userOib: null as string | null,
+            vesselName: "—",
+            vesselRegistration: "ODRŽAVANJE",
+            serviceTypeName: m.reason || "Planirano održavanje",
+            status: "maintenance" as any,
+        })) : [])
+    ];
 
     // Map raw data for Excel download
     const excelExportData = reservationsList.map(item => ({
@@ -252,7 +271,21 @@ export default function ReportSchedule() {
                     <ExportActions
                         excelData={excelExportData}
                         excelFileName="Plan_rada_dizalica"
-                        pdfDocument={<CraneSchedulePdf data={reservationsList} dateFrom={effectiveFrom} dateTo={effectiveTo} marinaName="PŠD Špinut" />}
+                        pdfDocument={
+                            viewMode === "daily-cranes" ? (
+                                <CalendarSchedulePdf
+                                    date={new Date(from)}
+                                    cranes={cranes}
+                                    reservations={mergedList}
+                                    workStart={sysSettings?.workdayStart || "08:00"}
+                                    workEnd={sysSettings?.workdayEnd || "16:00"}
+                                    marinaName={sysSettings?.marinaName || "PŠD Špinut"}
+                                    marinaLogo={sysSettings?.marinaLogo || undefined}
+                                />
+                            ) : (
+                                <CraneSchedulePdf data={reservationsList} dateFrom={effectiveFrom} dateTo={effectiveTo} marinaName="PŠD Špinut" />
+                            )
+                        }
                         pdfFileName="Plan_rada_dizalica"
                     />
 
@@ -319,37 +352,52 @@ export default function ReportSchedule() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {Array.from({ length: 9 }).map((_, hourIdx) => {
-                                            const hour = 8 + hourIdx;
-                                            const timeStr = `${String(hour).padStart(2, "0")}:00`;
-                                            return (
-                                                <TableRow key={hourIdx}>
-                                                    <TableCell className="font-bold font-mono">{timeStr}</TableCell>
-                                                    {cranes.map(crane => {
-                                                        const activeR = reservationsList.find(r => {
-                                                            if (!r.scheduledStart || r.craneId !== crane.id) return false;
-                                                            const startH = new Date(r.scheduledStart).getHours();
-                                                            return startH === hour;
-                                                        });
+                                        {(() => {
+                                            const startHour = parseInt(sysSettings?.workdayStart?.split(":")[0] || "8") || 8;
+                                            const endHour = parseInt(sysSettings?.workdayEnd?.split(":")[0] || "16") || 16;
+                                            const hours = [];
+                                            for (let h = startHour; h < endHour; h++) {
+                                                hours.push(h);
+                                            }
+                                            return hours.map((hour) => {
+                                                const timeStr = `${String(hour).padStart(2, "0")}:00`;
+                                                return (
+                                                    <TableRow key={hour}>
+                                                        <TableCell className="font-bold font-mono">{timeStr}</TableCell>
+                                                        {cranes.map(crane => {
+                                                            const activeR = mergedList.find(r => {
+                                                                if (!r.scheduledStart || r.craneId !== crane.id) return false;
+                                                                const startH = new Date(r.scheduledStart).getHours();
+                                                                return startH === hour;
+                                                            });
 
-                                                        return (
-                                                            <TableCell key={crane.id} className="border">
-                                                                {activeR ? (
-                                                                    <div className="text-xs p-1.5 border rounded bg-slate-50 dark:bg-slate-900">
-                                                                        <span className="font-bold">{activeR.clientName}</span>{"\n"}
-                                                                        <span className="block text-muted-foreground font-mono text-[10px]">OIB: {activeR.userOib}</span>
-                                                                        <span className="block text-primary font-semibold text-[10px]">{activeR.serviceTypeName}</span>
-                                                                        <span className="block text-[10px]">Plovilo: {activeR.vesselName} ({activeR.vesselRegistration})</span>
-                                                                    </div>
-                                                                ) : (
-                                                                    <span className="text-[10px] text-muted-foreground italic">— Slobodno —</span>
-                                                                )}
-                                                            </TableCell>
-                                                        );
-                                                    })}
-                                                </TableRow>
-                                            );
-                                        })}
+                                                            return (
+                                                                <TableCell key={crane.id} className="border">
+                                                                    {activeR ? (
+                                                                        <div className={`text-xs p-1.5 border rounded ${
+                                                                            activeR.isMaintenance 
+                                                                                ? "bg-orange-50 border-orange-200 text-orange-800 dark:bg-orange-950 dark:border-orange-800 dark:text-orange-200" 
+                                                                                : "bg-slate-50 dark:bg-slate-900"
+                                                                        }`}>
+                                                                            <span className="font-bold">{activeR.clientName}</span>{"\n"}
+                                                                            {!activeR.isMaintenance && (
+                                                                                <span className="block text-muted-foreground font-mono text-[10px]">OIB: {activeR.userOib}</span>
+                                                                            )}
+                                                                            <span className={`block font-semibold text-[10px] ${activeR.isMaintenance ? "text-orange-600 dark:text-orange-400" : "text-primary"}`}>
+                                                                                {activeR.serviceTypeName}
+                                                                            </span>
+                                                                            <span className="block text-[10px]">Plovilo: {activeR.vesselName} ({activeR.vesselRegistration})</span>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-[10px] text-muted-foreground italic">— Slobodno —</span>
+                                                                    )}
+                                                                </TableCell>
+                                                            );
+                                                        })}
+                                                    </TableRow>
+                                                );
+                                            });
+                                        })()}
                                     </TableBody>
                                 </Table>
                             </div>
