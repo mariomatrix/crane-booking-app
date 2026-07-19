@@ -682,6 +682,7 @@ export const appRouter = router({
                 email: finalEmail,
                 phone: phone || existingUser.phone,
                 oib: validOib || existingUser.oib,
+                emailVerifiedAt: existingUser.emailVerifiedAt || new Date(),
                 updatedAt: new Date(),
               }).where(eq(users.id, userId));
             } else {
@@ -696,6 +697,7 @@ export const appRouter = router({
                 oib: validOib || null,
                 role: "user",
                 userStatus: "active",
+                emailVerifiedAt: new Date(),
                 mustChangePassword: true,
               }).returning({ id: users.id });
               userId = newUserRows[0].id;
