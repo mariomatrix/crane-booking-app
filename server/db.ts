@@ -95,7 +95,14 @@ export async function getUserById(id: string) {
   return res[0];
 }
 
-export async function listAllUsers(limit = 100, offset = 0, search?: string, role?: string, status?: string) {
+export async function listAllUsers(
+  limit = 100,
+  offset = 0,
+  search?: string,
+  role?: string,
+  status?: string,
+  vesselFilter?: string
+) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
 
@@ -107,7 +114,12 @@ export async function listAllUsers(limit = 100, offset = 0, search?: string, rol
       ilike(users.firstName, pattern),
       ilike(users.lastName, pattern),
       ilike(users.email, pattern),
-      ilike(users.oib, pattern)
+      ilike(users.oib, pattern),
+      sql`exists (
+        select 1 from vessels 
+        where vessels.owner_id = ${users.id} 
+          and (vessels.name ilike ${pattern} or vessels.registration ilike ${pattern})
+      )`
     ) as any);
   }
 
@@ -120,6 +132,14 @@ export async function listAllUsers(limit = 100, offset = 0, search?: string, rol
       conditions.push(isNotNull(users.emailVerifiedAt));
     } else if (status === "unverified") {
       conditions.push(isNull(users.emailVerifiedAt));
+    }
+  }
+
+  if (vesselFilter && vesselFilter !== "all") {
+    if (vesselFilter === "has_vessel") {
+      conditions.push(sql`exists (select 1 from vessels where vessels.owner_id = ${users.id})`);
+    } else if (vesselFilter === "no_vessel") {
+      conditions.push(sql`not exists (select 1 from vessels where vessels.owner_id = ${users.id})`);
     }
   }
 

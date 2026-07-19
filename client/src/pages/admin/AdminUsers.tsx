@@ -51,6 +51,7 @@ export default function AdminUsers() {
     const [searchInput, setSearchInput] = useState("");
     const [roleFilter, setRoleFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
+    const [vesselFilter, setVesselFilter] = useState("all");
 
     useEffect(() => {
         const handler = setTimeout(() => {
@@ -65,7 +66,8 @@ export default function AdminUsers() {
         pageSize,
         search: search.trim() !== "" ? search : undefined,
         role: roleFilter,
-        status: statusFilter
+        status: statusFilter,
+        vesselFilter: vesselFilter
     });
     const users = usersQuery.data?.data || [];
     const totalUsers = usersQuery.data?.total || 0;
@@ -248,7 +250,7 @@ export default function AdminUsers() {
     // Reset to page 1 when count changes significantly or on invalidations if needed
     // But usually standard trpc invalidation is fine.
 
-    if (usersQuery.isLoading) {
+    if (usersQuery.isLoading && !usersQuery.data) {
         return (
             <div className="flex justify-center p-8">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -291,12 +293,12 @@ export default function AdminUsers() {
                 </CardHeader>
                 <CardContent>
                     {/* Search and Filters Bar */}
-                    <div className="flex flex-col sm:flex-row gap-4 mb-6 items-end sm:items-center">
+                    <div className="flex flex-col md:flex-row gap-4 mb-6 items-end md:items-center">
                         <div className="flex-1 w-full">
                             <Label className="text-xs font-semibold mb-1 block">Pretraga</Label>
                             <div className="relative">
                                 <Input
-                                    placeholder="Pretraži po imenu, prezimenu, emailu ili OIB-u..."
+                                    placeholder="Pretraži po klijentu (ime, prezime, email, OIB) ili plovilu (naziv, registracija)..."
                                     value={searchInput}
                                     onChange={(e) => setSearchInput(e.target.value)}
                                     className="pr-8"
@@ -312,7 +314,7 @@ export default function AdminUsers() {
                                 )}
                             </div>
                         </div>
-                        <div className="w-full sm:w-[200px]">
+                        <div className="w-full md:w-[160px]">
                             <Label className="text-xs font-semibold mb-1 block">Uloga</Label>
                             <Select 
                                 value={roleFilter} 
@@ -332,7 +334,7 @@ export default function AdminUsers() {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="w-full sm:w-[200px]">
+                        <div className="w-full md:w-[160px]">
                             <Label className="text-xs font-semibold mb-1 block">Verifikacija</Label>
                             <Select 
                                 value={statusFilter} 
@@ -348,6 +350,25 @@ export default function AdminUsers() {
                                     <SelectItem value="all">Svi statusi</SelectItem>
                                     <SelectItem value="verified">Verificiran</SelectItem>
                                     <SelectItem value="unverified">Nije verificiran</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="w-full md:w-[160px]">
+                            <Label className="text-xs font-semibold mb-1 block">Plovilo</Label>
+                            <Select 
+                                value={vesselFilter} 
+                                onValueChange={(val) => {
+                                    setVesselFilter(val);
+                                    setPage(1);
+                                }}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Svi korisnici</SelectItem>
+                                    <SelectItem value="has_vessel">S plovilom</SelectItem>
+                                    <SelectItem value="no_vessel">Bez plovila</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
