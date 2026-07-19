@@ -545,6 +545,143 @@ export const appRouter = router({
         return { success: true, tempPassword, userId: String(userId) };
       }),
 
+    importCsv: adminProcedure
+      .input(z.object({ csvContent: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        const { csvContent } = input;
+        const lines = csvContent.split(/\r?\n/);
+        if (lines.length < 2) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "CSV datoteka je prazna." });
+        }
+
+        const db = await getDb();
+        if (!db) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza podataka nije dostupna." });
+        }
+
+        const defaultPassword = "Spinut1234!";
+        const defaultPasswordHash = await bcrypt.hash(defaultPassword, 10);
+
+        let successCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+        let vesselCount = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          try {
+            const cols: string[] = [];
+            let current = '';
+            let inQuotes = false;
+            for (let j = 0; j < line.length; j++) {
+              const char = line[j];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                cols.push(current);
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            cols.push(current);
+            const cleanCols = cols.map(c => c.trim().replace(/^"|"$/g, ''));
+
+            if (cleanCols.length < 2) {
+              skippedCount++;
+              continue;
+            }
+
+            const id = cleanCols[0];
+            const fullName = cleanCols[1];
+            const rawEmail = cleanCols[2];
+            const phone = cleanCols[3];
+            const vesselName = cleanCols[4];
+
+            if (!id || !fullName) {
+              skippedCount++;
+              continue;
+            }
+
+            const nameParts = fullName.split(/\s+/);
+            const firstName = nameParts[0] || "";
+            const lastName = nameParts.slice(1).join(" ") || "";
+
+            let email = rawEmail.split(/[\s,;]+/)[0]?.trim();
+            if (!email || !email.includes("@")) {
+              const cleanId = id.toLowerCase().replace(/[^a-z0-9]/g, "");
+              email = `clan_${cleanId}@psd-spinut.hr`;
+            } else {
+              email = email.toLowerCase();
+            }
+
+            const existingUser = await db.select().from(users).where(eq(users.email, email)).limit(1);
+            let userId: string;
+
+            if (existingUser.length > 0) {
+              userId = existingUser[0].id;
+              await db.update(users).set({
+                name: fullName,
+                firstName,
+                lastName,
+                phone: phone || existingUser[0].phone,
+                updatedAt: new Date(),
+              }).where(eq(users.id, userId));
+            } else {
+              const newUserRows = await db.insert(users).values({
+                email,
+                passwordHash: defaultPasswordHash,
+                name: fullName,
+                firstName,
+                lastName,
+                phone: phone || null,
+                role: "user",
+                userStatus: "active",
+                mustChangePassword: true,
+              }).returning({ id: users.id });
+              userId = newUserRows[0].id;
+              successCount++;
+            }
+
+            if (vesselName) {
+              const existingVessels = await db.select().from(vessels).where(eq(vessels.ownerId, userId));
+              const hasVessel = existingVessels.some(v => v.name.toLowerCase() === vesselName.toLowerCase());
+
+              if (!hasVessel) {
+                await db.insert(vessels).values({
+                  ownerId: userId,
+                  name: vesselName,
+                  type: "ostalo",
+                  registration: vesselName,
+                });
+                vesselCount++;
+              }
+            }
+          } catch (err: any) {
+            console.error("Failed to import user on line " + (i + 1), err);
+            errorCount++;
+          }
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "users_imported_csv",
+          entityType: "user",
+          entityId: ctx.user.id,
+          payload: { successCount, skippedCount, errorCount, vesselCount },
+        });
+
+        return {
+          success: true,
+          successCount,
+          skippedCount,
+          errorCount,
+          vesselCount,
+        };
+      }),
+
     setRole: adminProcedure
       .input(z.object({ id: z.string().uuid(), role: z.enum(["user", "operator", "admin"]) }))
       .mutation(async ({ input, ctx }) => {

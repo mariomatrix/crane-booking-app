@@ -36,7 +36,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check, MailCheck } from "lucide-react";
+import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check, MailCheck, Upload } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { isValidOib } from "@shared/oib";
@@ -108,6 +108,29 @@ export default function AdminUsers() {
             toast.error(err.message || "Greška pri brisanju korisnika.");
         },
     });
+
+    const importCsvMutation = trpc.user.importCsv.useMutation({
+        onSuccess: (data) => {
+            toast.success(`Uvoz dovršen. Uspješno: ${data.successCount} korisnika, ${data.vesselCount} plovila. Preskočeno: ${data.skippedCount}, Greške: ${data.errorCount}.`);
+            utils.user.list.invalidate();
+        },
+        onError: (err) => {
+            toast.error(err.message || "Greška pri uvozu.");
+        }
+    });
+
+    const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const text = event.target?.result as string;
+            importCsvMutation.mutate({ csvContent: text });
+            e.target.value = "";
+        };
+        reader.readAsText(file);
+    };
 
     const adminAnonymizeUser = trpc.user.anonymize.useMutation({
         onSuccess: () => {
@@ -218,10 +241,33 @@ export default function AdminUsers() {
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle>{t.admin.users}</CardTitle>
-                    <Button onClick={() => setShowCreateDialog(true)} className="flex items-center gap-2">
-                        <UserPlus className="h-4 w-4" />
-                        {t.admin.addUser || "Novi Korisnik"}
-                    </Button>
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="file"
+                            id="csv-file-input"
+                            accept=".csv"
+                            className="hidden"
+                            onChange={handleCsvUpload}
+                            disabled={importCsvMutation.isPending}
+                        />
+                        <Button 
+                            variant="outline"
+                            onClick={() => document.getElementById("csv-file-input")?.click()}
+                            disabled={importCsvMutation.isPending}
+                            className="flex items-center gap-2"
+                        >
+                            {importCsvMutation.isPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <Upload className="h-4 w-4" />
+                            )}
+                            Uvezi CSV
+                        </Button>
+                        <Button onClick={() => setShowCreateDialog(true)} className="flex items-center gap-2">
+                            <UserPlus className="h-4 w-4" />
+                            {t.admin.addUser || "Novi Korisnik"}
+                        </Button>
+                    </div>
                 </CardHeader>
                 <CardContent>
                     <Table>
