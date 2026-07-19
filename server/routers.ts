@@ -447,7 +447,17 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }: any) => {
         const { id, ...data } = input;
-        await updateVessel(id, ctx.user.id, data as any);
+        const vessel = await getVesselById(id);
+        if (!vessel) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Plovilo nije pronađeno." });
+        }
+
+        const isAuthorized = ctx.user.role === "admin" || ctx.user.role === "operator" || vessel.ownerId === ctx.user.id;
+        if (!isAuthorized) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Nemate ovlasti za izmjenu ovog plovila." });
+        }
+
+        await updateVessel(id, vessel.ownerId, data as any);
         await createAuditEntry({ actorId: ctx.user.id, action: "vessel_updated", entityType: "vessel", entityId: id });
         return { success: true };
       }),
@@ -455,7 +465,17 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
-        await deleteVessel(input.id, ctx.user.id);
+        const vessel = await getVesselById(input.id);
+        if (!vessel) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Plovilo nije pronađeno." });
+        }
+
+        const isAuthorized = ctx.user.role === "admin" || ctx.user.role === "operator" || vessel.ownerId === ctx.user.id;
+        if (!isAuthorized) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Nemate ovlasti za brisanje ovog plovila." });
+        }
+
+        await deleteVessel(input.id, vessel.ownerId);
         await createAuditEntry({ actorId: ctx.user.id, action: "vessel_deleted", entityType: "vessel", entityId: input.id });
         return { success: true };
       }),
