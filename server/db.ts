@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql, ilike, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -95,21 +95,47 @@ export async function getUserById(id: string) {
   return res[0];
 }
 
-export async function listAllUsers(limit = 100, offset = 0) {
+export async function listAllUsers(limit = 100, offset = 0, search?: string, role?: string, status?: string) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
 
+  let conditions = [isNull(users.anonymizedAt)];
+
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(or(
+      ilike(users.firstName, pattern),
+      ilike(users.lastName, pattern),
+      ilike(users.email, pattern),
+      ilike(users.oib, pattern)
+    ) as any);
+  }
+
+  if (role && role !== "all") {
+    conditions.push(eq(users.role, role as any));
+  }
+
+  if (status && status !== "all") {
+    if (status === "verified") {
+      conditions.push(isNotNull(users.emailVerifiedAt));
+    } else if (status === "unverified") {
+      conditions.push(isNull(users.emailVerifiedAt));
+    }
+  }
+
+  const whereClause = and(...conditions);
+
   const [countRes] = await db.select({ count: sql<number>`count(*)` })
     .from(users)
-    .where(isNull(users.anonymizedAt));
+    .where(whereClause);
 
   const data = await db.select().from(users)
-    .where(isNull(users.anonymizedAt))
+    .where(whereClause)
     .orderBy(users.name, users.email)
     .limit(limit)
     .offset(offset);
 
-  return { data, total: Number(countRes.count) };
+  return { data, total: Number(countRes?.count || 0) };
 }
 
 export async function updateUserRole(id: string, role: "user" | "operator" | "admin") {

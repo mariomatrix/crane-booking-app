@@ -37,7 +37,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check, MailCheck, Upload } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { isValidOib } from "@shared/oib";
 
@@ -46,7 +46,27 @@ export default function AdminUsers() {
     const [, setLocation] = useLocation();
     const [page, setPage] = useState(1);
     const pageSize = 50;
-    const usersQuery = trpc.user.list.useQuery({ page, pageSize });
+
+    const [search, setSearch] = useState("");
+    const [searchInput, setSearchInput] = useState("");
+    const [roleFilter, setRoleFilter] = useState("all");
+    const [statusFilter, setStatusFilter] = useState("all");
+
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            setSearch(searchInput);
+            setPage(1);
+        }, 300);
+        return () => clearTimeout(handler);
+    }, [searchInput]);
+
+    const usersQuery = trpc.user.list.useQuery({
+        page,
+        pageSize,
+        search: search.trim() !== "" ? search : undefined,
+        role: roleFilter,
+        status: statusFilter
+    });
     const users = usersQuery.data?.data || [];
     const totalUsers = usersQuery.data?.total || 0;
     const totalPages = Math.ceil(totalUsers / pageSize);
@@ -270,6 +290,69 @@ export default function AdminUsers() {
                     </div>
                 </CardHeader>
                 <CardContent>
+                    {/* Search and Filters Bar */}
+                    <div className="flex flex-col sm:flex-row gap-4 mb-6 items-end sm:items-center">
+                        <div className="flex-1 w-full">
+                            <Label className="text-xs font-semibold mb-1 block">Pretraga</Label>
+                            <div className="relative">
+                                <Input
+                                    placeholder="Pretraži po imenu, prezimenu, emailu ili OIB-u..."
+                                    value={searchInput}
+                                    onChange={(e) => setSearchInput(e.target.value)}
+                                    className="pr-8"
+                                />
+                                {searchInput && (
+                                    <button
+                                        onClick={() => setSearchInput("")}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm"
+                                        type="button"
+                                    >
+                                        ✕
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                        <div className="w-full sm:w-[200px]">
+                            <Label className="text-xs font-semibold mb-1 block">Uloga</Label>
+                            <Select 
+                                value={roleFilter} 
+                                onValueChange={(val) => {
+                                    setRoleFilter(val);
+                                    setPage(1);
+                                }}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Sve uloge</SelectItem>
+                                    <SelectItem value="user">Korisnik (Član)</SelectItem>
+                                    <SelectItem value="operator">Operater</SelectItem>
+                                    <SelectItem value="admin">Administrator</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="w-full sm:w-[200px]">
+                            <Label className="text-xs font-semibold mb-1 block">Verifikacija</Label>
+                            <Select 
+                                value={statusFilter} 
+                                onValueChange={(val) => {
+                                    setStatusFilter(val);
+                                    setPage(1);
+                                }}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Svi statusi</SelectItem>
+                                    <SelectItem value="verified">Verificiran</SelectItem>
+                                    <SelectItem value="unverified">Nije verificiran</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -406,8 +489,8 @@ export default function AdminUsers() {
                             ))}
                             {users.length === 0 && (
                                 <TableRow>
-                                    <TableCell colSpan={6} className="text-center py-4">
-                                        Nema registriranih korisnika.
+                                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic">
+                                        Nema korisnika koji odgovaraju zadanim kriterijima pretrage i filtriranja.
                                     </TableCell>
                                 </TableRow>
                             )}

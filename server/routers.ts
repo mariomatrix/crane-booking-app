@@ -487,11 +487,14 @@ export const appRouter = router({
       .input(z.object({
         page: z.number().int().min(1).default(1),
         pageSize: z.number().int().min(1).max(1000).default(100),
+        search: z.string().optional(),
+        role: z.string().optional(),
+        status: z.string().optional(),
       }).optional().default({ page: 1, pageSize: 100 }))
       .query(async ({ input }) => {
-        const { page, pageSize } = input;
+        const { page, pageSize, search, role, status } = input;
         const offset = (page - 1) * pageSize;
-        return listAllUsers(pageSize, offset);
+        return listAllUsers(pageSize, offset, search, role, status);
       }),
 
     create: adminProcedure

@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { CalendarDays, Loader2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-
+import { DatePicker } from "@/components/ui/date-picker";
 type ViewMode = "daily-hours" | "daily-cranes" | "weekly" | "monthly";
 
 export default function ReportSchedule() {
@@ -36,6 +36,9 @@ export default function ReportSchedule() {
             } else if (viewMode === "monthly") {
                 effectiveFrom = format(startOfMonth(new Date(from)), "yyyy-MM-dd");
                 effectiveTo = format(endOfMonth(new Date(from)), "yyyy-MM-dd");
+            } else if (viewMode === "daily-cranes") {
+                effectiveFrom = from;
+                effectiveTo = from; // Force single day
             }
         }
     } catch (e) {
@@ -169,20 +172,26 @@ export default function ReportSchedule() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                        <div className="space-y-2">
-                            <Label>Datum od</Label>
-                            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Datum do</Label>
-                            <Input 
-                                type="date" 
-                                value={to} 
-                                onChange={(e) => setTo(e.target.value)} 
-                                disabled={viewMode === "weekly" || viewMode === "monthly"}
+                        <div className="space-y-2 flex flex-col justify-end">
+                            <Label className="mb-1">Datum od</Label>
+                            <DatePicker
+                                date={from ? new Date(from) : undefined}
+                                onChange={(d) => d && setFrom(format(d, "yyyy-MM-dd"))}
+                                placeholder="Odaberi datum"
                             />
-                            {(viewMode === "weekly" || viewMode === "monthly") && (
-                                <span className="text-[10px] text-muted-foreground block italic">Automatski izračunato prema 'Datum od'</span>
+                        </div>
+                        <div className="space-y-2 flex flex-col justify-end">
+                            <Label className="mb-1">Datum do</Label>
+                            <DatePicker
+                                date={to ? new Date(to) : undefined}
+                                onChange={(d) => d && setTo(format(d, "yyyy-MM-dd"))}
+                                placeholder="Odaberi datum"
+                                disabled={viewMode === "weekly" || viewMode === "monthly" || viewMode === "daily-cranes"}
+                            />
+                            {(viewMode === "weekly" || viewMode === "monthly" || viewMode === "daily-cranes") && (
+                                <span className="text-[10px] text-muted-foreground block italic mt-1">
+                                    {viewMode === "daily-cranes" ? "Onemogućeno za dnevni prikaz" : "Automatski izračunato prema 'Datum od'"}
+                                </span>
                             )}
                         </div>
                         <div className="space-y-2">
@@ -300,17 +309,21 @@ export default function ReportSchedule() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
-                                            <TableHead className="w-[12%]">Početak</TableHead>
-                                            <TableHead className="w-[12%]">Trajanje</TableHead>
-                                            <TableHead className="w-[20%]">OIB klijenta</TableHead>
-                                            <TableHead className="w-[20%]">Klijent</TableHead>
-                                            <TableHead className="w-[20%]">Plovilo (Registracija)</TableHead>
-                                            <TableHead className="w-[16%]">Radnja (Dizalica)</TableHead>
+                                            <TableHead className="w-[12%]">Datum</TableHead>
+                                            <TableHead className="w-[10%]">Početak</TableHead>
+                                            <TableHead className="w-[10%]">Trajanje</TableHead>
+                                            <TableHead className="w-[18%]">OIB klijenta</TableHead>
+                                            <TableHead className="w-[18%]">Klijent</TableHead>
+                                            <TableHead className="w-[18%]">Plovilo (Registracija)</TableHead>
+                                            <TableHead className="w-[14%]">Radnja (Dizalica)</TableHead>
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
                                         {reservationsList.map((item, idx) => (
                                             <TableRow key={idx}>
+                                                <TableCell className="font-mono text-sm">
+                                                    {item.scheduledStart ? format(new Date(item.scheduledStart), "dd.MM.yyyy") : "-"}
+                                                </TableCell>
                                                 <TableCell className="font-semibold font-mono">
                                                     {item.scheduledStart ? format(new Date(item.scheduledStart), "HH:mm") : "-"}
                                                 </TableCell>
@@ -329,7 +342,7 @@ export default function ReportSchedule() {
                                         ))}
                                         {reservationsList.length === 0 && (
                                             <TableRow>
-                                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground italic">
+                                                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic">
                                                     Nema rezervacija za odabrani dan i dizalicu.
                                                 </TableCell>
                                             </TableRow>

@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Layers, Loader2 } from "lucide-react";
 
+import { DatePicker } from "@/components/ui/date-picker";
+
 export default function ReportOperations() {
     const [from, setFrom] = useState(format(new Date(), "yyyy-MM-dd"));
     const [to, setTo] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -52,13 +54,21 @@ export default function ReportOperations() {
                 </CardHeader>
                 <CardContent>
                     <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2">
-                            <Label>Datum od</Label>
-                            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                        <div className="space-y-2 flex flex-col justify-end">
+                            <Label className="mb-1">Datum od</Label>
+                            <DatePicker
+                                date={from ? new Date(from) : undefined}
+                                onChange={(d) => d && setFrom(format(d, "yyyy-MM-dd"))}
+                                placeholder="Odaberi datum"
+                            />
                         </div>
-                        <div className="space-y-2">
-                            <Label>Datum do</Label>
-                            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                        <div className="space-y-2 flex flex-col justify-end">
+                            <Label className="mb-1">Datum do</Label>
+                            <DatePicker
+                                date={to ? new Date(to) : undefined}
+                                onChange={(d) => d && setTo(format(d, "yyyy-MM-dd"))}
+                                placeholder="Odaberi datum"
+                            />
                         </div>
                         <div className="space-y-2">
                             <Label>Tip operacije</Label>

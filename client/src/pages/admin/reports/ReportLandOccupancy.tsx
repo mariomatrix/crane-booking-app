@@ -11,6 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Anchor, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
+import { DatePicker } from "@/components/ui/date-picker";
+
 export default function ReportLandOccupancy() {
     const [status, setStatus] = useState<"all" | "active" | "history">("all");
     const [from, setFrom] = useState("");
@@ -80,13 +82,21 @@ export default function ReportLandOccupancy() {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="space-y-2">
-                            <Label>Duljina / datum od</Label>
-                            <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+                        <div className="space-y-2 flex flex-col justify-end">
+                            <Label className="mb-1">Datum od</Label>
+                            <DatePicker
+                                date={from ? new Date(from) : undefined}
+                                onChange={(d) => setFrom(d ? format(d, "yyyy-MM-dd") : "")}
+                                placeholder="Odaberi datum"
+                            />
                         </div>
-                        <div className="space-y-2">
-                            <Label>Duljina / datum do</Label>
-                            <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+                        <div className="space-y-2 flex flex-col justify-end">
+                            <Label className="mb-1">Datum do</Label>
+                            <DatePicker
+                                date={to ? new Date(to) : undefined}
+                                onChange={(d) => setTo(d ? format(d, "yyyy-MM-dd") : "")}
+                                placeholder="Odaberi datum"
+                            />
                         </div>
                         <div className="space-y-2">
                             <Label>Kopnena zona</Label>
