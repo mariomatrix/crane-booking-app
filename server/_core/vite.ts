@@ -22,5 +22,28 @@ export function serveStatic(app: Express) {
 }
 
 export async function setupVite(app: Express, server: any) {
-    // Ova funkcija ostaje ista za razvoj (development) mod
+  const { createServer } = await import("vite");
+  const vite = await createServer({
+    server: { 
+      middlewareMode: true,
+      hmr: { server }
+    },
+    appType: "custom",
+    root: path.resolve(process.cwd(), "client")
+  });
+
+  app.use(vite.middlewares);
+
+  app.use("*", async (req, res, next) => {
+    const url = req.originalUrl;
+    try {
+      const clientIndexHtml = path.resolve(process.cwd(), "client", "index.html");
+      let template = fs.readFileSync(clientIndexHtml, "utf-8");
+      template = await vite.transformIndexHtml(url, template);
+      res.status(200).set({ "Content-Type": "text/html" }).end(template);
+    } catch (e) {
+      vite.ssrFixStacktrace(e as Error);
+      next(e);
+    }
+  });
 }

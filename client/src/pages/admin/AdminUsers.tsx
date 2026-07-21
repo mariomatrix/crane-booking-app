@@ -68,6 +68,8 @@ export default function AdminUsers() {
         role: roleFilter,
         status: statusFilter,
         vesselFilter: vesselFilter
+    }, {
+        placeholderData: (prev) => prev
     });
     const users = usersQuery.data?.data || [];
     const totalUsers = usersQuery.data?.total || 0;
@@ -374,7 +376,7 @@ export default function AdminUsers() {
                         </div>
                     </div>
 
-                    <Table>
+                    <Table className={usersQuery.isFetching ? "opacity-60 transition-opacity duration-200" : "transition-opacity duration-200"}>
                         <TableHeader>
                             <TableRow>
                                 <TableHead>OIB</TableHead>
