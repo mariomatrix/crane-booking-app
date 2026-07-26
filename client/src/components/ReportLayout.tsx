@@ -81,9 +81,10 @@ interface ExportActionsProps {
     excelFileName: string;
     pdfDocument?: any;
     pdfFileName?: string;
+    onPdfExport?: () => void;
 }
 
-export function ExportActions({ excelData, excelFileName, pdfDocument, pdfFileName }: ExportActionsProps) {
+export function ExportActions({ excelData, excelFileName, pdfDocument, pdfFileName, onPdfExport }: ExportActionsProps) {
     const handleExcelExport = () => {
         try {
             if (excelData.length === 0) {
@@ -111,7 +112,16 @@ export function ExportActions({ excelData, excelFileName, pdfDocument, pdfFileNa
                 <FileSpreadsheet className="h-4 w-4" /> Izvoz u Excel
             </Button>
 
-            {pdfDocument && (
+            {onPdfExport ? (
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onPdfExport}
+                    className="flex items-center gap-1.5 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-950/20"
+                >
+                    <FileText className="h-4 w-4" /> Preuzmi PDF
+                </Button>
+            ) : pdfDocument && (
                 <PDFDownloadLink
                     document={pdfDocument}
                     fileName={`${pdfFileName || excelFileName}_${format(new Date(), "yyyy-MM-dd")}.pdf`}

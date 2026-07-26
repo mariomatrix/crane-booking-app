@@ -3,7 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
 import { hr } from "date-fns/locale";
 import { ReportPageNav, ReportHeader, ReportFooter, ExportActions } from "@/components/ReportLayout";
-import { CraneSchedulePdf, CalendarSchedulePdf, WeeklySchedulePdf, MonthlySchedulePdf } from "@/components/ReportPdfTemplates";
+import { exportSchedulePdf } from "@/lib/reports/pdfmake-schedule";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -288,37 +288,19 @@ export default function ReportSchedule() {
                     <ExportActions
                         excelData={excelExportData}
                         excelFileName={`Plan_rada_dizalica_${effectiveFrom}`}
-                        pdfDocument={
-                            reportType === "daily" ? (
-                                <CalendarSchedulePdf
-                                    date={selectedDate}
-                                    cranes={cranes}
-                                    reservations={mergedList}
-                                    workStart={sysSettings?.workdayStart || "08:00"}
-                                    workEnd={sysSettings?.workdayEnd || "16:00"}
-                                    marinaName={sysSettings?.marinaName || "PŠD Špinut"}
-                                    marinaLogo={sysSettings?.marinaLogo || undefined}
-                                />
-                            ) : reportType === "weekly" ? (
-                                <WeeklySchedulePdf
-                                    dateFrom={effectiveFrom}
-                                    dateTo={effectiveTo}
-                                    cranes={cranes}
-                                    reservations={mergedList}
-                                    marinaName={sysSettings?.marinaName || "PŠD Špinut"}
-                                    marinaLogo={sysSettings?.marinaLogo || undefined}
-                                />
-                            ) : (
-                                <MonthlySchedulePdf
-                                    dateFrom={effectiveFrom}
-                                    dateTo={effectiveTo}
-                                    reservations={mergedList}
-                                    marinaName={sysSettings?.marinaName || "PŠD Špinut"}
-                                    marinaLogo={sysSettings?.marinaLogo || undefined}
-                                />
-                            )
-                        }
-                        pdfFileName={`Plan_rada_dizalica_${reportType}_${effectiveFrom}_A4_Landscape`}
+                        onPdfExport={() => {
+                            exportSchedulePdf({
+                                reportType,
+                                selectedDate,
+                                effectiveFrom,
+                                effectiveTo,
+                                cranes,
+                                reservations: mergedList,
+                                workStart: sysSettings?.workdayStart || "08:00",
+                                workEnd: sysSettings?.workdayEnd || "16:00",
+                                marinaName: sysSettings?.marinaName || "PŠD Špinut",
+                            });
+                        }}
                     />
 
                     {/* Preview Page */}
