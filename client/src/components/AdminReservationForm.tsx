@@ -144,13 +144,13 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         e.preventDefault();
         
         if (isWaitlisted) {
-            if (!userId || !serviceTypeId || !requestedDate || !craneId || !durationMin || !vesselType || !contactPhone || !vesselRegistration) {
-                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu, trajanje, registraciju i telefon).");
+            if (!userId || !serviceTypeId || !requestedDate || !craneId || !durationMin || !vesselType) {
+                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu, trajanje i tip plovila).");
                 return;
             }
         } else {
-            if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType || !contactPhone || !vesselRegistration) {
-                toast.error("Molimo popunite sva obavezna polja (uključujući vrijeme, dizalicu, trajanje i registraciju).");
+            if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType) {
+                toast.error("Molimo popunite sva obavezna polja (uključujući datum, vrijeme, dizalicu i trajanje).");
                 return;
             }
         }
@@ -455,6 +455,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                     <Label>{lang === "hr" ? "Točno vrijeme" : "Exact Time"} *</Label>
                                     <Input
                                         type="time"
+                                        step="1800"
                                         value={scheduledTime}
                                         onChange={(e) => setScheduledTime(e.target.value)}
                                         required
@@ -478,6 +479,9 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                 <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
                                 <Input
                                     type="number"
+                                    min="30"
+                                    step="30"
+                                    placeholder="30, 60, 90..."
                                     value={durationMin}
                                     onChange={(e) => setDurationMin(e.target.value)}
                                     required

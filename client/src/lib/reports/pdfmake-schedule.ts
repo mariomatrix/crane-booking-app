@@ -115,16 +115,17 @@ export function exportSchedulePdf(options: GeneratePdfOptions) {
         const activeCranes = cranes.slice(0, 3);
         const startHour = parseInt(workStart.split(":")[0]) || 8;
         const endHour = parseInt(workEnd.split(":")[0]) || 16;
-        const hours = [];
+        const slots: { h: number; m: number }[] = [];
         for (let h = startHour; h < endHour; h++) {
-            hours.push(h);
+            slots.push({ h, m: 0 });
+            slots.push({ h, m: 30 });
         }
 
         const tableBody: any[][] = [];
 
         // Header row
         const headerRow: any[] = [
-            { text: "Termin", bold: true, fontSize: 9, alignment: "center", fillColor: "#f1f5f9" }
+            { text: "Termin", bold: true, fontSize: 8, alignment: "center", fillColor: "#f1f5f9" }
         ];
 
         for (let i = 0; i < 3; i++) {
@@ -132,45 +133,50 @@ export function exportSchedulePdf(options: GeneratePdfOptions) {
             headerRow.push({
                 text: crane ? crane.name : `Dizalica ${i + 1}`,
                 bold: true,
-                fontSize: 9,
+                fontSize: 8,
                 alignment: "center",
                 fillColor: "#f1f5f9"
             });
         }
         tableBody.push(headerRow);
 
-        // Hourly rows
-        hours.forEach(hour => {
-            const timeStr = `${String(hour).padStart(2, "0")}:00 - ${String(hour + 1).padStart(2, "0")}:00`;
+        // 30-minute slot rows
+        slots.forEach(({ h, m }) => {
+            const nextM = m === 30 ? 0 : 30;
+            const nextH = m === 30 ? h + 1 : h;
+            const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} - ${String(nextH).padStart(2, "0")}:${String(nextM).padStart(2, "0")}`;
+
             const row: any[] = [
-                { text: timeStr, bold: true, fontSize: 8, alignment: "center", margin: [0, 4, 0, 4] }
+                { text: timeStr, bold: true, fontSize: 7, alignment: "center", margin: [0, 2, 0, 2] }
             ];
 
             for (let colIdx = 0; colIdx < 3; colIdx++) {
                 const crane = activeCranes[colIdx];
                 if (!crane) {
-                    row.push({ text: "—", fontSize: 8, alignment: "center", color: "#94a3b8" });
+                    row.push({ text: "—", fontSize: 7, alignment: "center", color: "#94a3b8" });
                     continue;
                 }
 
                 const slotItems = reservations.filter((r: any) => {
                     if (r.craneId !== crane.id || !r.scheduledStart) return false;
                     const rDate = safeParseDate(r.scheduledStart);
-                    return isSameDay(rDate, selectedDate) && rDate.getHours() === hour;
+                    const sH = rDate.getHours();
+                    const sM = rDate.getMinutes();
+                    return isSameDay(rDate, selectedDate) && sH === h && Math.floor(sM / 30) * 30 === m;
                 });
 
                 if (slotItems.length > 0) {
                     const stackContent: any[] = slotItems.map((item: any) => ({
                         stack: [
-                            { text: `${item.clientName || "Klijent"}`, bold: true, fontSize: 8, color: item.isMaintenance ? "#9a3412" : "#0f172a" },
-                            { text: `Plovilo: ${item.vesselName || "—"} (${item.vesselRegistration || "—"})`, fontSize: 7, color: "#475569" },
-                            { text: item.serviceTypeName || "Radnja", bold: true, fontSize: 7, color: item.isMaintenance ? "#c2410c" : "#0284c7" }
+                            { text: `${item.clientName || "Klijent"}`, bold: true, fontSize: 7, color: item.isMaintenance ? "#9a3412" : "#0f172a" },
+                            { text: `Plovilo: ${item.vesselName || "—"} (${item.vesselRegistration || "—"})`, fontSize: 6, color: "#475569" },
+                            { text: item.serviceTypeName || "Radnja", bold: true, fontSize: 6, color: item.isMaintenance ? "#c2410c" : "#0284c7" }
                         ],
-                        margin: [0, 2, 0, 2]
+                        margin: [0, 1, 0, 1]
                     }));
                     row.push({ stack: stackContent });
                 } else {
-                    row.push({ text: "— Slobodno —", fontSize: 7, color: "#cbd5e1", alignment: "center", margin: [0, 4, 0, 4] });
+                    row.push({ text: "—", fontSize: 7, color: "#cbd5e1", alignment: "center", margin: [0, 2, 0, 2] });
                 }
             }
 

@@ -159,7 +159,7 @@ async function validateSlotAgainstSettings(
   sysSettings: Record<string, string>
 ) {
   const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-  const slotMin = Number(sysSettings.slotDurationMinutes ?? "60");
+  const slotMin = Number(sysSettings.slotDurationMinutes ?? "30");
   const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
   const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
 
@@ -175,24 +175,24 @@ async function validateSlotAgainstSettings(
     });
   }
 
-  // Phase 2: Strictly hourly slots (XX:00)
-  if (startDate.getMinutes() !== 0 || startDate.getSeconds() !== 0) {
+  // Strictly 30-minute interval slots (XX:00 or XX:30)
+  if (startDate.getMinutes() % 30 !== 0 || startDate.getSeconds() !== 0) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Termini moraju početi točno na puni sat (npr. 08:00).",
+      message: "Termini moraju početi na svakih 30 minuta (npr. 08:00 ili 08:30).",
     });
   }
 
-  // Duration must be a multiple of 60
+  // Duration must be a multiple of 30 minutes (minimum 30 min)
   const durationMin = (endDate.getTime() - startDate.getTime()) / 60000;
-  if (durationMin <= 0 || durationMin % 60 !== 0) {
+  if (durationMin < 30 || durationMin % 30 !== 0) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Trajanje mora biti višekratnik od 60 minuta (1, 2 ili 3 sata).",
+      message: "Trajanje mora biti najmanje 30 minuta i višekratnik od 30 minuta (30, 60, 90 min...).",
     });
   }
 
-  return { bufferMin: 0 }; // No separate buffer in Phase 2
+  return { bufferMin: 0 };
 }
 
 // ─── Main Router ──────────────────────────────────────────────────────
@@ -1654,6 +1654,8 @@ export const appRouter = router({
         scheduledStart: z.date(),
         durationMin: z.number().int().positive().default(60),
         adminNote: z.string().optional(),
+        vesselRegistration: z.string().optional(),
+        contactPhone: z.string().optional(),
         ignoreNoSpace: z.boolean().optional().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -1727,11 +1729,20 @@ export const appRouter = router({
             scheduledEnd,
             durationMin: input.durationMin,
             status: "approved",
-            adminNote: input.adminNote,
+            adminNote: input.adminNote !== undefined ? input.adminNote : reservation.adminNote,
+            vesselRegistration: input.vesselRegistration !== undefined ? input.vesselRegistration : reservation.vesselRegistration,
+            contactPhone: input.contactPhone !== undefined ? input.contactPhone : reservation.contactPhone,
             approvedBy: ctx.user.id,
             approvedAt: new Date(),
             updatedAt: new Date(),
           }).where(eq(reservations.id, input.id));
+
+          if (reservation.vesselId && input.vesselRegistration) {
+            const { vessels } = await import("../drizzle/schema");
+            await db.update(vessels)
+              .set({ registration: input.vesselRegistration, updatedAt: new Date() })
+              .where(eq(vessels.id, reservation.vesselId));
+          }
 
           // Update linked waiting list entry to assigned
           await db.update(landWaitingList)
@@ -2019,6 +2030,49 @@ export const appRouter = router({
           entityType: "reservation",
           entityId: input.id,
           payload: { landZoneId: input.landZoneId },
+        });
+
+        return { success: true };
+      }),
+
+    updateDetails: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        vesselRegistration: z.string().optional(),
+        contactPhone: z.string().optional(),
+        userNote: z.string().optional(),
+        adminNote: z.string().optional(),
+        landZoneId: z.string().uuid().nullable().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        await db.update(reservations).set({
+          vesselRegistration: input.vesselRegistration !== undefined ? input.vesselRegistration : reservation.vesselRegistration,
+          contactPhone: input.contactPhone !== undefined ? input.contactPhone : reservation.contactPhone,
+          userNote: input.userNote !== undefined ? input.userNote : reservation.userNote,
+          adminNote: input.adminNote !== undefined ? input.adminNote : reservation.adminNote,
+          landZoneId: input.landZoneId !== undefined ? input.landZoneId : reservation.landZoneId,
+          updatedAt: new Date(),
+        }).where(eq(reservations.id, input.id));
+
+        if (reservation.vesselId && input.vesselRegistration) {
+          const { vessels } = await import("../drizzle/schema");
+          await db.update(vessels)
+            .set({ registration: input.vesselRegistration, updatedAt: new Date() })
+            .where(eq(vessels.id, reservation.vesselId));
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_details_updated",
+          entityType: "reservation",
+          entityId: input.id,
+          payload: input,
         });
 
         return { success: true };

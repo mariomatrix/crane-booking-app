@@ -420,7 +420,7 @@ export async function removeFromWaitingList(id: string, userId: string) {
 
 // ─── Settings ─────────────────────────────────────────────────────────
 const DEFAULT_SETTINGS: Record<string, string> = {
-  slotDurationMinutes: "60",
+  slotDurationMinutes: "30",
   bufferMinutes: "15",
   workdayStart: "08:00",
   workdayEnd: "16:00",

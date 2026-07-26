@@ -341,16 +341,20 @@ export default function ReportSchedule() {
                                         {(() => {
                                             const startHour = parseInt(sysSettings?.workdayStart?.split(":")[0] || "8") || 8;
                                             const endHour = parseInt(sysSettings?.workdayEnd?.split(":")[0] || "16") || 16;
-                                            const hours = [];
+                                            const slots: { h: number; m: number }[] = [];
                                             for (let h = startHour; h < endHour; h++) {
-                                                hours.push(h);
+                                                slots.push({ h, m: 0 });
+                                                slots.push({ h, m: 30 });
                                             }
 
-                                            return hours.map((hour) => {
-                                                const timeStr = `${String(hour).padStart(2, "0")}:00 - ${String(hour + 1).padStart(2, "0")}:00`;
+                                            return slots.map(({ h, m }) => {
+                                                const nextM = m === 30 ? 0 : 30;
+                                                const nextH = m === 30 ? h + 1 : h;
+                                                const timeStr = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} - ${String(nextH).padStart(2, "0")}:${String(nextM).padStart(2, "0")}`;
+                                                
                                                 return (
-                                                    <TableRow key={hour} className="hover:bg-transparent">
-                                                        <TableCell className="font-bold font-mono text-center text-xs bg-muted/20 border-r py-3">
+                                                    <TableRow key={`${h}-${m}`} className="hover:bg-transparent">
+                                                        <TableCell className="font-bold font-mono text-center text-xs bg-muted/20 border-r py-2">
                                                             {timeStr}
                                                         </TableCell>
                                                         {Array.from({ length: 3 }).map((_, colIdx) => {
@@ -361,8 +365,10 @@ export default function ReportSchedule() {
 
                                                             const slotItems = mergedList.filter(r => {
                                                                 if (r.craneId !== crane.id || !r.scheduledStart) return false;
-                                                                const startH = new Date(r.scheduledStart).getHours();
-                                                                return startH === hour;
+                                                                const dt = new Date(r.scheduledStart);
+                                                                const sH = dt.getHours();
+                                                                const sM = dt.getMinutes();
+                                                                return sH === h && Math.floor(sM / 30) * 30 === m;
                                                             });
 
                                                             return (

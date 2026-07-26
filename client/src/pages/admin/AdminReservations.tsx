@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Pagination,
@@ -44,6 +45,7 @@ import {
   RotateCcw,
   Construction,
   MapPin,
+  Pencil,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
@@ -77,6 +79,15 @@ export default function AdminReservations() {
   const [approveTime, setApproveTime] = useState("");
   const [approveDuration, setApproveDuration] = useState("60");
   const [adminNote, setAdminNote] = useState("");
+  const [approveVesselRegistration, setApproveVesselRegistration] = useState("");
+  const [approveContactPhone, setApproveContactPhone] = useState("");
+
+  // Edit details dialog state
+  const [editDetailsOpen, setEditDetailsOpen] = useState(false);
+  const [editDetailsId, setEditDetailsId] = useState<string | null>(null);
+  const [editVesselRegistration, setEditVesselRegistration] = useState("");
+  const [editContactPhone, setEditContactPhone] = useState("");
+  const [editAdminNote, setEditAdminNote] = useState("");
 
   // Reject dialog state
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -134,6 +145,15 @@ export default function AdminReservations() {
     onError: (error) => toast.error(error.message),
   });
 
+  const updateDetailsMutation = trpc.reservation.updateDetails.useMutation({
+    onSuccess: () => {
+      toast.success("Podaci rezervacije su ažurirani.");
+      utils.reservation.listAll.invalidate();
+      setEditDetailsOpen(false);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const rejectMutation = trpc.reservation.reject.useMutation({
     onSuccess: () => {
       toast.success("Rezervacija odbijena.");
@@ -167,12 +187,16 @@ export default function AdminReservations() {
     setApproveTime("");
     setApproveDuration("60");
     setAdminNote("");
+    setApproveVesselRegistration("");
+    setApproveContactPhone("");
   };
 
   const openApprove = (id: string) => {
     setSelectedId(id);
     const reservation = (reservationsList as any[]).find((r: any) => r.id === id);
     if (reservation) {
+      setApproveVesselRegistration(reservation.vesselRegistration || "");
+      setApproveContactPhone(reservation.contactPhone || reservation.user?.phone || "");
       if (reservation.craneId) {
         setApproveCraneId(reservation.craneId);
       }
@@ -186,8 +210,28 @@ export default function AdminReservations() {
       }
     } else {
       setApproveDate(undefined);
+      setApproveVesselRegistration("");
+      setApproveContactPhone("");
     }
     setApproveOpen(true);
+  };
+
+  const openEditDetails = (reservation: any) => {
+    setEditDetailsId(reservation.id);
+    setEditVesselRegistration(reservation.vesselRegistration || "");
+    setEditContactPhone(reservation.contactPhone || reservation.user?.phone || "");
+    setEditAdminNote(reservation.adminNote || "");
+    setEditDetailsOpen(true);
+  };
+
+  const handleEditDetailsSave = () => {
+    if (!editDetailsId) return;
+    updateDetailsMutation.mutate({
+      id: editDetailsId,
+      vesselRegistration: editVesselRegistration || undefined,
+      contactPhone: editContactPhone || undefined,
+      adminNote: editAdminNote || undefined,
+    });
   };
 
   const openReject = (id: string) => {
@@ -211,6 +255,8 @@ export default function AdminReservations() {
       scheduledStart,
       durationMin: Number(approveDuration),
       adminNote: adminNote || undefined,
+      vesselRegistration: approveVesselRegistration || undefined,
+      contactPhone: approveContactPhone || undefined,
     });
   };
 
@@ -360,8 +406,18 @@ export default function AdminReservations() {
             )}
           </div>
 
-          {/* Card Footer Actions */}
+            {/* Card Footer Actions */}
           <div className="flex items-center justify-end gap-1.5 pt-2 border-t">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => openEditDetails(reservation)}
+              className="h-7 text-xs px-2"
+              title="Uredi registraciju, kontakt i bilješke"
+            >
+              <Pencil className="h-3.5 w-3.5 mr-1" />
+              Uredi
+            </Button>
             {(isPending || isWaitlisted) && (
               <>
                 <Button
@@ -883,6 +939,25 @@ export default function AdminReservations() {
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Registracija plovila (opcionalno)</Label>
+                <Input
+                  placeholder="npr. ST-1234"
+                  value={approveVesselRegistration}
+                  onChange={(e) => setApproveVesselRegistration(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Kontakt telefon / mobitel (opcionalno)</Label>
+                <Input
+                  placeholder="npr. 0912345678"
+                  value={approveContactPhone}
+                  onChange={(e) => setApproveContactPhone(e.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label>Trajanje</Label>
               <Select value={approveDuration} onValueChange={setApproveDuration}>
@@ -917,6 +992,62 @@ export default function AdminReservations() {
             >
               {approveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Odobri rezervaciju
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Details Dialog */}
+      <Dialog open={editDetailsOpen} onOpenChange={setEditDetailsOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Uredi podatke rezervacije</DialogTitle>
+            <DialogDescription>
+              Izmijenite registraciju plovila, kontakt telefon i internu bilješku operatera.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Registracija plovila</Label>
+              <Input
+                placeholder="npr. ST-1234"
+                value={editVesselRegistration}
+                onChange={(e) => setEditVesselRegistration(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Kontakt telefon / mobitel</Label>
+              <Input
+                placeholder="npr. 0912345678"
+                value={editContactPhone}
+                onChange={(e) => setEditContactPhone(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Interna bilješka operatera</Label>
+              <Textarea
+                placeholder="Interna napomena vidljiva samo osoblju..."
+                value={editAdminNote}
+                onChange={(e) => setEditAdminNote(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDetailsOpen(false)}>
+              Odustani
+            </Button>
+            <Button
+              onClick={handleEditDetailsSave}
+              disabled={updateDetailsMutation.isPending}
+              className="bg-primary text-white"
+            >
+              {updateDetailsMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Spremi promjene
             </Button>
           </DialogFooter>
         </DialogContent>

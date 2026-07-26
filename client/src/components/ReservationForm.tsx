@@ -128,7 +128,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!serviceTypeId || !requestedDate || !vesselType || !contactPhone) {
+        if (!serviceTypeId || !requestedDate || !vesselType) {
             toast.error(t.form.errors.required);
             return;
         }
