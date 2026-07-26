@@ -1,72 +1,60 @@
 import { useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
+import { hr } from "date-fns/locale";
 import { ReportPageNav, ReportHeader, ReportFooter, ExportActions } from "@/components/ReportLayout";
 import { CraneSchedulePdf, CalendarSchedulePdf } from "@/components/ReportPdfTemplates";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { CalendarDays, Loader2 } from "lucide-react";
+import { CalendarDays, Loader2, Calendar as CalendarIcon, Clock, Filter, CheckCircle2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
-type ViewMode = "daily-hours" | "daily-cranes" | "weekly" | "monthly";
+import { Badge } from "@/components/ui/badge";
+
+type ReportType = "daily" | "weekly" | "monthly";
 
 export default function ReportSchedule() {
-    const [from, setFrom] = useState(format(new Date(), "yyyy-MM-dd"));
-    const [to, setTo] = useState(format(new Date(), "yyyy-MM-dd"));
+    // 1. Report Type (Default: "daily")
+    const [reportType, setReportType] = useState<ReportType>("daily");
+    
+    // 2. Selected Date (Default: today)
+    const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+    
+    // Additional filters
     const [craneId, setCraneId] = useState("all");
     const [status, setStatus] = useState("all");
     const [includeMaintenance, setIncludeMaintenance] = useState(true);
-    const [viewMode, setViewMode] = useState<ViewMode>("daily-hours");
 
-    // Fetch cranes for the filter dropdown
+    // Fetch cranes & settings
     const { data: cranes = [] } = trpc.crane.list.useQuery();
     const { data: sysSettings } = trpc.settings.get.useQuery();
 
-    let effectiveFrom = from;
-    let effectiveTo = to;
-    try {
-        if (from && !isNaN(Date.parse(from))) {
-            if (viewMode === "weekly") {
-                effectiveFrom = format(startOfWeek(new Date(from), { weekStartsOn: 1 }), "yyyy-MM-dd");
-                effectiveTo = format(endOfWeek(new Date(from), { weekStartsOn: 1 }), "yyyy-MM-dd");
-            } else if (viewMode === "monthly") {
-                effectiveFrom = format(startOfMonth(new Date(from)), "yyyy-MM-dd");
-                effectiveTo = format(endOfMonth(new Date(from)), "yyyy-MM-dd");
-            } else if (viewMode === "daily-cranes") {
-                effectiveFrom = from;
-                effectiveTo = from; // Force single day
-            }
-        }
-    } catch (e) {
-        console.error(e);
+    // Calculate effective date range based on reportType & selectedDate
+    let effectiveFromDate = selectedDate;
+    let effectiveToDate = selectedDate;
+
+    if (reportType === "weekly") {
+        effectiveFromDate = startOfWeek(selectedDate, { weekStartsOn: 1 });
+        effectiveToDate = endOfWeek(selectedDate, { weekStartsOn: 1 });
+    } else if (reportType === "monthly") {
+        effectiveFromDate = startOfMonth(selectedDate);
+        effectiveToDate = endOfMonth(selectedDate);
     }
 
-    const { data: reportData, isLoading, refetch } = trpc.reports.craneSchedule.useQuery({
+    const effectiveFrom = format(effectiveFromDate, "yyyy-MM-dd");
+    const effectiveTo = format(effectiveToDate, "yyyy-MM-dd");
+
+    // Fetch schedule data
+    const { data: reportData, isLoading } = trpc.reports.craneSchedule.useQuery({
         from: effectiveFrom,
         to: effectiveTo,
         craneId: craneId === "all" ? undefined : craneId,
         status: status === "all" ? undefined : status,
         includeMaintenance,
     });
-
-    const handleQuickFilter = (type: "today" | "week" | "month") => {
-        const today = new Date();
-        if (type === "today") {
-            const formatted = format(today, "yyyy-MM-dd");
-            setFrom(formatted);
-            setTo(formatted);
-        } else if (type === "week") {
-            setFrom(format(startOfWeek(today, { weekStartsOn: 1 }), "yyyy-MM-dd"));
-            setTo(format(endOfWeek(today, { weekStartsOn: 1 }), "yyyy-MM-dd"));
-        } else if (type === "month") {
-            setFrom(format(startOfMonth(today), "yyyy-MM-dd"));
-            setTo(format(endOfMonth(today), "yyyy-MM-dd"));
-        }
-    };
 
     const reservationsList = reportData?.reservations || [];
     const maintenanceList = reportData?.maintenance || [];
@@ -78,6 +66,7 @@ export default function ReportSchedule() {
             isMaintenance: true,
             scheduledStart: m.startAt,
             scheduledEnd: m.endAt,
+            durationMin: Math.max(1, Math.round((new Date(m.endAt).getTime() - new Date(m.startAt).getTime()) / 60000)),
             craneId: m.craneId,
             craneName: m.craneName,
             clientName: "BLOKADA / ODRŽAVANJE",
@@ -89,14 +78,14 @@ export default function ReportSchedule() {
         })) : [])
     ];
 
-    // Map raw data for Excel download
+    // Excel export mapping
     const excelExportData = reservationsList.map(item => ({
         "Br. Rezervacije": item.reservationNumber || "",
         "OIB Klijenta": item.userOib || "",
         "Klijent": item.clientName || "",
         "Plovilo": item.vesselName || "",
         "Registracija": item.vesselRegistration || "",
-        "Radnja": item.serviceTypeName || item.serviceTypeName || "",
+        "Radnja": item.serviceTypeName || "",
         "Dizalica": item.craneName || "",
         "Trajanje (min)": item.durationMin || 0,
         "Početak": item.scheduledStart ? format(new Date(item.scheduledStart), "dd.MM.yyyy HH:mm") : "",
@@ -104,22 +93,42 @@ export default function ReportSchedule() {
         "Status": item.status || "",
     }));
 
-    // Rendering weekly schedule helper
+    // Period Display Label
+    const periodLabel = reportType === "daily"
+        ? `Dan: ${format(selectedDate, "dd.MM.yyyy. (EEEE)", { locale: hr })}`
+        : reportType === "weekly"
+        ? `Tjedan: ${format(effectiveFromDate, "dd.MM.yyyy.")} – ${format(effectiveToDate, "dd.MM.yyyy.")}`
+        : `Mjesec: ${format(selectedDate, "LLLL yyyy.", { locale: hr })} (${format(effectiveFromDate, "dd.MM.yyyy.")} – ${format(effectiveToDate, "dd.MM.yyyy.")})`;
+
+    // Helper to switch quick date shortcuts
+    const handleQuickShortcut = (shortcut: "today" | "thisWeek" | "thisMonth") => {
+        const today = new Date();
+        setSelectedDate(today);
+        if (shortcut === "today") {
+            setReportType("daily");
+        } else if (shortcut === "thisWeek") {
+            setReportType("weekly");
+        } else if (shortcut === "thisMonth") {
+            setReportType("monthly");
+        }
+    };
+
+    // Render Weekly Table
     const renderWeeklyTable = () => {
         const days = eachDayOfInterval({
-            start: startOfWeek(new Date(from), { weekStartsOn: 1 }),
-            end: endOfWeek(new Date(from), { weekStartsOn: 1 })
+            start: effectiveFromDate,
+            end: effectiveToDate,
         });
 
         return (
-            <Table>
+            <Table className="border">
                 <TableHeader>
-                    <TableRow>
-                        <TableHead>Dizalica</TableHead>
+                    <TableRow className="bg-muted/50">
+                        <TableHead className="w-[15%] font-bold">Dizalica</TableHead>
                         {days.map((day, idx) => (
-                            <TableHead key={idx} className="text-center font-medium">
-                                {format(day, "EEEE")}<br />
-                                <span className="text-xs text-muted-foreground">{format(day, "dd.MM.yyyy")}</span>
+                            <TableHead key={idx} className="text-center font-semibold text-xs border-l">
+                                <span className="capitalize">{format(day, "EEEE", { locale: hr })}</span>
+                                <span className="block text-[11px] text-muted-foreground font-mono">{format(day, "dd.MM.")}</span>
                             </TableHead>
                         ))}
                     </TableRow>
@@ -127,26 +136,36 @@ export default function ReportSchedule() {
                 <TableBody>
                     {cranes.map(crane => (
                         <TableRow key={crane.id}>
-                            <TableCell className="font-semibold">{crane.name}</TableCell>
+                            <TableCell className="font-bold text-sm bg-muted/20 border-r">{crane.name}</TableCell>
                             {days.map((day, dIdx) => {
                                 const dayStr = format(day, "yyyy-MM-dd");
-                                const dayReservations = reservationsList.filter(r =>
+                                const dayItems = mergedList.filter(r =>
                                     r.craneId === crane.id &&
                                     r.scheduledStart &&
                                     format(new Date(r.scheduledStart), "yyyy-MM-dd") === dayStr
                                 );
                                 return (
-                                    <TableCell key={dIdx} className="align-top border">
-                                        <div className="space-y-1">
-                                            {dayReservations.map((r, rIdx) => (
-                                                <div key={rIdx} className="text-[11px] p-1.5 border rounded bg-slate-50 dark:bg-slate-900 leading-tight">
-                                                    <span className="font-bold">{format(new Date(r.scheduledStart!), "HH:mm")}</span> - {r.clientName}<br />
-                                                    <span className="text-muted-foreground">{r.vesselName} ({r.vesselRegistration})</span><br />
-                                                    <span className="text-[10px] text-blue-600 font-medium">{r.serviceTypeName}</span>
+                                    <TableCell key={dIdx} className="align-top border-l p-2">
+                                        <div className="space-y-1.5 min-h-[60px]">
+                                            {dayItems.map((r, rIdx) => (
+                                                <div
+                                                    key={rIdx}
+                                                    className={`text-[11px] p-2 border rounded-md leading-tight ${
+                                                        r.isMaintenance
+                                                            ? "bg-amber-50 border-amber-300 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+                                                            : "bg-card border-slate-200 dark:border-slate-800"
+                                                    }`}
+                                                >
+                                                    <span className="font-bold text-foreground">
+                                                        {r.scheduledStart ? format(new Date(r.scheduledStart), "HH:mm") : ""}
+                                                    </span>{" "}
+                                                    — {r.clientName}<br />
+                                                    <span className="text-muted-foreground text-[10px]">{r.vesselName} ({r.vesselRegistration})</span><br />
+                                                    <span className="text-[10px] text-primary font-semibold">{r.serviceTypeName}</span>
                                                 </div>
                                             ))}
-                                            {dayReservations.length === 0 && (
-                                                <span className="text-[10px] text-muted-foreground italic">Nema operacija</span>
+                                            {dayItems.length === 0 && (
+                                                <span className="text-[10px] text-muted-foreground/60 italic block pt-2 text-center">—</span>
                                             )}
                                         </div>
                                     </TableCell>
@@ -164,58 +183,73 @@ export default function ReportSchedule() {
             <ReportPageNav title="Plan rada dizalica" />
 
             {/* Filter Panel */}
-            <Card className="no-print report-filters-card">
-                <CardHeader className="py-4">
-                    <CardTitle className="text-base flex items-center gap-2">
-                        <CalendarDays className="h-4 w-4" /> Filteri i Opcije Prikaza
+            <Card className="no-print report-filters-card border shadow-sm">
+                <CardHeader className="py-3 px-5 border-b bg-muted/30">
+                    <CardTitle className="text-sm font-semibold flex items-center justify-between">
+                        <span className="flex items-center gap-2">
+                            <Filter className="h-4 w-4 text-primary" /> Filteri i Postavke Izvještaja
+                        </span>
+                        <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleQuickShortcut("today")}>Danas</Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleQuickShortcut("thisWeek")}>Ovaj tjedan</Button>
+                            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => handleQuickShortcut("thisMonth")}>Ovaj mjesec</Button>
+                        </div>
                     </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                        <div className="space-y-2 flex flex-col justify-end">
-                            <Label className="mb-1">Datum od</Label>
-                            <DatePicker
-                                date={from ? new Date(from) : undefined}
-                                onChange={(d) => d && setFrom(format(d, "yyyy-MM-dd"))}
-                                placeholder="Odaberi datum"
-                            />
-                        </div>
-                        <div className="space-y-2 flex flex-col justify-end">
-                            <Label className="mb-1">Datum do</Label>
-                            <DatePicker
-                                date={to ? new Date(to) : undefined}
-                                onChange={(d) => d && setTo(format(d, "yyyy-MM-dd"))}
-                                placeholder="Odaberi datum"
-                                disabled={viewMode === "weekly" || viewMode === "monthly" || viewMode === "daily-cranes"}
-                            />
-                            {(viewMode === "weekly" || viewMode === "monthly" || viewMode === "daily-cranes") && (
-                                <span className="text-[10px] text-muted-foreground block italic mt-1">
-                                    {viewMode === "daily-cranes" ? "Onemogućeno za dnevni prikaz" : "Automatski izračunato prema 'Datum od'"}
-                                </span>
-                            )}
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Dizalica</Label>
-                            <Select value={craneId} onValueChange={setCraneId}>
-                                <SelectTrigger>
+                <CardContent className="p-4 sm:p-5 space-y-4">
+                    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+                        {/* 1. Report Type */}
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold">1. Tip izvještaja</Label>
+                            <Select value={reportType} onValueChange={(val: ReportType) => setReportType(val)}>
+                                <SelectTrigger className="h-9 text-xs font-semibold">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">Sve dizalice</SelectItem>
+                                    <SelectItem value="daily">📅 Dnevni izvještaj (1 dan)</SelectItem>
+                                    <SelectItem value="weekly">🗓️ Tjedni izvještaj (Ponedjeljak – Nedjelja)</SelectItem>
+                                    <SelectItem value="monthly">📊 Mjesečni izvještaj (Puni mjesec)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        {/* 2. Date Selection (Adapts according to report type) */}
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold">
+                                {reportType === "daily" ? "2. Odaberi dan" : reportType === "weekly" ? "2. Početni datum (ili dan u tjednu)" : "2. Odaberi mjesec"}
+                            </Label>
+                            <DatePicker
+                                date={selectedDate}
+                                onChange={(d) => d && setSelectedDate(d)}
+                                placeholder="Odaberi datum"
+                            />
+                        </div>
+
+                        {/* 3. Crane Selection */}
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold">Dizalica</Label>
+                            <Select value={craneId} onValueChange={setCraneId}>
+                                <SelectTrigger className="h-9 text-xs">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Sve dizalice (sve 3)</SelectItem>
                                     {cranes.map(c => (
                                         <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="space-y-2">
-                            <Label>Status</Label>
+
+                        {/* 4. Status Selection */}
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold">Status operacija</Label>
                             <Select value={status} onValueChange={setStatus}>
-                                <SelectTrigger>
+                                <SelectTrigger className="h-9 text-xs">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">Svi aktivni</SelectItem>
+                                    <SelectItem value="all">Svi aktivni statusi</SelectItem>
                                     <SelectItem value="approved">Odobreno</SelectItem>
                                     <SelectItem value="completed">Dovršeno</SelectItem>
                                     <SelectItem value="cancelled">Otkazano</SelectItem>
@@ -225,52 +259,26 @@ export default function ReportSchedule() {
                         </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
+                    <div className="flex items-center justify-between border-t pt-3">
                         <div className="flex items-center space-x-2">
                             <Checkbox
                                 id="maint-checkbox"
                                 checked={includeMaintenance}
                                 onCheckedChange={(v) => setIncludeMaintenance(!!v)}
                             />
-                            <Label htmlFor="maint-checkbox" className="text-sm font-normal cursor-pointer">
-                                Prikaži planirana održavanja/blokade
+                            <Label htmlFor="maint-checkbox" className="text-xs cursor-pointer select-none">
+                                Prikaži planirana održavanja i blokade
                             </Label>
                         </div>
 
-                        <div className="flex gap-2">
-                            <Button variant="ghost" size="sm" onClick={() => handleQuickFilter("today")}>Danas</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleQuickFilter("week")}>Ovaj tjedan</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handleQuickFilter("month")}>Ovaj mjesec</Button>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 border-t pt-4">
-                        <Button
-                            variant={viewMode === "daily-hours" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setViewMode("daily-hours")}
-                        >
-                            Dnevni (po satima)
-                        </Button>
-                        <Button
-                            variant={viewMode === "daily-cranes" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setViewMode("daily-cranes")}
-                        >
-                            Dnevni (po dizalicama)
-                        </Button>
-                        <Button
-                            variant={viewMode === "weekly" ? "default" : "outline"}
-                            size="sm"
-                            onClick={() => setViewMode("weekly")}
-                        >
-                            Tjedni raspored
-                        </Button>
+                        <Badge variant="outline" className="text-xs font-semibold bg-primary/5 text-primary border-primary/20">
+                            {periodLabel}
+                        </Badge>
                     </div>
                 </CardContent>
             </Card>
 
-            {/* Export and Preview Buttons */}
+            {/* Export and Preview Section */}
             {isLoading ? (
                 <div className="flex justify-center p-12">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -279,88 +287,52 @@ export default function ReportSchedule() {
                 <div className="space-y-4">
                     <ExportActions
                         excelData={excelExportData}
-                        excelFileName="Plan_rada_dizalica"
+                        excelFileName={`Plan_rada_dizalica_${effectiveFrom}`}
                         pdfDocument={
-                            viewMode === "daily-cranes" ? (
-                                <CalendarSchedulePdf
-                                    date={new Date(from)}
-                                    cranes={cranes}
-                                    reservations={mergedList}
-                                    workStart={sysSettings?.workdayStart || "08:00"}
-                                    workEnd={sysSettings?.workdayEnd || "16:00"}
-                                    marinaName={sysSettings?.marinaName || "PŠD Špinut"}
-                                    marinaLogo={sysSettings?.marinaLogo || undefined}
-                                />
-                            ) : (
-                                <CraneSchedulePdf data={reservationsList} dateFrom={effectiveFrom} dateTo={effectiveTo} marinaName="PŠD Špinut" />
-                            )
+                            <CalendarSchedulePdf
+                                date={selectedDate}
+                                cranes={cranes}
+                                reservations={mergedList}
+                                workStart={sysSettings?.workdayStart || "08:00"}
+                                workEnd={sysSettings?.workdayEnd || "16:00"}
+                                marinaName={sysSettings?.marinaName || "PŠD Špinut"}
+                                marinaLogo={sysSettings?.marinaLogo || undefined}
+                            />
                         }
-                        pdfFileName="Plan_rada_dizalica"
+                        pdfFileName={`Plan_rada_dizalica_${effectiveFrom}_A4_Landscape`}
                     />
 
                     {/* Preview Page */}
-                    <div className="border rounded-lg bg-card p-8 shadow-sm max-w-[21cm] mx-auto report-print-container">
+                    <div className="border rounded-xl bg-card p-6 sm:p-8 shadow-sm max-w-[29cm] mx-auto report-print-container">
                         <ReportHeader title="Plan rada dizalica" dateFrom={effectiveFrom} dateTo={effectiveTo} />
 
-                        {/* Rendering View Options */}
-                        {viewMode === "daily-hours" && (
-                            <div className="space-y-4">
-                                <h3 className="font-semibold text-lg border-b pb-2">Plan rada kronološki</h3>
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead className="w-[12%]">Datum</TableHead>
-                                            <TableHead className="w-[10%]">Početak</TableHead>
-                                            <TableHead className="w-[10%]">Trajanje</TableHead>
-                                            <TableHead className="w-[18%]">OIB klijenta</TableHead>
-                                            <TableHead className="w-[18%]">Klijent</TableHead>
-                                            <TableHead className="w-[18%]">Plovilo (Registracija)</TableHead>
-                                            <TableHead className="w-[14%]">Radnja (Dizalica)</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {reservationsList.map((item, idx) => (
-                                            <TableRow key={idx}>
-                                                <TableCell className="font-mono text-sm">
-                                                    {item.scheduledStart ? format(new Date(item.scheduledStart), "dd.MM.yyyy") : "-"}
-                                                </TableCell>
-                                                <TableCell className="font-semibold font-mono">
-                                                    {item.scheduledStart ? format(new Date(item.scheduledStart), "HH:mm") : "-"}
-                                                </TableCell>
-                                                <TableCell className="font-mono">{item.durationMin} min</TableCell>
-                                                <TableCell className="font-mono text-sm">{item.userOib || "—"}</TableCell>
-                                                <TableCell className="font-medium">{item.clientName}</TableCell>
-                                                <TableCell>
-                                                    <span className="font-semibold">{item.vesselName}</span>
-                                                    {item.vesselRegistration && <span className="block text-xs text-muted-foreground font-mono">Reg: {item.vesselRegistration}</span>}
-                                                </TableCell>
-                                                <TableCell>
-                                                    <span className="font-semibold text-blue-600 dark:text-blue-400">{item.serviceTypeName || "—"}</span>
-                                                    <span className="block text-xs text-muted-foreground">{item.craneName}</span>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                        {reservationsList.length === 0 && (
-                                            <TableRow>
-                                                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground italic">
-                                                    Nema rezervacija za odabrani dan i dizalicu.
-                                                </TableCell>
-                                            </TableRow>
-                                        )}
-                                    </TableBody>
-                                </Table>
+                        {/* Active Period Banner */}
+                        <div className="my-4 p-3 bg-slate-50 dark:bg-slate-900 border rounded-lg flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <CalendarIcon className="h-4 w-4 text-primary" />
+                                <span className="font-bold text-sm text-foreground">{periodLabel}</span>
                             </div>
-                        )}
+                            <span className="text-xs text-muted-foreground">
+                                Ukupno zahvata u razdoblju: <strong className="text-foreground">{mergedList.length}</strong>
+                            </span>
+                        </div>
 
-                        {viewMode === "daily-cranes" && (
+                        {/* DAILY VIEW: 3 Parallel Columns for Cranes */}
+                        {reportType === "daily" && (
                             <div className="space-y-4">
-                                <h3 className="font-semibold text-lg border-b pb-2">Plan rada po dizalicama</h3>
-                                <Table>
+                                <Table className="border">
                                     <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Termin</TableHead>
-                                            {cranes.map(crane => (
-                                                <TableHead key={crane.id}>{crane.name}</TableHead>
+                                        <TableRow className="bg-muted/50">
+                                            <TableHead className="w-[14%] font-bold text-center border-r">Termin</TableHead>
+                                            {cranes.slice(0, 3).map((crane) => (
+                                                <TableHead key={crane.id} className="font-bold text-center border-r">
+                                                    {crane.name}
+                                                </TableHead>
+                                            ))}
+                                            {cranes.length < 3 && Array.from({ length: 3 - cranes.length }).map((_, idx) => (
+                                                <TableHead key={idx} className="font-bold text-center border-r text-muted-foreground">
+                                                    Dizalica {cranes.length + idx + 1}
+                                                </TableHead>
                                             ))}
                                         </TableRow>
                                     </TableHeader>
@@ -372,37 +344,55 @@ export default function ReportSchedule() {
                                             for (let h = startHour; h < endHour; h++) {
                                                 hours.push(h);
                                             }
+
                                             return hours.map((hour) => {
-                                                const timeStr = `${String(hour).padStart(2, "0")}:00`;
+                                                const timeStr = `${String(hour).padStart(2, "0")}:00 - ${String(hour + 1).padStart(2, "0")}:00`;
                                                 return (
-                                                    <TableRow key={hour}>
-                                                        <TableCell className="font-bold font-mono">{timeStr}</TableCell>
-                                                        {cranes.map(crane => {
-                                                            const activeR = mergedList.find(r => {
-                                                                if (!r.scheduledStart || r.craneId !== crane.id) return false;
+                                                    <TableRow key={hour} className="hover:bg-transparent">
+                                                        <TableCell className="font-bold font-mono text-center text-xs bg-muted/20 border-r py-3">
+                                                            {timeStr}
+                                                        </TableCell>
+                                                        {Array.from({ length: 3 }).map((_, colIdx) => {
+                                                            const crane = cranes[colIdx];
+                                                            if (!crane) {
+                                                                return <TableCell key={colIdx} className="border-r" />;
+                                                            }
+
+                                                            const slotItems = mergedList.filter(r => {
+                                                                if (r.craneId !== crane.id || !r.scheduledStart) return false;
                                                                 const startH = new Date(r.scheduledStart).getHours();
                                                                 return startH === hour;
                                                             });
 
                                                             return (
-                                                                <TableCell key={crane.id} className="border">
-                                                                    {activeR ? (
-                                                                        <div className={`text-xs p-1.5 border rounded ${
-                                                                            activeR.isMaintenance 
-                                                                                ? "bg-orange-50 border-orange-200 text-orange-800 dark:bg-orange-950 dark:border-orange-800 dark:text-orange-200" 
-                                                                                : "bg-slate-50 dark:bg-slate-900"
-                                                                        }`}>
-                                                                            <span className="font-bold">{activeR.clientName}</span>{"\n"}
-                                                                            {!activeR.isMaintenance && (
-                                                                                <span className="block text-muted-foreground font-mono text-[10px]">OIB: {activeR.userOib}</span>
-                                                                            )}
-                                                                            <span className={`block font-semibold text-[10px] ${activeR.isMaintenance ? "text-orange-600 dark:text-orange-400" : "text-primary"}`}>
-                                                                                {activeR.serviceTypeName}
-                                                                            </span>
-                                                                            <span className="block text-[10px]">Plovilo: {activeR.vesselName} ({activeR.vesselRegistration})</span>
+                                                                <TableCell key={crane.id} className="border-r align-top p-2">
+                                                                    {slotItems.length > 0 ? (
+                                                                        <div className="space-y-1.5">
+                                                                            {slotItems.map((item, iIdx) => (
+                                                                                <div
+                                                                                    key={iIdx}
+                                                                                    className={`p-2 border rounded-md text-xs leading-tight ${
+                                                                                        item.isMaintenance
+                                                                                            ? "bg-amber-50 border-amber-300 text-amber-950 dark:bg-amber-950/40 dark:text-amber-200"
+                                                                                            : "bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                                                                                    }`}
+                                                                                >
+                                                                                    <div className="font-bold text-foreground">
+                                                                                        {item.clientName}
+                                                                                    </div>
+                                                                                    <div className="text-[11px] text-muted-foreground">
+                                                                                        Plovilo: {item.vesselName} ({item.vesselRegistration || "—"})
+                                                                                    </div>
+                                                                                    <div className={`font-semibold text-[11px] mt-0.5 ${item.isMaintenance ? "text-amber-700" : "text-primary"}`}>
+                                                                                        {item.serviceTypeName}
+                                                                                    </div>
+                                                                                </div>
+                                                                            ))}
                                                                         </div>
                                                                     ) : (
-                                                                        <span className="text-[10px] text-muted-foreground italic">— Slobodno —</span>
+                                                                        <span className="text-[11px] text-muted-foreground/40 italic block text-center py-1">
+                                                                            Slobodno
+                                                                        </span>
                                                                     )}
                                                                 </TableCell>
                                                             );
@@ -416,24 +406,69 @@ export default function ReportSchedule() {
                             </div>
                         )}
 
-                        {viewMode === "weekly" && (
+                        {/* WEEKLY VIEW */}
+                        {reportType === "weekly" && (
                             <div className="space-y-4">
-                                <h3 className="font-semibold text-lg border-b pb-2">Tjedni pregled rada</h3>
                                 {renderWeeklyTable()}
                             </div>
                         )}
 
-                        {viewMode === "monthly" && (
+                        {/* MONTHLY VIEW */}
+                        {reportType === "monthly" && (
                             <div className="space-y-4">
-                                <h3 className="font-semibold text-lg border-b pb-2">Mjesečni pregled rada</h3>
-                                <p className="text-sm text-muted-foreground">Preporučuje se tjedni ili dnevni ispis. Mjesečni ispis se preporučuje preuzeti kao Excel tablicu radi veće preglednosti podataka.</p>
+                                <Table className="border">
+                                    <TableHeader>
+                                        <TableRow className="bg-muted/50">
+                                            <TableHead className="w-[12%]">Datum</TableHead>
+                                            <TableHead className="w-[10%]">Vrijeme</TableHead>
+                                            <TableHead className="w-[20%]">Klijent (OIB)</TableHead>
+                                            <TableHead className="w-[22%]">Plovilo (Registracija)</TableHead>
+                                            <TableHead className="w-[18%]">Operacija</TableHead>
+                                            <TableHead className="w-[18%]">Dizalica</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {mergedList.map((item, idx) => (
+                                            <TableRow key={idx}>
+                                                <TableCell className="font-mono text-xs">
+                                                    {item.scheduledStart ? format(new Date(item.scheduledStart), "dd.MM.yyyy.") : "—"}
+                                                </TableCell>
+                                                <TableCell className="font-mono text-xs font-bold">
+                                                    {item.scheduledStart ? format(new Date(item.scheduledStart), "HH:mm") : "—"}
+                                                </TableCell>
+                                                <TableCell className="text-xs font-medium">
+                                                    {item.clientName}
+                                                    {item.userOib && <span className="block text-[10px] text-muted-foreground">OIB: {item.userOib}</span>}
+                                                </TableCell>
+                                                <TableCell className="text-xs">
+                                                    <span className="font-semibold">{item.vesselName}</span>
+                                                    {item.vesselRegistration && <span className="block text-[10px] text-muted-foreground font-mono">Reg: {item.vesselRegistration}</span>}
+                                                </TableCell>
+                                                <TableCell className="text-xs font-bold text-primary">
+                                                    {item.serviceTypeName}
+                                                </TableCell>
+                                                <TableCell className="text-xs font-medium text-muted-foreground">
+                                                    {item.craneName || "—"}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                        {mergedList.length === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground italic">
+                                                    Nema zabilježenih operacija za odabrani mjesec.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
                             </div>
                         )}
 
                         <ReportFooter
                             summaryItems={[
-                                { label: "Ukupno zahtjeva", value: reservationsList.length },
-                                { label: "Kumulativno vrijeme", value: (reservationsList.reduce((acc, curr) => acc + (curr.durationMin || 0), 0) / 60).toFixed(1) + " h" }
+                                { label: "Ukupno operacija", value: mergedList.filter(r => !r.isMaintenance).length },
+                                { label: "Planirano održavanje", value: mergedList.filter(r => r.isMaintenance).length },
+                                { label: "Ukupno sati", value: (mergedList.reduce((acc, curr) => acc + (curr.durationMin || 60), 0) / 60).toFixed(1) + " h" }
                             ]}
                         />
                     </div>

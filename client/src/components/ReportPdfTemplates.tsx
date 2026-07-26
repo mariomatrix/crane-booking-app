@@ -20,6 +20,13 @@ const styles = StyleSheet.create({
         color: "#333333",
         lineHeight: 1.4,
     },
+    pageLandscape: {
+        padding: 28,
+        fontSize: 9,
+        fontFamily: "Roboto",
+        color: "#333333",
+        lineHeight: 1.3,
+    },
     headerContainer: {
         borderBottom: "1px solid #CCCCCC",
         paddingBottom: 15,
@@ -139,12 +146,13 @@ interface PdfShellProps {
     marinaLogo?: string;
     summaryItems?: { label: string; value: string | number }[];
     children: React.ReactNode;
+    orientation?: "portrait" | "landscape";
 }
 
-export function PdfShell({ title, dateFrom, dateTo, marinaName, marinaLogo, summaryItems = [], children }: PdfShellProps) {
+export function PdfShell({ title, dateFrom, dateTo, marinaName, marinaLogo, summaryItems = [], children, orientation = "portrait" }: PdfShellProps) {
     return (
         <Document>
-            <Page size="A4" orientation="portrait" style={styles.page}>
+            <Page size="A4" orientation={orientation} style={orientation === "landscape" ? styles.pageLandscape : styles.page}>
                 {/* Header */}
                 <View style={styles.headerContainer} fixed>
                     <View style={styles.headerLeft}>
@@ -201,6 +209,7 @@ export function CraneSchedulePdf({ data, dateFrom, dateTo, marinaName, marinaLog
             dateTo={dateTo}
             marinaName={marinaName}
             marinaLogo={marinaLogo}
+            orientation="landscape"
             summaryItems={[
                 { label: "Ukupno rezervacija", value: data.length },
                 { label: "Planirano sati", value: (data.reduce((acc, curr) => acc + (curr.durationMin || 0), 0) / 60).toFixed(1) + " h" }
@@ -532,6 +541,7 @@ export function CalendarSchedulePdf({
             dateTo={formattedDate}
             marinaName={marinaName}
             marinaLogo={marinaLogo}
+            orientation="landscape"
             summaryItems={[
                 { label: "Ukupno operacija", value: dayReservations.filter(r => !r.isMaintenance).length },
                 { label: "Održavanje", value: dayReservations.filter(r => r.isMaintenance).length }
