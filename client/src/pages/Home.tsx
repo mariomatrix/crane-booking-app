@@ -267,7 +267,7 @@ export default function Home() {
                   <CardHeader className="pb-2 flex flex-row items-center justify-between">
                     <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                       <ListOrdered className="h-4 w-4 text-primary" />
-                      {lang === "hr" ? "Lista čekanja" : "Waitlist"}
+                      {lang === "hr" ? "Čeka suhi vez" : "Waitlist"}
                     </CardTitle>
                     {waitlistStatus.status === "offered" ? (
                       <Badge className="bg-emerald-500 hover:bg-emerald-600 animate-pulse text-white">

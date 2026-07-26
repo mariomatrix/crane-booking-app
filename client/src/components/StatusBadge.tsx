@@ -8,7 +8,7 @@ const statusConfig: Record<Status, { label: string; className: string }> = {
     className: "status-badge-pending border-0 font-medium",
   },
   waitlisted: {
-    label: "Lista čekanja",
+    label: "Čeka suhi vez",
     className: "bg-amber-600 text-white dark:bg-amber-600 dark:text-white border-0 font-medium",
   },
   approved: {

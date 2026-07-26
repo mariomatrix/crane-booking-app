@@ -96,7 +96,7 @@ export default function LandingPage() {
             <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
               <Shield className="h-6 w-6" />
             </div>
-            <h3 className="text-lg font-semibold">{isHr ? "3. Lista čekanja i kopno" : "3. Waiting List & Land"}</h3>
+            <h3 className="text-lg font-semibold">{isHr ? "3. Lista čekanja za suhi vez" : "3. Dry Berth Waiting List"}</h3>
             <p className="text-sm text-muted-foreground">
               {isHr
                 ? "Ako nema mjesta na kopnu ili slobodnih termina, sustav vas automatski vodi na listu čekanja po FIFO redoslijedu."

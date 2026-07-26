@@ -131,7 +131,7 @@ export const hr = {
         calendar: "Kalendar",
         settings: "Postavke",
         users: "Korisnici",
-        waitingList: "Lista čekanja",
+        waitingList: "Lista čekanja za suhi vez",
         analytics: "Analitika",
         pending: "Na čekanju",
         approved: "Odobreno",

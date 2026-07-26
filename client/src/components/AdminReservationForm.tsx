@@ -41,6 +41,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [landZoneId, setLandZoneId] = useState("");
     const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
     const [isWaitlisted, setIsWaitlisted] = useState(false);
+    const [adminNote, setAdminNote] = useState("");
 
     const utils = trpc.useUtils();
 
@@ -143,8 +144,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         e.preventDefault();
         
         if (isWaitlisted) {
-            if (!userId || !serviceTypeId || !requestedDate || !vesselType || !contactPhone || !vesselRegistration) {
-                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, registraciju i telefon).");
+            if (!userId || !serviceTypeId || !requestedDate || !craneId || !durationMin || !vesselType || !contactPhone || !vesselRegistration) {
+                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu, trajanje, registraciju i telefon).");
                 return;
             }
         } else {
@@ -167,6 +168,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             requestedDate: formatToSqlDate(requestedDate),
             requestedTimeSlot: "po_dogovoru" as any,
             userNote: userNote || undefined,
+            adminNote: adminNote || undefined,
             vesselType: vesselType as any,
             vesselRegistration: vesselRegistration || undefined,
             vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
@@ -178,9 +180,9 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             overrideCapacityCheck: overrideCapacityCheck || undefined,
             status: isWaitlisted ? ("waitlisted" as const) : undefined,
             isAutoApprove: !isWaitlisted ? true : undefined,
-            craneId: !isWaitlisted ? craneId : undefined,
+            craneId: craneId || undefined,
             scheduledStart: !isWaitlisted ? scheduledStartDate : undefined,
-            durationMin: !isWaitlisted ? Number(durationMin) : undefined,
+            durationMin: durationMin ? Number(durationMin) : undefined,
         };
 
         if (selectedVesselId === "new" && saveToProfile) {
@@ -378,7 +380,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                                 className="text-left text-[10px] text-amber-700 font-semibold hover:underline flex items-center gap-1 focus:outline-none"
                                             >
                                                 📋 {lang === "hr"
-                                                    ? "Umjesto toga, stavi klijenta na listu čekanja za kopno"
+                                                    ? "Umjesto toga, stavi klijenta na listu čekanja za suhi vez"
                                                     : "Instead, place client on dry berth waiting list"
                                                 }
                                             </button>
@@ -427,8 +429,8 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                 />
                                 <span>
                                     {lang === "hr"
-                                        ? "Stavi klijenta na listu čekanja (bez fiksnog termina dizalice)"
-                                        : "Place client on waiting list (no fixed crane schedule)"
+                                        ? "Stavi klijenta na listu čekanja za suhi vez (termin dizalice će se odrediti naknadno)"
+                                        : "Place client on dry berth waiting list (crane schedule to be determined)"
                                     }
                                 </span>
                             </label>
@@ -460,30 +462,28 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                 </div>
                             )}
                         </div>
-                        {!isWaitlisted && (
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label>{lang === "hr" ? "Dizalica" : "Crane"} *</Label>
-                                    <Select value={craneId} onValueChange={setCraneId}>
-                                        <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
-                                        <SelectContent>
-                                            {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
-                                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
-                                    <Input
-                                        type="number"
-                                        value={durationMin}
-                                        onChange={(e) => setDurationMin(e.target.value)}
-                                        required
-                                    />
-                                </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Dizalica" : "Crane"} *</Label>
+                                <Select value={craneId} onValueChange={setCraneId}>
+                                    <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
+                                    <SelectContent>
+                                        {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
+                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
                             </div>
-                        )}
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
+                                <Input
+                                    type="number"
+                                    value={durationMin}
+                                    onChange={(e) => setDurationMin(e.target.value)}
+                                    required
+                                />
+                            </div>
+                        </div>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Napomena" : "Note"}</Label>
                             <Textarea
@@ -493,6 +493,20 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                     ? "Opišite zahvat, posebne zahtjeve i sl..."
                                     : "Describe the operation, special requirements..."}
                                 rows={2}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label className="flex items-center gap-1.5">
+                                🔒 {lang === "hr" ? "Interna napomena operatera" : "Internal operator note"}
+                            </Label>
+                            <Textarea
+                                value={adminNote}
+                                onChange={(e) => setAdminNote(e.target.value)}
+                                placeholder={lang === "hr"
+                                    ? "Napomena vidljiva samo operaterima (npr. obavezan karet, posebni uvjeti...)"
+                                    : "Note visible only to operators (e.g. mandatory cradle, special conditions...)"}
+                                rows={2}
+                                className="border-amber-200 bg-amber-50/30 focus:border-amber-400"
                             />
                         </div>
                     </div>
@@ -620,10 +634,10 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                         !vesselType || 
                         !contactPhone || 
                         !vesselRegistration ||
+                        !craneId ||
+                        !durationMin ||
                         (!isWaitlisted && (
-                            !craneId || 
                             !scheduledTime || 
-                            !durationMin || 
                             (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
                         ))
                     }

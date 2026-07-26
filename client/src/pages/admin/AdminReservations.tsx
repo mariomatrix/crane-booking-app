@@ -204,7 +204,7 @@ export default function AdminReservations() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="pending">Na čekanju</SelectItem>
-              <SelectItem value="waitlisted">Lista čekanja</SelectItem>
+              <SelectItem value="waitlisted">Čeka suhi vez</SelectItem>
               <SelectItem value="approved">Odobreni</SelectItem>
               <SelectItem value="completed">Završeni</SelectItem>
               <SelectItem value="rejected">Odbijeni</SelectItem>

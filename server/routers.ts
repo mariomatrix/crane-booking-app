@@ -1129,6 +1129,7 @@ export const appRouter = router({
         requestedDate: z.string().min(1), // YYYY-MM-DD
         requestedTimeSlot: z.enum(["jutro", "poslijepodne", "po_dogovoru"]).default("po_dogovoru"),
         userNote: z.string().max(1000).optional(),
+        adminNote: z.string().max(1000).optional(),
         // Vessel data
         vesselId: z.string().uuid().optional(),
         vesselType: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
@@ -1271,6 +1272,22 @@ export const appRouter = router({
         let finalApprovedAt = undefined;
         let autoApproveCrane = null;
 
+        // Validate crane capacity for waitlisted reservations (crane is known, schedule is not)
+        if (finalStatus === "waitlisted" && input.craneId) {
+          const waitlistedCrane = await getCraneById(input.craneId);
+          if (!waitlistedCrane || waitlistedCrane.craneStatus !== "active") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+          }
+          if (vesselSnapshot.vesselWeightTons && (Number(vesselSnapshot.vesselWeightTons) * 10) > Number(waitlistedCrane.maxCapacityKN)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Težina plovila (${vesselSnapshot.vesselWeightTons} t) prelazi kapacitet dizalice (${waitlistedCrane.maxCapacityKN} kN).`,
+            });
+          }
+          finalCraneId = input.craneId;
+          finalDurationMin = input.durationMin;
+        }
+
         if (finalStatus !== "waitlisted" && input.isAutoApprove && (ctx.user.role === 'admin' || ctx.user.role === 'operator')) {
           if (!input.craneId || !input.scheduledStart || !input.durationMin) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Nedostaju podaci za automatsko odobrenje." });
@@ -1323,6 +1340,7 @@ export const appRouter = router({
           vesselWeightTons: vesselSnapshot.vesselWeightTons,
           contactPhone: input.contactPhone,
           userNote: input.userNote,
+          adminNote: input.adminNote,
           landZoneId: input.landZoneId,
         }).returning({ id: resTable.id });
 
@@ -1352,14 +1370,38 @@ export const appRouter = router({
             status: "waiting",
             reservationId: resId,
             note: input.userNote,
+            adminNote: input.adminNote,
           });
+
+          // Also add to waiting_list table so it appears in the calendar sidebar
+          if (input.craneId) {
+            const wlMaxPos = await db.select({ maxPos: sql<number>`max(position)` }).from(waitingList);
+            const wlNextPos = (Number(wlMaxPos[0]?.maxPos) || 0) + 1;
+            await db.insert(waitingList).values({
+              userId: targetUserId,
+              vesselId: input.vesselId,
+              craneId: input.craneId,
+              serviceTypeId: input.serviceTypeId,
+              requestedDate: input.requestedDate,
+              position: wlNextPos,
+              status: "waiting",
+              vesselData: {
+                type: vesselSnapshot.vesselType,
+                registration: vesselSnapshot.vesselRegistration,
+                weightTons: vesselSnapshot.vesselWeightTons,
+                lengthM: vesselSnapshot.vesselLengthM,
+                beamM: vesselSnapshot.vesselBeamM,
+                draftM: vesselSnapshot.vesselDraftM,
+              },
+            });
+          }
 
           await createAuditEntry({
             actorId: ctx.user.id,
             action: "land_waiting_added_auto",
             entityType: "land_waiting_list",
             entityId: resId,
-            payload: { zoneId: input.landZoneId },
+            payload: { zoneId: input.landZoneId, craneId: input.craneId },
           });
         }
 

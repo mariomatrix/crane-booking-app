@@ -223,7 +223,7 @@ export default function AdminLandWaiting() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold tracking-tight">{isHr ? "Lista čekanja za kopno" : "Dry Berth Waitlist"}</h2>
+          <h2 className="text-2xl font-bold tracking-tight">{isHr ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist"}</h2>
           <p className="text-sm text-muted-foreground">
             {isHr ? "Upravljajte FIFO listom čekanja korisnika za suhi vez." : "Manage the FIFO waitlist of users waiting for dry berth slots."}
           </p>

@@ -241,7 +241,7 @@ export default function AdminLandZones() {
                 }`}
                 onClick={() => setActiveTab("waiting")}
               >
-                {isHr ? "Lista čekanja" : "Waiting List"}
+                {isHr ? "Lista čekanja za suhi vez" : "Waiting List"}
                 {activeZone.waitingCount > 0 && (
                   <Badge className="bg-amber-600 hover:bg-amber-600 text-white border-0 py-0 px-1 text-[9px] h-4">
                     {activeZone.waitingCount}
