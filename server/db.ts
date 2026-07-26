@@ -897,11 +897,14 @@ export async function listLandZones() {
   const waitingListEntries = await db.select().from(landWaitingList).where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")));
 
   return zones.map(z => {
-    const activeCount = occupancies.filter(o => o.zoneId === z.id).length;
+    const registeredCount = occupancies.filter(o => o.zoneId === z.id).length;
+    const manualCount = z.manualOccupiedSpots || 0;
+    const activeCount = registeredCount + manualCount;
     const waitingCount = waitingListEntries.filter(w => w.preferredZoneId === z.id).length;
     return {
       ...z,
       activeSpots: activeCount,
+      registeredSpots: registeredCount,
       waitingCount,
     };
   });
@@ -916,7 +919,9 @@ export async function getLandZoneCapacity(zoneId: string) {
   const occupancies = await db.select().from(landOccupancies)
     .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
 
-  const activeSpots = occupancies.length;
+  const registeredSpots = occupancies.length;
+  const manualSpots = zone.manualOccupiedSpots || 0;
+  const activeSpots = registeredSpots + manualSpots;
   const totalSpots = zone.totalSpots;
   const availableSpots = Math.max(0, totalSpots - activeSpots);
   const percentFull = totalSpots > 0 ? Math.round((activeSpots / totalSpots) * 100) : 0;
@@ -928,6 +933,8 @@ export async function getLandZoneCapacity(zoneId: string) {
     code: zone.code,
     totalSpots,
     activeSpots,
+    registeredSpots,
+    manualOccupiedSpots: manualSpots,
     availableSpots,
     percentFull,
     isOver80,

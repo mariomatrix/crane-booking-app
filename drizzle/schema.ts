@@ -324,6 +324,7 @@ export const landZones = pgTable("land_zones", {
     name: varchar("name", { length: 255 }).notNull(),
     code: varchar("code", { length: 10 }).unique().notNull(),
     totalSpots: integer("total_spots").notNull(),
+    manualOccupiedSpots: integer("manual_occupied_spots").default(0).notNull(),
     description: text("description"),
     sortOrder: integer("sort_order").default(0).notNull(),
     isActive: boolean("is_active").default(true).notNull(),

@@ -23,6 +23,7 @@ type ZoneForm = {
   name: string;
   code: string;
   totalSpots: string;
+  manualOccupiedSpots: string;
   description: string;
   sortOrder: string;
 };
@@ -31,6 +32,7 @@ const emptyForm: ZoneForm = {
   name: "",
   code: "",
   totalSpots: "",
+  manualOccupiedSpots: "0",
   description: "",
   sortOrder: "0",
 };
@@ -102,6 +104,7 @@ export default function AdminLandZones() {
       name: zone.name,
       code: zone.code,
       totalSpots: String(zone.totalSpots),
+      manualOccupiedSpots: String(zone.manualOccupiedSpots || 0),
       description: zone.description || "",
       sortOrder: String(zone.sortOrder),
     });
@@ -111,13 +114,14 @@ export default function AdminLandZones() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.code || !form.totalSpots) {
-      toast.error(isHr ? "Naziv, kod i broj mjesta su obavezni." : "Name, code and capacity are required.");
+      toast.error(isHr ? "Naziv, kod i ukupno mjesta su obavezni." : "Name, code and total spots are required.");
       return;
     }
     const payload = {
       name: form.name,
       code: form.code,
       totalSpots: Number(form.totalSpots),
+      manualOccupiedSpots: Number(form.manualOccupiedSpots || 0),
       description: form.description || undefined,
       sortOrder: Number(form.sortOrder),
     };
@@ -188,6 +192,13 @@ export default function AdminLandZones() {
                       <span>{isHr ? "Popunjenost" : "Occupancy"}</span>
                       <span>{zone.activeSpots} / {zone.totalSpots} {isHr ? "mjesta" : "spots"}</span>
                     </div>
+                    {zone.manualOccupiedSpots > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {isHr
+                          ? `(${zone.manualOccupiedSpots} ručno unesenih + ${zone.registeredSpots || 0} registriranih)`
+                          : `(${zone.manualOccupiedSpots} manual + ${zone.registeredSpots || 0} registered)`}
+                      </p>
+                    )}
                     <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
                       <div
                         className={`h-full transition-all duration-500 ${utilization >= 90 ? "bg-red-500" : utilization >= 70 ? "bg-amber-500" : "bg-emerald-500"
@@ -382,9 +393,15 @@ export default function AdminLandZones() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label>{isHr ? "Ukupno mjesta" : "Total spots"} *</Label>
-                <Input type="number" value={form.totalSpots} onChange={e => setForm({ ...form, totalSpots: e.target.value })} required />
+                <Label>{isHr ? "Ukupno mjesta (Kapacitet)" : "Total spots (Capacity)"} *</Label>
+                <Input type="number" min="1" value={form.totalSpots} onChange={e => setForm({ ...form, totalSpots: e.target.value })} required />
               </div>
+              <div className="space-y-1">
+                <Label>{isHr ? "Ručno zauzeta mjesta" : "Manually occupied"}</Label>
+                <Input type="number" min="0" value={form.manualOccupiedSpots} onChange={e => setForm({ ...form, manualOccupiedSpots: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>{isHr ? "Poredak sortiranja" : "Sort order"}</Label>
                 <Input type="number" value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: e.target.value })} />

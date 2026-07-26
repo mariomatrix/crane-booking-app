@@ -2717,11 +2717,12 @@ export const appRouter = router({
         return { ...occ, zone: null };
       }),
 
-    create: adminProcedure
+    create: operatorProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
         code: z.string().min(1).max(10),
         totalSpots: z.number().int().positive(),
+        manualOccupiedSpots: z.number().int().nonnegative().optional().default(0),
         description: z.string().optional(),
         sortOrder: z.number().int().default(0),
       }))
@@ -2731,12 +2732,13 @@ export const appRouter = router({
         return { id };
       }),
 
-    update: adminProcedure
+    update: operatorProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
         code: z.string().min(1).max(10).optional(),
         totalSpots: z.number().int().positive().optional(),
+        manualOccupiedSpots: z.number().int().nonnegative().optional(),
         description: z.string().optional(),
         sortOrder: z.number().int().optional(),
         isActive: z.boolean().optional(),

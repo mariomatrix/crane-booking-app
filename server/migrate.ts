@@ -28,6 +28,11 @@ async function runMigration() {
     }
 
     await migrate(db, { migrationsFolder: "drizzle" });
+    try {
+        await migrationClient`ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL`;
+    } catch (e: any) {
+        console.warn("Could not alter land_zones table for manual_occupied_spots:", e);
+    }
     console.log("Migrations completed.");
 
     // ─── Import schema and helpers ────────────────────────────────────
