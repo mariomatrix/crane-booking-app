@@ -1,5 +1,5 @@
 import { Document, Page, Text, View, StyleSheet, Image, Font } from "@react-pdf/renderer";
-import { format } from "date-fns";
+import { format, eachDayOfInterval } from "date-fns";
 
 // Register custom font to support Latin diacritics in PDF
 Font.register({
@@ -635,6 +635,199 @@ export function CalendarSchedulePdf({
                         </View>
                     );
                 })}
+            </View>
+        </PdfShell>
+    );
+}
+
+// 🗓️ Weekly schedule PDF Document template (A4 Landscape)
+export function WeeklySchedulePdf({
+    dateFrom,
+    dateTo,
+    cranes,
+    reservations,
+    marinaName,
+    marinaLogo
+}: {
+    dateFrom: string;
+    dateTo: string;
+    cranes: any[];
+    reservations: any[];
+    marinaName: string;
+    marinaLogo?: string;
+}) {
+    const startDate = safeParseDate(dateFrom);
+    const endDate = safeParseDate(dateTo);
+    const days = eachDayOfInterval({ start: startDate, end: endDate });
+
+    const totalOps = reservations.filter(r => !r.isMaintenance).length;
+    const totalMaint = reservations.filter(r => r.isMaintenance).length;
+    const totalHours = (reservations.reduce((acc, curr) => acc + (curr.durationMin || 60), 0) / 60).toFixed(1);
+
+    const craneColWidth = "13%";
+    const dayColWidth = "12.4%";
+
+    return (
+        <PdfShell
+            title={`Tjedni plan rada dizalica (${format(startDate, "dd.MM.")} – ${format(endDate, "dd.MM.yyyy.")})`}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            marinaName={marinaName}
+            marinaLogo={marinaLogo}
+            orientation="landscape"
+            summaryItems={[
+                { label: "Ukupno operacija", value: totalOps },
+                { label: "Planirano održavanje", value: totalMaint },
+                { label: "Ukupno sati rada", value: `${totalHours} h` }
+            ]}
+        >
+            <View style={styles.table}>
+                {/* Header Row */}
+                <View style={styles.tableHeaderRow}>
+                    <Text style={[styles.tableCellHeader, { width: craneColWidth, fontSize: 8 }]}>Dizalica</Text>
+                    {days.map((day, idx) => (
+                        <Text key={idx} style={[styles.tableCellHeader, { width: dayColWidth, fontSize: 7, textAlign: "center" }]}>
+                            {format(day, "EEEE")}{"\n"}
+                            <Text style={{ fontSize: 6, color: "#64748b" }}>{format(day, "dd.MM.")}</Text>
+                        </Text>
+                    ))}
+                </View>
+
+                {/* Crane rows */}
+                {cranes.map((crane) => (
+                    <View key={crane.id} style={[styles.tableRow, { minHeight: 45, alignItems: "flex-start", paddingTop: 4, paddingBottom: 4 }]}>
+                        {/* Crane Name Column */}
+                        <Text style={[styles.tableCell, { width: craneColWidth, fontFamily: "Roboto-Bold", fontSize: 8, paddingTop: 4 }]}>
+                            {crane.name}
+                        </Text>
+
+                        {/* Day columns */}
+                        {days.map((day, dIdx) => {
+                            const dayItems = reservations.filter((r: any) => {
+                                if (r.craneId !== crane.id || !r.scheduledStart) return false;
+                                return isSameDay(safeParseDate(r.scheduledStart), day);
+                            });
+
+                            return (
+                                <View key={dIdx} style={{ width: dayColWidth, paddingRight: 2, paddingLeft: 2 }}>
+                                    {dayItems.map((r: any, rIdx) => {
+                                        const statusColor = r.isMaintenance
+                                            ? "#f97316"
+                                            : (r.status === "approved" ? "#059669" : r.status === "completed" ? "#16a34a" : r.status === "pending" ? "#f59e0b" : "#4b5563");
+
+                                        const timeStr = r.scheduledStart ? format(safeParseDate(r.scheduledStart), "HH:mm") : "";
+                                        const clientName = r.user?.name || r.clientName || "Korisnik";
+                                        const reg = r.vesselRegistration || "—";
+                                        const action = r.isMaintenance ? "ODRŽAVANJE" : (r.serviceTypeName || r.serviceType?.name || "—");
+
+                                        return (
+                                            <View
+                                                key={r.id || rIdx}
+                                                style={{
+                                                    borderLeftWidth: 2,
+                                                    borderLeftColor: statusColor,
+                                                    paddingLeft: 3,
+                                                    marginBottom: 3,
+                                                    marginTop: rIdx > 0 ? 3 : 0,
+                                                    backgroundColor: r.isMaintenance ? "#fff7ed" : "#f8fafc",
+                                                    padding: 2,
+                                                    borderRadius: 2
+                                                }}
+                                            >
+                                                <Text style={{ fontFamily: "Roboto-Bold", fontSize: 7, color: "#1e293b" }}>
+                                                    {timeStr} {clientName}
+                                                </Text>
+                                                <Text style={{ fontSize: 6, color: "#64748b" }}>
+                                                    Reg: {reg}
+                                                </Text>
+                                                <Text style={{ fontSize: 6, fontFamily: "Roboto-Bold", color: statusColor }}>
+                                                    {action}
+                                                </Text>
+                                            </View>
+                                        );
+                                    })}
+                                    {dayItems.length === 0 && (
+                                        <Text style={{ fontSize: 7, color: "#cbd5e1", paddingTop: 4, textAlign: "center" }}>
+                                            —
+                                        </Text>
+                                    )}
+                                </View>
+                            );
+                        })}
+                    </View>
+                ))}
+            </View>
+        </PdfShell>
+    );
+}
+
+// 📊 Monthly schedule PDF Document template (A4 Landscape)
+export function MonthlySchedulePdf({
+    dateFrom,
+    dateTo,
+    reservations,
+    marinaName,
+    marinaLogo
+}: {
+    dateFrom: string;
+    dateTo: string;
+    reservations: any[];
+    marinaName: string;
+    marinaLogo?: string;
+}) {
+    const startDate = safeParseDate(dateFrom);
+    const endDate = safeParseDate(dateTo);
+    const totalOps = reservations.filter(r => !r.isMaintenance).length;
+    const totalMaint = reservations.filter(r => r.isMaintenance).length;
+    const totalHours = (reservations.reduce((acc, curr) => acc + (curr.durationMin || 60), 0) / 60).toFixed(1);
+
+    return (
+        <PdfShell
+            title={`Mjesečni plan rada dizalica (${format(startDate, "dd.MM.yyyy.")} – ${format(endDate, "dd.MM.yyyy.")})`}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            marinaName={marinaName}
+            marinaLogo={marinaLogo}
+            orientation="landscape"
+            summaryItems={[
+                { label: "Ukupno operacija", value: totalOps },
+                { label: "Planirano održavanje", value: totalMaint },
+                { label: "Ukupno sati rada", value: `${totalHours} h` }
+            ]}
+        >
+            <View style={styles.table}>
+                <View style={styles.tableHeaderRow}>
+                    <Text style={[styles.tableCellHeader, { width: "10%" }]}>Datum</Text>
+                    <Text style={[styles.tableCellHeader, { width: "8%" }]}>Vrijeme</Text>
+                    <Text style={[styles.tableCellHeader, { width: "22%" }]}>Klijent (OIB)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "22%" }]}>Plovilo (Reg)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "18%" }]}>Radnja</Text>
+                    <Text style={[styles.tableCellHeader, { width: "12%" }]}>Dizalica</Text>
+                    <Text style={[styles.tableCellHeader, { width: "8%" }]}>Status</Text>
+                </View>
+                {reservations.map((item, idx) => (
+                    <View key={idx} style={styles.tableRow}>
+                        <Text style={[styles.tableCell, { width: "10%" }]}>
+                            {item.scheduledStart ? format(safeParseDate(item.scheduledStart), "dd.MM.yyyy.") : "-"}
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "8%", fontFamily: "Roboto-Bold" }]}>
+                            {item.scheduledStart ? format(safeParseDate(item.scheduledStart), "HH:mm") : "-"}
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "22%" }]}>
+                            {item.clientName || "—"}{"\n"}
+                            <Text style={{ fontSize: 7, color: "#64748b" }}>OIB: {item.userOib || "—"}</Text>
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "22%" }]}>
+                            {item.vesselName || "—"}{"\n"}
+                            <Text style={{ fontSize: 7, color: "#64748b" }}>Reg: {item.vesselRegistration || "—"}</Text>
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "18%", color: item.isMaintenance ? "#f97316" : "#0284c7", fontFamily: "Roboto-Bold" }]}>
+                            {item.serviceTypeName || "—"}
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "12%" }]}>{item.craneName || "—"}</Text>
+                        <Text style={[styles.tableCell, { width: "8%", textTransform: "capitalize" }]}>{item.status}</Text>
+                    </View>
+                ))}
             </View>
         </PdfShell>
     );
