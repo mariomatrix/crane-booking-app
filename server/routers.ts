@@ -3083,6 +3083,26 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    update: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        preferredZoneId: z.string().uuid().nullable().optional(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        await db.update(landWaitingList)
+          .set({
+            preferredZoneId: input.preferredZoneId,
+            note: input.note,
+            updatedAt: new Date(),
+          })
+          .where(eq(landWaitingList.id, input.id));
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_updated", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true };
+      }),
+
      reorder: operatorProcedure
       .input(z.array(z.string().uuid()))
       .mutation(async ({ input, ctx }) => {
@@ -3096,7 +3116,7 @@ export const appRouter = router({
         id: z.string().uuid(),
         craneId: z.string().uuid(),
         scheduledStart: z.date(),
-        durationMin: z.number().int().positive().default(60),
+        durationMin: z.number().int().positive().default(30),
         adminNote: z.string().optional(),
       }))
       .mutation(async ({ input, ctx }) => {

@@ -104,8 +104,8 @@ export default function AdminCalendar() {
     });
     const allReservations = reservationsQuery.data?.data || [];
     const isResLoading = reservationsQuery.isLoading;
-    const waitingListQuery = trpc.waitingList.listAll.useQuery({ pageSize: 200 });
-    const waitingList = waitingListQuery.data?.data || [];
+    const landWaitingQuery = trpc.landWaiting.listAll.useQuery();
+    const landWaitingList = (landWaitingQuery.data || []).filter((w: any) => w.status === "waiting" || w.status === "offered");
     const { data: sysSettings } = trpc.settings.get.useQuery();
     const { data: landZones = [] } = trpc.landZone.list.useQuery();
     const utils = trpc.useUtils();
@@ -135,15 +135,15 @@ export default function AdminCalendar() {
     // Edit Waiting List Form State
     const [isWaitingEditOpen, setIsWaitingEditOpen] = useState(false);
     const [editingWaiting, setEditingWaiting] = useState<any>(null);
-    const [waitEditDate, setWaitEditDate] = useState<string>("");
-    const [waitEditCraneId, setWaitEditCraneId] = useState("");
-    const [waitEditSlots, setWaitEditSlots] = useState(1);
+    const [waitEditPreferredZoneId, setWaitEditPreferredZoneId] = useState("none");
+    const [waitEditNote, setWaitEditNote] = useState("");
 
     // Mutations
     const rescheduleMutation = trpc.reservation.reschedule.useMutation({
         onSuccess: () => {
             toast.success("Termin je premješten.");
             utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
         },
         onError: (err: any) => {
             toast.error(err.message);
@@ -155,6 +155,7 @@ export default function AdminCalendar() {
         onSuccess: () => {
             toast.success("Održavanje je zabilježeno.");
             utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
             setIsMaintOpen(false);
             setMaintDesc("");
             setMaintDateObj(new Date());
@@ -167,52 +168,50 @@ export default function AdminCalendar() {
         onSuccess: () => {
             toast.success("Rezervacija je odobrena.");
             utils.reservation.listAll.invalidate();
-            utils.waitingList.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
+            utils.calendar.events.invalidate();
         },
         onError: (err: any) => toast.error(err.message),
     });
 
-    const updateWaitingMutation = trpc.waitingList.update.useMutation({
+    const updateLandWaitingMutation = trpc.landWaiting.update.useMutation({
         onSuccess: () => {
-            toast.success("Zahtjev je ažuriran.");
-            utils.waitingList.listAll.invalidate();
+            toast.success("Zahtjev na listi čekanja za suhi vez je ažuriran.");
+            utils.landWaiting.listAll.invalidate();
             setIsWaitingEditOpen(false);
         },
         onError: (err: any) => toast.error(err.message),
     });
 
-    const toReservationMutation = trpc.waitingList.toReservation.useMutation({
+    const directAssignMutation = trpc.landWaiting.directAssign.useMutation({
         onSuccess: () => {
-            toast.success("Zahtjev je pretvoren u rezervaciju.");
+            toast.success("Rezervacija je uspješno zakazana s liste čekanja.");
             utils.reservation.listAll.invalidate();
-            utils.waitingList.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
+            utils.calendar.events.invalidate();
         },
         onError: (err: any) => {
             toast.error(err.message);
             utils.reservation.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
         },
     });
 
     const handleEditWaiting = (w: any) => {
         setEditingWaiting(w);
-        setWaitEditDate(w.requestedDate);
-        setWaitEditCraneId(String(w.craneId));
-        setWaitEditSlots(w.slotCount);
+        setWaitEditPreferredZoneId(w.preferredZoneId || "none");
+        setWaitEditNote(w.note || "");
         setIsWaitingEditOpen(true);
     };
 
     const handleUpdateWaiting = (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingWaiting) return;
-        updateWaitingMutation.mutate({
+        updateLandWaitingMutation.mutate({
             id: editingWaiting.id,
-            requestedDate: waitEditDate,
-            craneId: waitEditCraneId,
+            preferredZoneId: waitEditPreferredZoneId === "none" ? null : waitEditPreferredZoneId,
+            note: waitEditNote,
         });
-    };
-
-    const handleApproveWaiting = (w: any) => {
-        toast.info("Povucite zahtjev na kalendar za brzu rezervaciju.");
     };
 
     // Initialize Draggable
@@ -224,7 +223,7 @@ export default function AdminCalendar() {
                 const data = JSON.parse(eventEl.getAttribute("data-event") || "{}");
                 return {
                     title: data.title,
-                    duration: { hours: data.slotCount },
+                    duration: { minutes: 30 },
                     extendedProps: {
                         isFromWaitingList: true,
                         waitingId: data.id,
@@ -233,7 +232,7 @@ export default function AdminCalendar() {
             }
         });
         return () => draggable.destroy();
-    }, [waitingList]);
+    }, [landWaitingList]);
 
     const rejectMutation = trpc.reservation.reject.useMutation({
         onSuccess: () => {
@@ -358,6 +357,10 @@ export default function AdminCalendar() {
                     craneId: r.craneId,
                     originalStart: r.scheduledStart,
                     cancelReason: r.cancelReason,
+                    vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
+                    landZoneCode: r.landZone?.code || r.landZone?.name || "",
+                    operationCategory: r.serviceType?.operationCategory || "",
+                    serviceTypeName: r.serviceType?.name || "",
                 },
             };
         }).filter(Boolean);
@@ -768,36 +771,37 @@ export default function AdminCalendar() {
                         <DialogContent className="max-w-md">
                             <form onSubmit={handleUpdateWaiting}>
                                 <DialogHeader>
-                                    <DialogTitle>Uredi listu čekanja</DialogTitle>
+                                    <DialogTitle>Uredi zahtjev na listi čekanja</DialogTitle>
                                     <DialogDescription>
-                                        ID #{editingWaiting?.id} - {editingWaiting?.user?.name}
+                                        {editingWaiting?.user?.name} — {editingWaiting?.vessel?.registration || editingWaiting?.vessel?.name || "Plovilo"}
                                     </DialogDescription>
                                 </DialogHeader>
                                 <div className="grid gap-5 py-6">
                                     <div className="grid gap-2">
-                                        <Label>Željeni datum</Label>
-                                        <Input type="date" value={waitEditDate} onChange={(e) => setWaitEditDate(e.target.value)} required />
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Dizalica</Label>
-                                        <Select value={waitEditCraneId} onValueChange={setWaitEditCraneId} required>
-                                            <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
+                                        <Label>Preferirani suhi vez (Kopnena zona)</Label>
+                                        <Select value={waitEditPreferredZoneId} onValueChange={setWaitEditPreferredZoneId}>
+                                            <SelectTrigger><SelectValue placeholder="Bilo koja zona (Nije određeno)" /></SelectTrigger>
                                             <SelectContent>
-                                                {cranesList.map((c: any) => (
-                                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                                <SelectItem value="none">Bilo koja zona (Nije određeno)</SelectItem>
+                                                {landZones.map((lz: any) => (
+                                                    <SelectItem key={lz.id} value={String(lz.id)}>{lz.name} ({lz.code})</SelectItem>
                                                 ))}
                                             </SelectContent>
                                         </Select>
                                     </div>
                                     <div className="grid gap-2">
-                                        <Label>Broj slotova (60 min)</Label>
-                                        <Input type="number" min={1} max={8} value={waitEditSlots} onChange={(e) => setWaitEditSlots(Number(e.target.value))} required />
+                                        <Label>Predviđeno trajanje termina</Label>
+                                        <Input disabled value="30 minuta" readOnly className="bg-muted text-muted-foreground" />
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label>Napomena</Label>
+                                        <Input value={waitEditNote} onChange={(e) => setWaitEditNote(e.target.value)} placeholder="Unesite napomenu..." />
                                     </div>
                                 </div>
                                 <DialogFooter>
                                     <Button variant="outline" type="button" onClick={() => setIsWaitingEditOpen(false)}>Odustani</Button>
-                                    <Button type="submit" disabled={updateWaitingMutation.isPending}>
-                                        {updateWaitingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    <Button type="submit" disabled={updateLandWaitingMutation.isPending}>
+                                        {updateLandWaitingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                         Spremi promjene
                                     </Button>
                                 </DialogFooter>
@@ -962,21 +966,18 @@ export default function AdminCalendar() {
                                     }
                                     targetCrane = activeCranes[diffDays];
                                     startDate = new Date(viewDate);
-                                    startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0);
+                                    startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0, 0);
                                 } else if (selectedCrane !== "all") {
                                     const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
                                     if (found) targetCrane = found;
                                 }
 
-                                const durationHours = info.event.end ? (info.event.end.getTime() - dropDate.getTime()) / 3600000 : 1;
-                                const endDate = new Date(startDate.getTime() + durationHours * 3600000);
+                                info.revert(); // Remove the temp DOM element
 
-                                info.revert(); // Remove the temp event
-
-                                toReservationMutation.mutate({
+                                directAssignMutation.mutate({
                                     id: String(p.waitingId),
                                     scheduledStart: startDate,
-                                    scheduledEnd: endDate,
+                                    durationMin: 30,
                                     craneId: targetCrane.id
                                 });
                             }
@@ -1018,24 +1019,38 @@ export default function AdminCalendar() {
                                 return <div className="text-[10px] font-bold p-1 text-red-700/50">{arg.event.title}</div>
                             }
                             const statusColor = STATUS_COLORS[p.status] ?? '#6b7280';
+
+                            // Format registration and dry berth zone direction
+                            const reg = p.vesselRegistration || "";
+                            let zoneDirection = "";
+                            if (p.landZoneCode) {
+                                if (p.operationCategory === "lift_from_sea") {
+                                    zoneDirection = `➡️ ${p.landZoneCode}`;
+                                } else if (p.operationCategory === "lower_to_sea") {
+                                    zoneDirection = `⬅️ ${p.landZoneCode}`;
+                                } else {
+                                    zoneDirection = `${p.landZoneCode}`;
+                                }
+                            }
+                            const details = [reg, zoneDirection].filter(Boolean).join(" • ");
+
                             return (
                                 <div
-                                    className="flex flex-col h-full overflow-hidden p-1 rounded-sm text-white"
+                                    className="flex flex-col h-full overflow-hidden p-1 rounded-sm text-white leading-tight"
                                     style={{ backgroundColor: statusColor }}
                                 >
-                                    <div className="flex items-center justify-between mb-0.5">
-                                        <span className="text-[10px] font-black uppercase opacity-95 truncate">{arg.event.title}</span>
-                                        {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse" />}
+                                    <div className="flex items-center justify-between font-bold text-[10px] truncate">
+                                        <span className="truncate">{p.user}</span>
+                                        {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse shrink-0 ml-0.5" />}
                                     </div>
-                                    <div className="text-[10px] font-bold opacity-85 leading-tight truncate">{p.user}</div>
-                                    <div className="mt-0.5">
-                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/25 text-white leading-none">
-                                            {STATUS_LABELS[p.status] || p.status}
-                                        </span>
-                                    </div>
+                                    {details && (
+                                        <div className="text-[9px] font-medium opacity-90 truncate mt-0.5">
+                                            {details}
+                                        </div>
+                                    )}
                                     {p.status === 'cancelled' && p.cancelReason && (
-                                        <div className="text-[9px] italic opacity-90 leading-tight mt-1 border-t border-white/20 pt-1">
-                                            Razlog: {p.cancelReason}
+                                        <div className="text-[9px] italic opacity-90 truncate mt-0.5 border-t border-white/20 pt-0.5">
+                                            {p.cancelReason}
                                         </div>
                                     )}
                                     {!p.isMaintenance && p.status === 'pending' && (
@@ -1050,13 +1065,14 @@ export default function AdminCalendar() {
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); rejectMutation.mutate({ id: p.reservationId, adminNote: "Preko kalendara" }); }}
                                                 className="hover:bg-red-600/50 rounded p-0.5"
+                                                title="Odbij"
                                             >
                                                 <XCircle className="h-3 w-3" />
                                             </button>
                                         </div>
                                     )}
                                 </div>
-                            )
+                            );
                         }}
                         dayMaxEvents={true}
                         locale={lang === "hr" ? "hr" : "en"}
@@ -1070,37 +1086,43 @@ export default function AdminCalendar() {
                             <div className="flex items-center justify-between">
                                 <CardTitle className="text-sm font-bold flex items-center gap-2">
                                     <ListTodo className="h-4 w-4 text-blue-500" />
-                                    Lista čekanja
+                                    Lista čekanja za suhi vez
                                 </CardTitle>
-                                <Badge variant="outline" className="bg-background">{waitingList.length}</Badge>
+                                <Badge variant="outline" className="bg-background">{landWaitingList.length}</Badge>
                             </div>
                         </CardHeader>
                         <CardContent className="p-0 flex-1 overflow-hidden">
                             <ScrollArea className="h-full">
                                 <div className="p-4 space-y-3" ref={draggableRef}>
-                                    {waitingList.length === 0 ? (
+                                    {landWaitingList.length === 0 ? (
                                         <div className="text-center py-8 text-sm text-muted-foreground italic">
-                                            Nema aktivnih zahtjeva u listi čekanja.
+                                            Nema aktivnih zahtjeva na listi čekanja za suhi vez.
                                         </div>
                                     ) : (
-                                        waitingList.map((w: any) => (
+                                        landWaitingList.map((w: any) => (
                                             <div
                                                 key={w.id}
                                                 className="waiting-list-item p-3 border rounded-lg bg-background hover:border-primary/50 transition-colors shadow-sm group cursor-grab active:cursor-grabbing"
                                                 data-event={JSON.stringify({
                                                     id: w.id,
-                                                    title: `${w.user?.name || "Korisnik"} (${w.crane?.name})`,
-                                                    slotCount: w.slotCount
+                                                    title: `${w.user?.name || "Korisnik"} (${w.vessel?.registration || w.vessel?.name || "Plovilo"})`,
                                                 })}
                                             >
                                                 <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase">{w.crane?.name}</span>
-                                                    <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{formatAppDate(parseISO(w.requestedDate), lang as any)}</span>
+                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                                                        {w.preferredZone?.name ? `Zona: ${w.preferredZone.name}` : "Bilo koja zona"}
+                                                    </span>
+                                                    <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                                                        #{w.position || 1}
+                                                    </span>
                                                 </div>
                                                 <div className="font-semibold text-sm mb-1">{w.user?.name || "Korisnik"}</div>
-                                                <div className="text-xs text-muted-foreground flex items-center gap-1 mb-3">
-                                                    <Clock className="h-3 w-3" />
-                                                    {w.slotCount}x 60 min slots
+                                                <div className="text-xs text-muted-foreground flex items-center justify-between mb-3">
+                                                    <span>{w.vessel?.registration || w.vessel?.name || "—"}</span>
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock className="h-3 w-3" />
+                                                        30 min
+                                                    </span>
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <Button
