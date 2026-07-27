@@ -611,11 +611,10 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
 
                     <div className="space-y-4">
                         <div className="space-y-2">
-                            <Label>{t.form.contactPhone} *</Label>
+                            <Label>{t.form.contactPhone}</Label>
                             <Input
                                 value={contactPhone}
                                 onChange={(e) => setContactPhone(e.target.value)}
-                                required
                             />
                         </div>
                     </div>
@@ -636,8 +635,6 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                         !serviceTypeId || 
                         !requestedDate || 
                         !vesselType || 
-                        !contactPhone || 
-                        !vesselRegistration ||
                         !craneId ||
                         !durationMin ||
                         (!isWaitlisted && (

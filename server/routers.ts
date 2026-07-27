@@ -1139,7 +1139,7 @@ export const appRouter = router({
         vesselDraftM: z.number().positive().optional(),
         vesselWeightTons: z.number().nonnegative().optional(),
         // Contact
-        contactPhone: z.string().min(6),
+        contactPhone: z.string().optional(),
         // Land zone
         landZoneId: z.string().uuid().optional(),
         overrideCapacityCheck: z.boolean().optional(),

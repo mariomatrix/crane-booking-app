@@ -24,9 +24,10 @@ interface DatePickerProps {
 
 export function DatePicker({ date, onChange, placeholder, className, disabled }: DatePickerProps) {
     const { lang } = useLang();
+    const [open, setOpen] = React.useState(false);
 
     return (
-        <Popover>
+        <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
                 <Button
                     variant={"outline"}
@@ -45,7 +46,12 @@ export function DatePicker({ date, onChange, placeholder, className, disabled }:
                 <Calendar
                     mode="single"
                     selected={date}
-                    onSelect={onChange}
+                    onSelect={(selectedDate) => {
+                        onChange?.(selectedDate);
+                        if (selectedDate) {
+                            setOpen(false);
+                        }
+                    }}
                     initialFocus
                     locale={lang === "hr" ? hr : enUS}
                 />
