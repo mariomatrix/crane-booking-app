@@ -16,6 +16,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
   SidebarProvider,
   SidebarTrigger,
   useSidebar,
@@ -43,6 +46,9 @@ import {
   Anchor,
   ListOrdered,
   FileText,
+  ChevronDown,
+  ChevronRight,
+  SlidersHorizontal,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -150,17 +156,21 @@ function DashboardLayoutContent({
 
   const isOperator = user?.role === "operator";
 
-  const allMenuItems = [
-    { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
-    { icon: Home, label: t.admin.dashboard, path: "/admin" },
-    { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
+  const programSubItems = [
+    { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
-    { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
-    { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
-    { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
     { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types" },
     { icon: Sun, label: t.nav.seasons, path: "/admin/seasons" },
     { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays" },
+  ].filter(item => !(isOperator && (item as any).adminOnly));
+
+  const mainMenuItems = [
+    { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
+    { icon: Home, label: t.admin.dashboard, path: "/admin" },
+    { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
+    { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
+    { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
+    { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
     { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
     ...(isOperator
@@ -168,18 +178,22 @@ function DashboardLayoutContent({
       : [{ icon: FileText, label: lang === "hr" ? "Izvještaji" : "Reports", path: "/admin/reports" }]
     ),
     { icon: History, label: t.nav.auditLog, path: "/admin/audit-log", adminOnly: true },
-    { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
-    { icon: Globe, label: lang === "hr" ? "Početna stranica" : "Home Page", path: "/" },
-  ];
+  ].filter(item => !(isOperator && (item as any).adminOnly));
 
-  const menuItems = isOperator
-    ? allMenuItems.filter(item => !(item as any).adminOnly)
-    : allMenuItems;
+  const isProgramSettingsActive = programSubItems.some(item => item.path === location);
+  const [isProgramSettingsOpen, setIsProgramSettingsOpen] = useState(isProgramSettingsActive);
+
+  useEffect(() => {
+    if (isProgramSettingsActive) {
+      setIsProgramSettingsOpen(true);
+    }
+  }, [location]);
+
   const { state, toggleSidebar } = useSidebar();
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const activeMenuItem = menuItems.find((item) => item.path === location);
+  const activeMenuItem = [...mainMenuItems, ...programSubItems].find((item) => item.path === location);
   const isMobile = useIsMobile();
 
   // Unread messages polling (30s)
@@ -273,8 +287,8 @@ function DashboardLayoutContent({
           </SidebarHeader>
 
           <SidebarContent className="gap-0">
-            <SidebarMenu className="px-2 py-1">
-              {menuItems.map((item) => {
+            <SidebarMenu className="px-2 py-1 space-y-0.5">
+              {mainMenuItems.map((item) => {
                 const isActive = location === item.path;
                 return (
                   <SidebarMenuItem key={item.path}>
@@ -282,10 +296,10 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
-                      className="h-10 transition-all font-normal"
+                      className="h-9 transition-all font-normal"
                     >
                       <item.icon
-                        className={`h-4 w-4 ${isActive ? "text-primary" : ""}`}
+                        className={`h-4 w-4 ${isActive ? "text-primary font-bold" : ""}`}
                       />
                       <span>{item.label}</span>
                       {item.path === "/admin/reservations" && unreadCount > 0 && (
@@ -297,6 +311,61 @@ function DashboardLayoutContent({
                   </SidebarMenuItem>
                 );
               })}
+
+              {/* Postavke programa Submenu Group */}
+              {programSubItems.length > 0 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={isProgramSettingsActive}
+                    onClick={() => setIsProgramSettingsOpen(prev => !prev)}
+                    tooltip={t.admin.programSettings}
+                    className="h-9 transition-all font-normal flex items-center justify-between cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <SlidersHorizontal className={`h-4 w-4 shrink-0 ${isProgramSettingsActive ? "text-primary font-bold" : ""}`} />
+                      <span className="truncate">{t.admin.programSettings}</span>
+                    </div>
+                    {isProgramSettingsOpen ? (
+                      <ChevronDown className="h-4 w-4 opacity-60 shrink-0 group-data-[collapsible=icon]:hidden" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 opacity-60 shrink-0 group-data-[collapsible=icon]:hidden" />
+                    )}
+                  </SidebarMenuButton>
+
+                  {isProgramSettingsOpen && (
+                    <SidebarMenuSub className="ml-4 border-l border-border/60 pl-2 space-y-0.5 my-1">
+                      {programSubItems.map((subItem) => {
+                        const isSubActive = location === subItem.path;
+                        return (
+                          <SidebarMenuSubItem key={subItem.path}>
+                            <SidebarMenuSubButton
+                              isActive={isSubActive}
+                              onClick={() => setLocation(subItem.path)}
+                              className="h-8 transition-all font-normal text-xs flex items-center gap-2 cursor-pointer"
+                            >
+                              <subItem.icon className={`h-3.5 w-3.5 shrink-0 ${isSubActive ? "text-primary font-bold" : "text-muted-foreground"}`} />
+                              <span className="truncate">{subItem.label}</span>
+                            </SidebarMenuSubButton>
+                          </SidebarMenuSubItem>
+                        );
+                      })}
+                    </SidebarMenuSub>
+                  )}
+                </SidebarMenuItem>
+              )}
+
+              {/* Home Page Link */}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location === "/"}
+                  onClick={() => setLocation("/")}
+                  tooltip={lang === "hr" ? "Početna stranica" : "Home Page"}
+                  className="h-9 transition-all font-normal"
+                >
+                  <Globe className="h-4 w-4" />
+                  <span>{lang === "hr" ? "Početna stranica" : "Home Page"}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarContent>
 
