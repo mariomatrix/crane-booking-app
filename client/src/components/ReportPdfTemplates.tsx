@@ -511,8 +511,8 @@ export function CalendarSchedulePdf({
 }) {
     const formattedDate = format(date, "yyyy-MM-dd");
     
-    // Get the first 3 cranes
-    const activeCranes = cranes.slice(0, 3);
+    // Filter cranes
+    const activeCranes = cranes && cranes.length > 0 ? cranes : [];
     
     // Filter reservations for this day using local-date-safe comparison
     const dayReservations = reservations.filter((r: any) => {
@@ -525,14 +525,14 @@ export function CalendarSchedulePdf({
     // Prepare hour slots
     const startHour = parseInt(workStart.split(":")[0]) || 8;
     const endHour = parseInt(workEnd.split(":")[0]) || 16;
-    const hours = [];
+    const hours: number[] = [];
     for (let h = startHour; h < endHour; h++) {
         hours.push(h);
     }
 
-    // Width definitions: 16% for Time, 28% for each of the 3 cranes
+    // Width definitions: 16% for Time, remaining 84% divided equally among activeCranes
     const timeColWidth = "16%";
-    const craneColWidth = "28%";
+    const craneColWidth = activeCranes.length > 0 ? `${(84 / activeCranes.length).toFixed(1)}%` : "84%";
 
     return (
         <PdfShell
@@ -556,13 +556,6 @@ export function CalendarSchedulePdf({
                             {crane.name}
                         </Text>
                     ))}
-                    {activeCranes.length < 3 && 
-                        Array.from({ length: 3 - activeCranes.length }).map((_, idx) => (
-                            <Text key={`empty-col-${idx}`} style={[styles.tableCellHeader, { width: craneColWidth, fontSize: 8 }]}>
-                                Dizalica {activeCranes.length + idx + 1}
-                            </Text>
-                        ))
-                    }
                 </View>
 
                 {/* Hour Slots */}
@@ -577,12 +570,7 @@ export function CalendarSchedulePdf({
                             </Text>
 
                             {/* Crane columns */}
-                            {Array.from({ length: 3 }).map((_, colIdx) => {
-                                const crane = activeCranes[colIdx];
-                                if (!crane) {
-                                    return <View key={`empty-cell-${colIdx}`} style={{ width: craneColWidth }} />;
-                                }
-
+                            {activeCranes.map((crane, colIdx) => {
                                 // Get reservations starting in this hour slot for this crane
                                 const slotRes = dayReservations.filter((r: any) => {
                                     if (r.craneId !== crane.id) return false;

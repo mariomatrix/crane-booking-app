@@ -393,29 +393,56 @@ export default function AdminCalendar() {
         return [...resEvents, ...holidayEvents];
     }, [allReservations, activeCranes, viewDate, lang, viewMode, holidays]);
 
+    const pdfCranes = useMemo(() => {
+        if (selectedCrane === "all") return cranesList;
+        return cranesList.filter((c: any) => String(c.id) === String(selectedCrane));
+    }, [cranesList, selectedCrane]);
+
+    const pdfReservations = useMemo(() => {
+        let res = allReservations;
+        if (selectedCrane !== "all") {
+            res = res.filter((r: any) => String(r.craneId) === String(selectedCrane));
+        }
+        return res;
+    }, [allReservations, selectedCrane]);
+
     const handleEventDrop = (info: EventDropArg) => {
+        if (info.event.extendedProps.isMaintenance) {
+            info.revert();
+            return;
+        }
+
+        const id = String(info.event.extendedProps.reservationId || info.event.id);
+
         if (viewMode !== 'master') {
-            // Standard move (only if not maintenance)
-            if (info.event.extendedProps.isMaintenance) {
-                info.revert();
-                return;
+            const origStart = info.oldEvent.start!;
+            const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
+            const durationMs = origEnd.getTime() - origStart.getTime();
+
+            let newStart = info.event.start!;
+            if (viewMode === 'dayGridMonth') {
+                newStart = new Date(info.event.start!);
+                newStart.setHours(origStart.getHours(), origStart.getMinutes(), 0, 0);
             }
+            const newEnd = new Date(newStart.getTime() + durationMs);
+
             rescheduleMutation.mutate({
-                id: info.event.id,
-                scheduledStart: info.event.start!,
-                scheduledEnd: info.event.end!,
+                id,
+                scheduledStart: newStart,
+                scheduledEnd: newEnd,
                 craneId: info.event.extendedProps.craneId
+            }, {
+                onError: (err: any) => {
+                    info.revert();
+                    toast.error(err.message);
+                }
             });
             return;
         }
 
-        const id = String(info.event.extendedProps.reservationId);
-
-        // Calculate new date and time
         const newOffsetDate = info.event.start!;
         const diffDays = Math.round((newOffsetDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
 
-        // Ensure within range of cranes
         if (diffDays < 0 || diffDays >= activeCranes.length) {
             info.revert();
             return;
@@ -423,16 +450,61 @@ export default function AdminCalendar() {
 
         const newTargetCrane = activeCranes[diffDays];
         const newStart = new Date(viewDate);
-        newStart.setHours(newOffsetDate.getHours(), newOffsetDate.getMinutes(), 0);
+        newStart.setHours(newOffsetDate.getHours(), newOffsetDate.getMinutes(), 0, 0);
 
-        const duration = info.event.end ? (info.event.end.getTime() - info.event.start!.getTime()) : 3600000;
-        const newEnd = new Date(newStart.getTime() + duration);
+        const origStart = info.oldEvent.start!;
+        const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
+        const durationMs = origEnd.getTime() - origStart.getTime();
+        const newEnd = new Date(newStart.getTime() + durationMs);
 
         rescheduleMutation.mutate({
             id,
             scheduledStart: newStart,
             scheduledEnd: newEnd,
             craneId: newTargetCrane.id
+        }, {
+            onError: (err: any) => {
+                info.revert();
+                toast.error(err.message);
+            }
+        });
+    };
+
+    const handleEventResize = (info: any) => {
+        if (info.event.extendedProps.isMaintenance) {
+            info.revert();
+            return;
+        }
+        const id = String(info.event.extendedProps.reservationId || info.event.id);
+        let newStart = info.event.start!;
+        let newEnd = info.event.end!;
+        let craneId = info.event.extendedProps.craneId;
+
+        if (viewMode === 'master') {
+            const diffDays = Math.round((newStart.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+            if (diffDays < 0 || diffDays >= activeCranes.length) {
+                info.revert();
+                return;
+            }
+            craneId = activeCranes[diffDays].id;
+            const realStart = new Date(viewDate);
+            realStart.setHours(newStart.getHours(), newStart.getMinutes(), 0, 0);
+
+            const durationMs = newEnd.getTime() - newStart.getTime();
+            newStart = realStart;
+            newEnd = new Date(realStart.getTime() + durationMs);
+        }
+
+        rescheduleMutation.mutate({
+            id,
+            scheduledStart: newStart,
+            scheduledEnd: newEnd,
+            craneId
+        }, {
+            onError: (err: any) => {
+                info.revert();
+                toast.error(err.message);
+            }
         });
     };
 
@@ -733,12 +805,12 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <PDFDownloadLink
-                        key={`${viewDate.toISOString()}-${allReservations.length}-${allReservations.map(r => r.id + '-' + r.status).join(',')}`}
+                        key={`${viewDate.toISOString()}-${selectedCrane}-${pdfReservations.length}-${pdfReservations.map(r => r.id + '-' + r.status).join(',')}`}
                         document={
                             <CalendarSchedulePdf
                                 date={viewDate}
-                                cranes={cranesList}
-                                reservations={allReservations}
+                                cranes={pdfCranes}
+                                reservations={pdfReservations}
                                 workStart={workStart}
                                 workEnd={workEnd}
                                 marinaName={sysSettings?.marinaName || "PŠD Špinut"}
@@ -774,9 +846,9 @@ export default function AdminCalendar() {
                                     variant={statusFilters.includes(s) ? "secondary" : "ghost"}
                                     size="sm"
                                     onClick={() => toggleStatus(s)}
-                                    className="px-2 py-0 h-7 text-[10px] uppercase font-bold"
+                                    className="h-7 text-xs px-2.5 rounded-sm"
                                 >
-                                    <span
+                                    <div
                                         className="h-2 w-2 rounded-full mr-1.5"
                                         style={{ backgroundColor: STATUS_COLORS[s] }}
                                     />
@@ -827,26 +899,32 @@ export default function AdminCalendar() {
                         }}>
                             <ChevronRight className="h-4 w-4" />
                         </Button>
+                        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs font-semibold ml-1 border-l rounded-none" onClick={() => {
+                            const today = startOfDay(new Date());
+                            setViewDate(today);
+                            calendarRef.current?.getApi().gotoDate(today);
+                        }}>
+                            Danas
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
 
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
-                {/* Calendar View */}
-                <div className="lg:col-span-3 h-[700px] bg-background border rounded-lg overflow-hidden shadow-sm relative">
+            {/* Calendar Container */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-3 bg-background border rounded-xl p-4 shadow-sm h-[700px] relative">
                     {isResLoading && (
-                        <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-50 flex items-center justify-center">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] z-10 flex items-center justify-center rounded-xl">
+                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
                         </div>
                     )}
-                    <style dangerouslySetInnerHTML={{
-                        __html: `
-                        .fc .fc-timegrid-axis-cushion { font-size: 0.75rem; color: #666; }
-                        .fc .fc-col-header-cell-cushion { 
-                            padding: 10px; font-weight: 700; color: #333; 
-                            text-transform: uppercase; font-size: 0.85rem;
-                        }
-                        .fc-theme-standard td, .fc-theme-standard th { border: 1px solid #e5e7eb !important; }
+                    <style dangerouslySetInnerHTML={{ __html: `
+                        .fc-theme-standard td, .fc-theme-standard th { border-color: var(--border) !important; }
+                        .fc-timegrid-slot { height: 40px !important; }
+                        .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 11px; color: var(--muted-foreground); }
+                        .fc-col-header-cell { background-color: var(--muted); padding: 8px 0; font-size: 12px; font-weight: 600; }
+                        .fc-event { cursor: pointer; transition: transform 0.1s ease; }
+                        .fc-event:hover { transform: scale(1.01); z-index: 5; }
                         .fc-timegrid-event { border-radius: 4px; border: none !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
                         .fc-v-event .fc-event-main { padding: 4px; }
                     `}} />
@@ -873,7 +951,7 @@ export default function AdminCalendar() {
                                 // Calculate crane and time
                                 const dropDate = info.event.start!;
 
-                                let targetCrane = activeCranes[0];
+                                let targetCrane = activeCranes[0] || cranesList[0];
                                 let startDate = dropDate;
 
                                 if (viewMode === 'master') {
@@ -885,6 +963,9 @@ export default function AdminCalendar() {
                                     targetCrane = activeCranes[diffDays];
                                     startDate = new Date(viewDate);
                                     startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0);
+                                } else if (selectedCrane !== "all") {
+                                    const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
+                                    if (found) targetCrane = found;
                                 }
 
                                 const durationHours = info.event.end ? (info.event.end.getTime() - dropDate.getTime()) / 3600000 : 1;
@@ -901,6 +982,7 @@ export default function AdminCalendar() {
                             }
                         }}
                         eventDrop={handleEventDrop}
+                        eventResize={handleEventResize}
                         eventClick={handleEventClick}
                         datesSet={handleDatesSet}
                         events={calendarEvents as any}
