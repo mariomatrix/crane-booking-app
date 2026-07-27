@@ -112,7 +112,7 @@ export default function AdminReservations() {
 
   // Board query fetches all active statuses (pending, waitlisted, approved)
   const boardStatusFilter = ["pending", "waitlisted", "approved"];
-  
+
   const reservationsQuery = trpc.reservation.listAll.useQuery(
     {
       status: viewMode === "board" ? boardStatusFilter : (statusFilter !== "all" ? [statusFilter] : undefined),
@@ -183,8 +183,8 @@ export default function AdminReservations() {
   const resetApproveState = () => {
     setSelectedId(null);
     setApproveCraneId("");
-    setApproveDate(undefined);
-    setApproveTime("");
+    setApproveDate(new Date());
+    setApproveTime("08:00");
     setApproveDuration("60");
     setAdminNote("");
     setApproveVesselRegistration("");
@@ -194,6 +194,9 @@ export default function AdminReservations() {
   const openApprove = (id: string) => {
     setSelectedId(id);
     const reservation = (reservationsList as any[]).find((r: any) => r.id === id);
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
     if (reservation) {
       setApproveVesselRegistration(reservation.vesselRegistration || "");
       setApproveContactPhone(reservation.contactPhone || reservation.user?.phone || "");
@@ -204,12 +207,15 @@ export default function AdminReservations() {
         setApproveDuration(String(reservation.durationMin));
       }
       if (reservation.requestedDate) {
-        setApproveDate(new Date(reservation.requestedDate));
+        const rDate = new Date(reservation.requestedDate);
+        setApproveDate(rDate < startOfToday ? new Date() : rDate);
       } else {
-        setApproveDate(undefined);
+        setApproveDate(new Date());
       }
+      setApproveTime("08:00");
     } else {
-      setApproveDate(undefined);
+      setApproveDate(new Date());
+      setApproveTime("08:00");
       setApproveVesselRegistration("");
       setApproveContactPhone("");
     }
@@ -406,7 +412,7 @@ export default function AdminReservations() {
             )}
           </div>
 
-            {/* Card Footer Actions */}
+          {/* Card Footer Actions */}
           <div className="flex items-center justify-end gap-1.5 pt-2 border-t">
             <Button
               size="sm"
@@ -565,7 +571,7 @@ export default function AdminReservations() {
                 {pendingReservations.length}
               </Badge>
             </div>
-            
+
             <ScrollArea className="h-[calc(100vh-250px)] min-h-[500px]">
               <div className="p-3 space-y-3">
                 {pendingReservations.length === 0 ? (
@@ -813,7 +819,7 @@ export default function AdminReservations() {
                   <Pagination>
                     <PaginationContent>
                       <PaginationItem>
-                        <PaginationPrevious 
+                        <PaginationPrevious
                           onClick={() => setPage(p => Math.max(1, p - 1))}
                           className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                         />
@@ -822,7 +828,7 @@ export default function AdminReservations() {
                         {page} / {totalPages} ({totalReservations} ukupno)
                       </div>
                       <PaginationItem>
-                        <PaginationNext 
+                        <PaginationNext
                           onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                           className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
                         />
@@ -915,18 +921,20 @@ export default function AdminReservations() {
                   date={approveDate}
                   onChange={setApproveDate}
                   placeholder="Odaberi datum"
+                  disablePastDates
                 />
               </div>
               <div className="space-y-2">
                 <Label>Sat *</Label>
                 <Select value={approveTime} onValueChange={setApproveTime}>
                   <SelectTrigger>
-                    <SelectValue placeholder="--:--" />
+                    <SelectValue placeholder="08:00" />
                   </SelectTrigger>
                   <SelectContent className="max-h-[200px]">
-                    {Array.from({ length: 24 * 4 }).map((_, i) => {
-                      const hour = Math.floor(i / 4).toString().padStart(2, '0');
-                      const min = ((i % 4) * 15).toString().padStart(2, '0');
+                    {Array.from({ length: 15 * 2 }).map((_, i) => {
+                      const h = Math.floor(i / 2) + 6; // 06:00 to 20:00
+                      const hour = h.toString().padStart(2, '0');
+                      const min = (i % 2 === 0 ? "00" : "30");
                       const time = `${hour}:${min}`;
                       return (
                         <SelectItem key={time} value={time}>
@@ -941,7 +949,7 @@ export default function AdminReservations() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Registracija plovila (opcionalno)</Label>
+                <Label>Registracija plovila</Label>
                 <Input
                   placeholder="npr. ST-1234"
                   value={approveVesselRegistration}
@@ -949,7 +957,7 @@ export default function AdminReservations() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Kontakt telefon / mobitel (opcionalno)</Label>
+                <Label>Kontakt telefon / mobitel</Label>
                 <Input
                   placeholder="npr. 0912345678"
                   value={approveContactPhone}

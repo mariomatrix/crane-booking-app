@@ -323,6 +323,13 @@ export async function updateReservationStatus(
       updatedAt: new Date(),
     })
     .where(eq(reservations.id, id));
+
+  if (status === "cancelled" || status === "rejected") {
+    const { landWaitingList } = await import("../drizzle/schema");
+    await db.update(landWaitingList)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(eq(landWaitingList.reservationId, id));
+  }
 }
 
 /**

@@ -29,7 +29,7 @@ import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 export default function AdminLandWaiting() {
   const { lang } = useLang();
   const isHr = lang === "hr";
-  
+
   // Waitlist add dialog states
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [userId, setUserId] = useState("");
@@ -69,6 +69,8 @@ export default function AdminLandWaiting() {
     onSuccess: () => {
       toast.success(isHr ? "Korisnik je dodan na listu čekanja." : "User successfully added to waitlist.");
       utils.landWaiting.listAll.invalidate();
+      utils.reservation.listAll.invalidate();
+      utils.calendar.events.invalidate();
       setAddDialogOpen(false);
       resetAddForm();
     },
@@ -95,6 +97,8 @@ export default function AdminLandWaiting() {
     onSuccess: () => {
       toast.success(isHr ? "Zahtjev je uklonjen s liste." : "Waitlist entry cancelled.");
       utils.landWaiting.listAll.invalidate();
+      utils.reservation.listAll.invalidate();
+      utils.calendar.events.invalidate();
     },
     onError: (error) => toast.error(error.message),
   });
@@ -103,7 +107,9 @@ export default function AdminLandWaiting() {
     onSuccess: () => {
       toast.success(isHr ? "Mjesto je uspješno dodijeljeno (boravak započet)." : "Dry berth successfully assigned.");
       utils.landWaiting.listAll.invalidate();
+      utils.reservation.listAll.invalidate();
       utils.landZone.list.invalidate();
+      utils.calendar.events.invalidate();
       setAssignDialogOpen(false);
     },
     onError: (error) => toast.error(error.message),
@@ -113,7 +119,9 @@ export default function AdminLandWaiting() {
     onSuccess: () => {
       toast.success(isHr ? "Uspješno odobreno i raspoređeno na kalendar." : "Successfully approved and scheduled.");
       utils.landWaiting.listAll.invalidate();
+      utils.reservation.listAll.invalidate();
       utils.landZone.list.invalidate();
+      utils.calendar.events.invalidate();
       setDirectAssignDialogOpen(false);
       setDirectCraneId("");
       setDirectDate(undefined);
@@ -143,7 +151,7 @@ export default function AdminLandWaiting() {
     const nextList = [...waiting];
     const swapWith = direction === "up" ? index - 1 : index + 1;
     if (swapWith < 0 || swapWith >= nextList.length) return;
-    
+
     // Swap items
     const temp = nextList[index];
     nextList[index] = nextList[swapWith];
@@ -297,19 +305,19 @@ export default function AdminLandWaiting() {
                       <div className="flex items-center justify-end gap-1.5">
                         {/* Reorder Buttons */}
                         <div className="flex flex-col gap-0.5 mr-2">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-6 w-6 rounded-md hover:bg-accent" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 rounded-md hover:bg-accent"
                             disabled={idx === 0 || reorderMutation.isPending}
                             onClick={() => handleMove(idx, "up")}
                           >
                             <ArrowUp className="h-3.5 w-3.5" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-6 w-6 rounded-md hover:bg-accent" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 rounded-md hover:bg-accent"
                             disabled={idx === waiting.length - 1 || reorderMutation.isPending}
                             onClick={() => handleMove(idx, "down")}
                           >
@@ -319,9 +327,9 @@ export default function AdminLandWaiting() {
 
                         {/* Custom status actions */}
                         {entry.status === "waiting" && (
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
+                          <Button
+                            size="sm"
+                            variant="outline"
                             className="h-8 rounded-lg text-blue-600 border-blue-200 hover:bg-blue-50"
                             onClick={() => offerMutation.mutate({ id: entry.id })}
                           >
@@ -332,18 +340,18 @@ export default function AdminLandWaiting() {
 
                         {entry.status === "offered" && (
                           <>
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
+                            <Button
+                              size="sm"
+                              variant="outline"
                               className="h-8 rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50"
                               onClick={() => openAssign(entry)}
                             >
                               <CheckCircle className="h-3 w-3 mr-1" />
                               {isHr ? "Dodijeli" : "Assign"}
                             </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
+                            <Button
+                              size="sm"
+                              variant="outline"
                               className="h-8 rounded-lg text-amber-600 border-amber-200 hover:bg-amber-50"
                               onClick={() => {
                                 if (confirm(isHr ? "Označiti da je korisnik odbio ponudu?" : "Mark as declined by user?")) {
@@ -358,9 +366,9 @@ export default function AdminLandWaiting() {
                         )}
 
                         {entry.status === "declined" && (
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
+                          <Button
+                            size="sm"
+                            variant="outline"
                             className="h-8 rounded-lg text-blue-600 border-blue-200 hover:bg-blue-50"
                             onClick={() => offerMutation.mutate({ id: entry.id })}
                           >
@@ -370,9 +378,9 @@ export default function AdminLandWaiting() {
                         )}
 
                         {entry.reservationId && (entry.status === "waiting" || entry.status === "offered" || entry.status === "declined") && (
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
+                          <Button
+                            size="sm"
+                            variant="outline"
                             className="h-8 rounded-lg text-purple-600 border-purple-200 hover:bg-purple-50"
                             onClick={() => {
                               setDirectAssignEntry(entry);
@@ -389,9 +397,9 @@ export default function AdminLandWaiting() {
                           </Button>
                         )}
 
-                        <Button 
-                          size="sm" 
-                          variant="ghost" 
+                        <Button
+                          size="sm"
+                          variant="ghost"
                           className="h-8 w-8 p-0 rounded-lg text-destructive hover:bg-destructive/10"
                           onClick={() => {
                             if (confirm(isHr ? "Ukloniti s liste čekanja?" : "Remove from waitlist?")) {
@@ -429,9 +437,9 @@ export default function AdminLandWaiting() {
                 placeholder={isHr ? "Odaberite korisnika..." : "Select user..."}
               />
             </div>
-            
+
             <div className="space-y-1">
-              <Label>{isHr ? "Plovilo (Opcijski)" : "Vessel (Optional)"}</Label>
+              <Label>{isHr ? "Plovilo" : "Vessel"}</Label>
               <Select value={vesselId} onValueChange={setVesselId} disabled={!userId || vesselsLoading}>
                 <SelectTrigger>
                   <SelectValue placeholder={
@@ -447,8 +455,8 @@ export default function AdminLandWaiting() {
             </div>
 
             <div className="space-y-1">
-              <Label>{isHr ? "Preferirana zona (Opcijski)" : "Preferred Zone (Optional)"}</Label>
-              <Select value={preferredZoneId} onOpenChange={() => {}} onValueChange={setPreferredZoneId}>
+              <Label>{isHr ? "Preferirana zona" : "Preferred Zone"}</Label>
+              <Select value={preferredZoneId} onOpenChange={() => { }} onValueChange={setPreferredZoneId}>
                 <SelectTrigger><SelectValue placeholder={isHr ? "Bilo koja" : "Any zone"} /></SelectTrigger>
                 <SelectContent>
                   {zones.map(z => (
@@ -491,14 +499,14 @@ export default function AdminLandWaiting() {
                 </SelectContent>
               </Select>
             </div>
-            
+
             <div className="space-y-1">
               <Label>{isHr ? "Broj mjesta (Opcijski)" : "Spot Number (Optional)"}</Label>
-              <Input 
-                type="number" 
-                placeholder="npr. 12" 
-                value={assignSpotNumber} 
-                onChange={e => setAssignSpotNumber(e.target.value)} 
+              <Input
+                type="number"
+                placeholder="npr. 12"
+                value={assignSpotNumber}
+                onChange={e => setAssignSpotNumber(e.target.value)}
               />
             </div>
 
@@ -537,7 +545,7 @@ export default function AdminLandWaiting() {
                 required
               />
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>{isHr ? "Vrijeme" : "Time"} *</Label>

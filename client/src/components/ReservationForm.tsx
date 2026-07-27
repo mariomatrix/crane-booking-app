@@ -195,6 +195,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 date={requestedDate}
                                 onChange={setRequestedDate}
                                 placeholder={lang === "hr" ? "Odaberite datum" : "Select date"}
+                                disablePastDates
                             />
                         </div>
                         <div className="space-y-2">

@@ -20,11 +20,15 @@ interface DatePickerProps {
     placeholder?: string;
     className?: string;
     disabled?: boolean;
+    disablePastDates?: boolean;
 }
 
-export function DatePicker({ date, onChange, placeholder, className, disabled }: DatePickerProps) {
+export function DatePicker({ date, onChange, placeholder, className, disabled, disablePastDates = false }: DatePickerProps) {
     const { lang } = useLang();
     const [open, setOpen] = React.useState(false);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -46,6 +50,7 @@ export function DatePicker({ date, onChange, placeholder, className, disabled }:
                 <Calendar
                     mode="single"
                     selected={date}
+                    disabled={disablePastDates ? (d) => d < startOfToday : undefined}
                     onSelect={(selectedDate) => {
                         onChange?.(selectedDate);
                         if (selectedDate) {

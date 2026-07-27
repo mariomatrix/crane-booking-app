@@ -448,6 +448,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                                     date={requestedDate}
                                     onChange={setRequestedDate}
                                     placeholder={lang === "hr" ? "Datum" : "Date"}
+                                    disablePastDates
                                 />
                             </div>
                             {!isWaitlisted && (

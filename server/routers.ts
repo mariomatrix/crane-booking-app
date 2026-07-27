@@ -158,10 +158,37 @@ async function validateSlotAgainstSettings(
   endDate: Date,
   sysSettings: Record<string, string>
 ) {
-  const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-  const slotMin = Number(sysSettings.slotDurationMinutes ?? "30");
-  const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
-  const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
+  // 1. Past date check (No past dates allowed)
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  if (startDate < startOfToday) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Rezervaciju nije moguće ugovoriti ili odobriti za datum u prošlosti. Najraniji datum je današnji dan.",
+    });
+  }
+
+  // 2. Active Season & Working Hours check
+  const year = startDate.getFullYear();
+  const month = String(startDate.getMonth() + 1).padStart(2, "0");
+  const day = String(startDate.getDate()).padStart(2, "0");
+  const dateStr = `${year}-${month}-${day}`;
+
+  const activeSeason = await getActiveSeason(dateStr);
+
+  let workStartStr = sysSettings.workdayStart ?? "08:00";
+  let workEndStr = sysSettings.workdayEnd ?? "18:00";
+
+  if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
+    const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    const dayKey = dayKeys[startDate.getDay()];
+    const dayHours = (activeSeason.workingHours as any)[dayKey];
+    if (dayHours?.from) workStartStr = dayHours.from;
+    if (dayHours?.to) workEndStr = dayHours.to;
+  }
+
+  const { h: wsH, m: wsM } = parseHHMM(workStartStr);
+  const { h: weH, m: weM } = parseHHMM(workEndStr);
 
   const startH = startDate.getHours() * 60 + startDate.getMinutes();
   const endH = endDate.getHours() * 60 + endDate.getMinutes();
@@ -169,9 +196,10 @@ async function validateSlotAgainstSettings(
   const workEnd = weH * 60 + weM;
 
   if (startH < workStart || endH > workEnd) {
+    const startFormatted = `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`;
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Termini su dostupni između ${sysSettings.workdayStart} i ${sysSettings.workdayEnd}.`,
+      message: `Odabrani termin (${startFormatted}) je izvan radnog vremena za taj dan (${workStartStr} - ${workEndStr}).`,
     });
   }
 
@@ -1168,7 +1196,17 @@ export const appRouter = router({
           }
         }
 
-        // 2. Check date is not a holiday or outside season
+        // 2. Check date is not in the past
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        if (input.requestedDate < todayStr) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Rezervaciju nije moguće napraviti za datum u prošlosti. Najraniji datum je današnji dan.",
+          });
+        }
+
+        // 3. Check date is not a holiday or outside season
         const dateIsHoliday = await isHoliday(input.requestedDate);
         if (dateIsHoliday) {
           throw new TRPCError({
@@ -1711,6 +1749,10 @@ export const appRouter = router({
 
         // Compute scheduled end
         const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
+
+        // Validate slot date and working hours against active season
+        const sysSettings = await getAllSettings();
+        await validateSlotAgainstSettings(input.scheduledStart, scheduledEnd, sysSettings);
 
         // Validate weight vs crane capacity
         if (reservation.vesselWeightTons && (Number(reservation.vesselWeightTons) * 10) > Number(crane.maxCapacityKN)) {
@@ -3025,6 +3067,17 @@ export const appRouter = router({
     remove: operatorProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (db) {
+          const waitlistEntry = await db.select().from(landWaitingList).where(eq(landWaitingList.id, input.id)).limit(1);
+          if (waitlistEntry.length > 0 && waitlistEntry[0].reservationId) {
+            await db.update(reservations).set({
+              status: "cancelled",
+              adminNote: "Uklonjeno s liste čekanja za suhi vez",
+              updatedAt: new Date(),
+            }).where(eq(reservations.id, waitlistEntry[0].reservationId));
+          }
+        }
         await updateLandWaitingListStatus(input.id, "cancelled");
         await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_removed", entityType: "land_waiting_list", entityId: input.id });
         return { success: true };
