@@ -166,12 +166,14 @@ async function runMigration() {
                 role: "admin",
                 loginMethod: "email",
                 userStatus: "active",
+                emailVerifiedAt: new Date(),
             });
         } else {
             console.log(`Ensuring admin role and updating password: ${admin.email}`);
             await db.update(users).set({
                 role: "admin",
                 passwordHash,
+                emailVerifiedAt: new Date(),
                 updatedAt: new Date()
             }).where(eq(users.email, admin.email));
         }

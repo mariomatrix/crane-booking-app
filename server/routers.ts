@@ -1146,22 +1146,26 @@ export const appRouter = router({
         status: z.enum(["pending", "waitlisted"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        // 0. Email verification check
-        if (!ctx.user.emailVerifiedAt) {
+        const isAdminOrOperator = ctx.user.role === "admin" || ctx.user.role === "operator";
+
+        // 0. Email verification check (administrators and operators are exempt)
+        if (!ctx.user.emailVerifiedAt && !isAdminOrOperator) {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "Molimo potvrdite svoju email adresu prije kreiranja rezervacije.",
           });
         }
 
-        // 1. Limit check: Max 3 active reservations
-        const myActive = await listReservationsByUser(ctx.user.id);
-        const activeCount = myActive.filter(r => r.status === "pending" || r.status === "approved").length;
-        if (activeCount >= 3) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Imate maksimalni broj aktivnih rezervacija (3). Molimo pričekajte završetak ili otkažite postojeće.",
-          });
+        // 1. Limit check: Max 3 active reservations (administrators and operators are exempt)
+        if (!isAdminOrOperator) {
+          const myActive = await listReservationsByUser(ctx.user.id);
+          const activeCount = myActive.filter(r => r.status === "pending" || r.status === "approved").length;
+          if (activeCount >= 3) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Imate maksimalni broj aktivnih rezervacija (3). Molimo pričekajte završetak ili otkažite postojeće.",
+            });
+          }
         }
 
         // 2. Check date is not a holiday or outside season
