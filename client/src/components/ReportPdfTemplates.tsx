@@ -218,10 +218,10 @@ export function CraneSchedulePdf({ data, dateFrom, dateTo, marinaName, marinaLog
             <View style={styles.table}>
                 <View style={styles.tableHeaderRow}>
                     <Text style={[styles.tableCellHeader, { width: "10%" }]}>Datum</Text>
-                    <Text style={[styles.tableCellHeader, { width: "10%" }]}>Vrijeme</Text>
-                    <Text style={[styles.tableCellHeader, { width: "22%" }]}>Klijent (OIB)</Text>
-                    <Text style={[styles.tableCellHeader, { width: "23%" }]}>Plovilo (Reg)</Text>
-                    <Text style={[styles.tableCellHeader, { width: "15%" }]}>Radnja</Text>
+                    <Text style={[styles.tableCellHeader, { width: "9%" }]}>Vrijeme</Text>
+                    <Text style={[styles.tableCellHeader, { width: "21%" }]}>Klijent (OIB)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "21%" }]}>Plovilo (Reg)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "19%", paddingLeft: 6 }]}>Radnja</Text>
                     <Text style={[styles.tableCellHeader, { width: "12%" }]}>Dizalica</Text>
                     <Text style={[styles.tableCellHeader, { width: "8%" }]}>Status</Text>
                 </View>
@@ -230,18 +230,18 @@ export function CraneSchedulePdf({ data, dateFrom, dateTo, marinaName, marinaLog
                         <Text style={[styles.tableCell, { width: "10%" }]}>
                             {item.scheduledStart ? format(new Date(item.scheduledStart), "dd.MM.yy") : "-"}
                         </Text>
-                        <Text style={[styles.tableCell, { width: "10%" }]}>
+                        <Text style={[styles.tableCell, { width: "9%" }]}>
                             {item.scheduledStart ? format(new Date(item.scheduledStart), "HH:mm") : "-"}
                         </Text>
-                        <Text style={[styles.tableCell, { width: "22%" }]}>
+                        <Text style={[styles.tableCell, { width: "21%" }]}>
                             {item.clientName || "—"}{"\n"}
                             <Text style={{ fontSize: 7, color: "#64748b" }}>OIB: {item.userOib || "—"}</Text>
                         </Text>
-                        <Text style={[styles.tableCell, { width: "23%" }]}>
+                        <Text style={[styles.tableCell, { width: "21%" }]}>
                             {item.vesselName || "—"}{"\n"}
                             <Text style={{ fontSize: 7, color: "#64748b" }}>Reg: {item.vesselRegistration || "—"}</Text>
                         </Text>
-                        <Text style={[styles.tableCell, { width: "15%" }]}>{item.serviceTypeName || item.operationType || "—"}</Text>
+                        <Text style={[styles.tableCell, { width: "19%", paddingLeft: 6 }]}>{item.serviceTypeName || item.operationType || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "12%" }]}>{item.craneName || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "8%", textTransform: "capitalize" }]}>{item.status}</Text>
                     </View>
@@ -591,9 +591,10 @@ export function CalendarSchedulePdf({
                                                 <View 
                                                     key={r.id || rIdx} 
                                                     style={{ 
-                                                        borderLeftWidth: 2, 
+                                                        borderLeftWidth: 3, 
                                                         borderLeftColor: statusColor, 
-                                                        paddingLeft: 4, 
+                                                        paddingLeft: 6, 
+                                                        paddingRight: 2,
                                                         marginBottom: 4, 
                                                         marginTop: rIdx > 0 ? 4 : 0 
                                                     }}
@@ -604,11 +605,11 @@ export function CalendarSchedulePdf({
                                                     <Text style={{ fontSize: 7, color: "#64748b", marginTop: 1 }}>
                                                         Reg: {reg}{landZoneLabel ? ` • Suhi vez: ${landZoneLabel}` : ""}
                                                     </Text>
-                                                    <Text style={{ fontSize: 7, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 1 }}>
+                                                    <Text style={{ fontSize: 7, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 1, paddingLeft: 1 }}>
                                                         {action}
                                                     </Text>
                                                     {r.adminNote && (
-                                                        <Text style={{ fontSize: 6.5, fontStyle: "italic", color: "#475569", marginTop: 1 }}>
+                                                        <Text style={{ fontSize: 6.5, fontStyle: "italic", color: "#475569", marginTop: 1, paddingLeft: 1 }}>
                                                             Napom: {r.adminNote}
                                                         </Text>
                                                     )}
