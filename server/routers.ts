@@ -1170,6 +1170,7 @@ export const appRouter = router({
         contactPhone: z.string().optional(),
         // Land zone
         landZoneId: z.string().uuid().optional(),
+        landWaitingId: z.string().uuid().optional(),
         overrideCapacityCheck: z.boolean().optional(),
         status: z.enum(["pending", "waitlisted"]).optional(),
       }))
@@ -1484,6 +1485,15 @@ export const appRouter = router({
             userNote: input.userNote || undefined,
             lang: "hr"
           }).catch(console.warn);
+        }
+
+        if (input.landWaitingId) {
+          await db.update(landWaitingList).set({
+            reservationId: resId,
+            preferredZoneId: input.landZoneId || undefined,
+            status: "assigned",
+            updatedAt: new Date(),
+          }).where(eq(landWaitingList.id, input.landWaitingId));
         }
 
         return { id: resId, reservationNumber };

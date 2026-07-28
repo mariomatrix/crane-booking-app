@@ -13,40 +13,75 @@ import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { formatToSqlDate } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Loader2, Send, UserPlus } from "lucide-react";
+import { Loader2, Send, UserPlus, XCircle } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { cn } from "@/lib/utils";
 
 interface AdminReservationFormProps {
+    initialData?: {
+        landWaitingId?: string;
+        userId?: string;
+        vesselId?: string;
+        landZoneId?: string;
+        requestedDate?: Date;
+        craneId?: string;
+        serviceTypeId?: string;
+        scheduledTime?: string;
+        durationMin?: string;
+        adminNote?: string;
+    };
     onSuccess?: () => void;
     onCancel?: () => void;
+    onRejectWaitlist?: () => void;
+    isRejectPending?: boolean;
+    submitButtonText?: string;
 }
 
-export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFormProps) {
+export function AdminReservationForm({
+    initialData,
+    onSuccess,
+    onCancel,
+    onRejectWaitlist,
+    isRejectPending,
+    submitButtonText
+}: AdminReservationFormProps) {
     const { t, lang } = useLang();
 
     // ── Form state ───────────────────────────────────────────────────────
-    const [userId, setUserId] = useState("");
-    const [serviceTypeId, setServiceTypeId] = useState("");
-    const [requestedDate, setRequestedDate] = useState<Date | undefined>(undefined);
-    const [scheduledTime, setScheduledTime] = useState("08:00");
-    const [durationMin, setDurationMin] = useState<string>("");
-    const [craneId, setCraneId] = useState("");
+    const [userId, setUserId] = useState(initialData?.userId || "");
+    const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
+    const [requestedDate, setRequestedDate] = useState<Date | undefined>(initialData?.requestedDate || new Date());
+    const [scheduledTime, setScheduledTime] = useState(initialData?.scheduledTime || "08:00");
+    const [durationMin, setDurationMin] = useState<string>(initialData?.durationMin || "30");
+    const [craneId, setCraneId] = useState(initialData?.craneId || "");
     const [userNote, setUserNote] = useState("");
     const [contactPhone, setContactPhone] = useState("");
     const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
-    const [landZoneId, setLandZoneId] = useState("");
+    const [landZoneId, setLandZoneId] = useState(initialData?.landZoneId || "");
     const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
     const [isWaitlisted, setIsWaitlisted] = useState(false);
-    const [adminNote, setAdminNote] = useState("");
+    const [adminNote, setAdminNote] = useState(initialData?.adminNote || "");
+
+    useEffect(() => {
+        if (initialData) {
+            if (initialData.userId) setUserId(initialData.userId);
+            if (initialData.landZoneId) setLandZoneId(initialData.landZoneId);
+            if (initialData.serviceTypeId) setServiceTypeId(initialData.serviceTypeId);
+            if (initialData.craneId) setCraneId(initialData.craneId);
+            if (initialData.requestedDate) setRequestedDate(initialData.requestedDate);
+            if (initialData.scheduledTime) setScheduledTime(initialData.scheduledTime);
+            if (initialData.durationMin) setDurationMin(initialData.durationMin);
+            if (initialData.adminNote) setAdminNote(initialData.adminNote);
+        }
+    }, [initialData]);
 
     const utils = trpc.useUtils();
 
     // Vessel state
-    const [selectedVesselId, setSelectedVesselId] = useState<string>("new");
+    const [selectedVesselId, setSelectedVesselId] = useState<string>(initialData?.vesselId || "new");
     const [saveToProfile, setSaveToProfile] = useState(true);
     const [vesselType, setVesselType] = useState("jedrilica");
     const [vesselLength, setVesselLength] = useState("");
@@ -87,16 +122,18 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const [lastLoadedUserId, setLastLoadedUserId] = useState("");
     if (userId !== lastLoadedUserId) {
         setLastLoadedUserId(userId);
-        setSelectedVesselId("new");
-        setVesselType("jedrilica");
-        setVesselLength("");
-        setVesselWidth("");
-        setVesselDraft("");
-        setVesselWeight("");
-        setVesselRegistration("");
+        if (!initialData?.vesselId) {
+            setSelectedVesselId("new");
+            setVesselType("jedrilica");
+            setVesselLength("");
+            setVesselWidth("");
+            setVesselDraft("");
+            setVesselWeight("");
+            setVesselRegistration("");
+        }
     }
 
-    if (userVessels.length > 0 && selectedVesselId === "new" && !vesselRegistration && !userVesselsLoading) {
+    if (userVessels.length > 0 && selectedVesselId === "new" && !vesselRegistration && !userVesselsLoading && !initialData?.vesselId) {
         const v = userVessels[0];
         setSelectedVesselId(v.id);
         setVesselType(v.type || "jedrilica");
@@ -133,6 +170,9 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
             toast.success("Rezervacija uspješno kreirana.");
+            utils.reservation.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
+            utils.calendar.events.invalidate();
             onSuccess?.();
         },
         onError: (error: any) => toast.error(error.message),
@@ -156,7 +196,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         }
 
         let scheduledStartDate: Date | undefined = undefined;
-        if (!isWaitlisted) {
+        if (!isWaitlisted && requestedDate) {
             const [hours, minutes] = scheduledTime.split(":").map(Number);
             scheduledStartDate = new Date(requestedDate);
             scheduledStartDate.setHours(hours, minutes, 0, 0);
@@ -165,7 +205,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
         const commonPayload = {
             userId,
             serviceTypeId,
-            requestedDate: formatToSqlDate(requestedDate),
+            requestedDate: requestedDate ? formatToSqlDate(requestedDate) : "",
             requestedTimeSlot: "po_dogovoru" as any,
             userNote: userNote || undefined,
             adminNote: adminNote || undefined,
@@ -177,6 +217,7 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
             contactPhone,
             landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
+            landWaitingId: initialData?.landWaitingId || undefined,
             overrideCapacityCheck: overrideCapacityCheck || undefined,
             status: isWaitlisted ? ("waitlisted" as const) : undefined,
             isAutoApprove: !isWaitlisted ? true : undefined,
@@ -214,12 +255,6 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
             });
         }
     };
-
-    const timeSlotOptions = [
-        { value: "jutro", label: lang === "hr" ? "Jutro (08:00–12:00)" : "Morning (08:00–12:00)" },
-        { value: "poslijepodne", label: lang === "hr" ? "Poslijepodne (12:00–16:00)" : "Afternoon (12:00–16:00)" },
-        { value: "po_dogovoru", label: lang === "hr" ? "Po dogovoru" : "By arrangement" },
-    ];
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -622,35 +657,55 @@ export function AdminReservationForm({ onSuccess, onCancel }: AdminReservationFo
                 </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-4 border-t">
-                {onCancel && (
-                    <Button type="button" variant="ghost" onClick={onCancel}>
-                        {t.admin.cancel}
-                    </Button>
-                )}
-                <Button
-                    type="submit"
-                    disabled={
-                        createMutation.isPending || 
-                        !userId || 
-                        !serviceTypeId || 
-                        !requestedDate || 
-                        !vesselType || 
-                        !craneId ||
-                        !durationMin ||
-                        (!isWaitlisted && (
-                            !scheduledTime || 
-                            (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
-                        ))
-                    }
-                    className="min-w-[120px]"
-                >
-                    {createMutation.isPending ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.form.submitting}</>
-                    ) : (
-                        <><Send className="h-4 w-4 mr-2" />Kreiraj</>
+            <div className="flex items-center justify-between gap-3 pt-4 border-t">
+                <div>
+                    {onRejectWaitlist && (
+                        <Button
+                            type="button"
+                            variant="destructive"
+                            disabled={isRejectPending || createMutation.isPending}
+                            onClick={onRejectWaitlist}
+                            className="gap-1.5"
+                        >
+                            {isRejectPending ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                                <XCircle className="h-4 w-4" />
+                            )}
+                            Odbij zahtjev
+                        </Button>
                     )}
-                </Button>
+                </div>
+                <div className="flex items-center gap-3">
+                    {onCancel && (
+                        <Button type="button" variant="ghost" onClick={onCancel}>
+                            {t.admin.cancel}
+                        </Button>
+                    )}
+                    <Button
+                        type="submit"
+                        disabled={
+                            createMutation.isPending || 
+                            !userId || 
+                            !serviceTypeId || 
+                            !requestedDate || 
+                            !vesselType || 
+                            !craneId ||
+                            !durationMin ||
+                            (!isWaitlisted && (
+                                !scheduledTime || 
+                                (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
+                            ))
+                        }
+                        className="min-w-[140px]"
+                    >
+                        {createMutation.isPending ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t.form.submitting}</>
+                        ) : (
+                            <><Send className="h-4 w-4 mr-2" />{submitButtonText || (initialData?.landWaitingId ? "Spremi i potvrdi rezervaciju" : "Kreiraj")}</>
+                        )}
+                    </Button>
+                </div>
             </div>
         </form>
     );

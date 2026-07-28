@@ -28,6 +28,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { addDays, addMonths, addWeeks, startOfDay, endOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
@@ -195,6 +196,17 @@ export default function AdminCalendar() {
             utils.reservation.listAll.invalidate();
             utils.landWaiting.listAll.invalidate();
         },
+    });
+
+    const removeLandWaitingMutation = trpc.landWaiting.remove.useMutation({
+        onSuccess: () => {
+            toast.success("Zahtjev s liste čekanja za suhi vez je odbijen i uklonjen.");
+            utils.landWaiting.listAll.invalidate();
+            utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
+            setIsWaitingEditOpen(false);
+        },
+        onError: (err: any) => toast.error(err.message),
     });
 
     const handleEditWaiting = (w: any) => {
@@ -768,44 +780,39 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <Dialog open={isWaitingEditOpen} onOpenChange={setIsWaitingEditOpen}>
-                        <DialogContent className="max-w-md">
-                            <form onSubmit={handleUpdateWaiting}>
-                                <DialogHeader>
-                                    <DialogTitle>Uredi zahtjev na listi čekanja</DialogTitle>
-                                    <DialogDescription>
-                                        {editingWaiting?.user?.name} — {editingWaiting?.vessel?.registration || editingWaiting?.vessel?.name || "Plovilo"}
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div className="grid gap-5 py-6">
-                                    <div className="grid gap-2">
-                                        <Label>Preferirani suhi vez (Kopnena zona)</Label>
-                                        <Select value={waitEditPreferredZoneId} onValueChange={setWaitEditPreferredZoneId}>
-                                            <SelectTrigger><SelectValue placeholder="Bilo koja zona (Nije određeno)" /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="none">Bilo koja zona (Nije određeno)</SelectItem>
-                                                {landZones.map((lz: any) => (
-                                                    <SelectItem key={lz.id} value={String(lz.id)}>{lz.name} ({lz.code})</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Predviđeno trajanje termina</Label>
-                                        <Input disabled value="30 minuta" readOnly className="bg-muted text-muted-foreground" />
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Napomena</Label>
-                                        <Input value={waitEditNote} onChange={(e) => setWaitEditNote(e.target.value)} placeholder="Unesite napomenu..." />
-                                    </div>
-                                </div>
-                                <DialogFooter>
-                                    <Button variant="outline" type="button" onClick={() => setIsWaitingEditOpen(false)}>Odustani</Button>
-                                    <Button type="submit" disabled={updateLandWaitingMutation.isPending}>
-                                        {updateLandWaitingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        Spremi promjene
-                                    </Button>
-                                </DialogFooter>
-                            </form>
+                        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Definiranje suhog veza i termina dizalice za zahtjev</DialogTitle>
+                                <DialogDescription>
+                                    Korisnik: {editingWaiting?.user?.name || "Nepoznat"} — Plovilo: {editingWaiting?.vessel?.registration || editingWaiting?.vessel?.name || "Plovilo"}
+                                </DialogDescription>
+                            </DialogHeader>
+                            {editingWaiting && (
+                                <AdminReservationForm
+                                    initialData={{
+                                        landWaitingId: editingWaiting.id,
+                                        userId: editingWaiting.userId,
+                                        vesselId: editingWaiting.vesselId,
+                                        landZoneId: editingWaiting.preferredZoneId || "none",
+                                        requestedDate: viewDate || new Date(),
+                                        scheduledTime: "08:00",
+                                        durationMin: "30",
+                                        adminNote: editingWaiting.note || "",
+                                    }}
+                                    onSuccess={() => {
+                                        setIsWaitingEditOpen(false);
+                                        utils.landWaiting.listAll.invalidate();
+                                        utils.reservation.listAll.invalidate();
+                                        utils.calendar.events.invalidate();
+                                    }}
+                                    onCancel={() => setIsWaitingEditOpen(false)}
+                                    onRejectWaitlist={() => {
+                                        removeLandWaitingMutation.mutate({ id: editingWaiting.id });
+                                    }}
+                                    isRejectPending={removeLandWaitingMutation.isPending}
+                                    submitButtonText="Spremi i potvrdi rezervaciju"
+                                />
+                            )}
                         </DialogContent>
                     </Dialog>
                     <PDFDownloadLink
