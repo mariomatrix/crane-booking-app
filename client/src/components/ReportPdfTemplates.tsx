@@ -607,6 +607,11 @@ export function CalendarSchedulePdf({
                                                     <Text style={{ fontSize: 7, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 1 }}>
                                                         {action}
                                                     </Text>
+                                                    {r.adminNote && (
+                                                        <Text style={{ fontSize: 6.5, fontStyle: "italic", color: "#475569", marginTop: 1 }}>
+                                                            Napom: {r.adminNote}
+                                                        </Text>
+                                                    )}
                                                 </View>
                                             );
                                         })}

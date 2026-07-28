@@ -373,6 +373,7 @@ export default function AdminCalendar() {
                     landZoneCode: r.landZone?.code || r.landZone?.name || "",
                     operationCategory: r.serviceType?.operationCategory || "",
                     serviceTypeName: r.serviceType?.name || "",
+                    adminNote: r.adminNote || "",
                 },
             };
         }).filter(Boolean);
@@ -1058,6 +1059,11 @@ export default function AdminCalendar() {
                                     {details && (
                                         <div className="text-[9px] font-medium opacity-90 truncate">
                                             {details}
+                                        </div>
+                                    )}
+                                    {p.adminNote && (
+                                        <div className="text-[9px] italic opacity-85 truncate">
+                                            📝 {p.adminNote}
                                         </div>
                                     )}
                                     {p.status === 'cancelled' && p.cancelReason && (

@@ -170,7 +170,8 @@ export function exportSchedulePdf(options: GeneratePdfOptions) {
                         stack: [
                             { text: `${item.clientName || "Klijent"}`, bold: true, fontSize: 7, color: item.isMaintenance ? "#9a3412" : "#0f172a" },
                             { text: `Plovilo: ${item.vesselName || "—"} (${item.vesselRegistration || "—"})${item.landZoneCode ? ` • Vez: ${item.landZoneCode}` : ""}`, fontSize: 6, color: "#475569" },
-                            { text: item.serviceTypeName || "Radnja", bold: true, fontSize: 6, color: item.isMaintenance ? "#c2410c" : "#0284c7" }
+                            { text: item.serviceTypeName || "Radnja", bold: true, fontSize: 6, color: item.isMaintenance ? "#c2410c" : "#0284c7" },
+                            ...(item.adminNote ? [{ text: `Napom: ${item.adminNote}`, fontSize: 5.5, italics: true, color: "#64748b" }] : [])
                         ],
                         margin: [0, 1, 0, 1]
                     }));
