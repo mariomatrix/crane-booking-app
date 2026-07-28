@@ -542,10 +542,7 @@ export function CalendarSchedulePdf({
             marinaName={marinaName}
             marinaLogo={marinaLogo}
             orientation="landscape"
-            summaryItems={[
-                { label: "Ukupno operacija", value: dayReservations.filter(r => !r.isMaintenance).length },
-                { label: "Održavanje", value: dayReservations.filter(r => r.isMaintenance).length }
-            ]}
+            summaryItems={[]}
         >
             <View style={styles.table}>
                 {/* Header Row */}
@@ -588,6 +585,7 @@ export function CalendarSchedulePdf({
                                             const clientName = r.user?.name || r.clientName || "Korisnik";
                                             const reg = r.vesselRegistration || "—";
                                             const action = r.isMaintenance ? "ODRŽAVANJE" : (r.serviceType?.name || r.serviceTypeName || "—");
+                                            const landZoneLabel = r.landZone?.code ? (r.landZone.name ? `${r.landZone.name} (${r.landZone.code})` : r.landZone.code) : (r.landZone?.name || r.landZoneCode || r.landZoneName || null);
 
                                             return (
                                                 <View 
@@ -604,7 +602,7 @@ export function CalendarSchedulePdf({
                                                         {clientName}
                                                     </Text>
                                                     <Text style={{ fontSize: 7, color: "#64748b", marginTop: 1 }}>
-                                                        Reg: {reg}
+                                                        Reg: {reg}{landZoneLabel ? ` • Suhi vez: ${landZoneLabel}` : ""}
                                                     </Text>
                                                     <Text style={{ fontSize: 7, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 1 }}>
                                                         {action}

@@ -1050,8 +1050,13 @@ export default function AdminCalendar() {
                                         <span className="truncate">{p.user}</span>
                                         {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse shrink-0 ml-0.5" />}
                                     </div>
+                                    {p.serviceTypeName && (
+                                        <div className="text-[9px] font-semibold opacity-95 truncate">
+                                            {p.serviceTypeName}
+                                        </div>
+                                    )}
                                     {details && (
-                                        <div className="text-[9px] font-medium opacity-90 truncate mt-0.5">
+                                        <div className="text-[9px] font-medium opacity-90 truncate">
                                             {details}
                                         </div>
                                     )}

@@ -169,7 +169,7 @@ export function exportSchedulePdf(options: GeneratePdfOptions) {
                     const stackContent: any[] = slotItems.map((item: any) => ({
                         stack: [
                             { text: `${item.clientName || "Klijent"}`, bold: true, fontSize: 7, color: item.isMaintenance ? "#9a3412" : "#0f172a" },
-                            { text: `Plovilo: ${item.vesselName || "—"} (${item.vesselRegistration || "—"})`, fontSize: 6, color: "#475569" },
+                            { text: `Plovilo: ${item.vesselName || "—"} (${item.vesselRegistration || "—"})${item.landZoneCode ? ` • Vez: ${item.landZoneCode}` : ""}`, fontSize: 6, color: "#475569" },
                             { text: item.serviceTypeName || "Radnja", bold: true, fontSize: 6, color: item.isMaintenance ? "#c2410c" : "#0284c7" }
                         ],
                         margin: [0, 1, 0, 1]
