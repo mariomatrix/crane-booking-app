@@ -93,13 +93,73 @@ export default function AdminUsers() {
     const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
 
     // Create form state
+    const [newIsLegalEntity, setNewIsLegalEntity] = useState(false);
+    const [newCompanyName, setNewCompanyName] = useState("");
+    const [newContactPerson, setNewContactPerson] = useState("");
     const [newEmail, setNewEmail] = useState("");
     const [newFirstName, setNewFirstName] = useState("");
     const [newLastName, setNewLastName] = useState("");
     const [newPhone, setNewPhone] = useState("");
     const [newOib, setNewOib] = useState("");
     const [newOibError, setNewOibError] = useState<string | null>(null);
+    const [newAddress, setNewAddress] = useState("");
+    const [newCity, setNewCity] = useState("Split");
+    const [newPostalCode, setNewPostalCode] = useState("21000");
     const [newRole, setNewRole] = useState<"user" | "admin" | "operator">("user");
+
+    type FormVesselItem = {
+        id: string;
+        name: string;
+        registration: string;
+        type: "jedrilica" | "motorni" | "katamaran" | "ostalo";
+    };
+    const [newVessels, setNewVessels] = useState<FormVesselItem[]>([]);
+    const [tempVesselName, setTempVesselName] = useState("");
+    const [tempVesselReg, setTempVesselReg] = useState("");
+    const [tempVesselType, setTempVesselType] = useState<"jedrilica" | "motorni" | "katamaran" | "ostalo">("jedrilica");
+
+    const handleAddVesselToUser = () => {
+        if (!tempVesselName.trim()) {
+            toast.error("Unesite naziv plovila.");
+            return;
+        }
+        setNewVessels(prev => [
+            ...prev,
+            {
+                id: Math.random().toString(),
+                name: tempVesselName.trim(),
+                registration: tempVesselReg.trim(),
+                type: tempVesselType,
+            }
+        ]);
+        setTempVesselName("");
+        setTempVesselReg("");
+        setTempVesselType("jedrilica");
+    };
+
+    const handleRemoveVesselFromUser = (id: string) => {
+        setNewVessels(prev => prev.filter(v => v.id !== id));
+    };
+
+    const resetCreateForm = () => {
+        setNewIsLegalEntity(false);
+        setNewCompanyName("");
+        setNewContactPerson("");
+        setNewFirstName("");
+        setNewLastName("");
+        setNewEmail("");
+        setNewPhone("");
+        setNewOib("");
+        setNewOibError(null);
+        setNewAddress("");
+        setNewCity("Split");
+        setNewPostalCode("21000");
+        setNewRole("user");
+        setNewVessels([]);
+        setTempVesselName("");
+        setTempVesselReg("");
+        setTempVesselType("jedrilica");
+    };
 
     const setRole = trpc.user.setRole.useMutation({
         onSuccess: () => {
@@ -180,17 +240,10 @@ export default function AdminUsers() {
 
     const adminCreateUser = trpc.user.create.useMutation({
         onSuccess: (data) => {
-            toast.success("Korisnik uspješno kreiran i dobio je email s lozinkom.");
+            toast.success("Korisnik uspješno kreiran!");
             setCreatedTempPassword(data.tempPassword || null);
             setShowCreateDialog(false);
-            // Reset form
-            setNewEmail("");
-            setNewFirstName("");
-            setNewLastName("");
-            setNewPhone("");
-            setNewOib("");
-            setNewOibError(null);
-            setNewRole("user");
+            resetCreateForm();
             utils.user.list.invalidate();
         },
         onError: (err: any) => {
@@ -220,7 +273,7 @@ export default function AdminUsers() {
 
     const handleUpdate = () => {
         if (!editUser) return;
-        if (editOib && (editOib.length !== 11 || !isValidOib(editOib))) {
+        if (editOib && editOib.length === 11 && !isValidOib(editOib)) {
             setEditOibError("OIB nije ispravan.");
             return;
         }
@@ -235,17 +288,41 @@ export default function AdminUsers() {
     };
 
     const handleCreate = () => {
-        if (!newOib || newOib.length !== 11 || !isValidOib(newOib)) {
+        if (newIsLegalEntity) {
+            if (!newCompanyName.trim()) {
+                toast.error("Naziv pravne osobe / tvrtke je obavezan.");
+                return;
+            }
+        } else {
+            if (!newFirstName.trim()) {
+                toast.error("Ime korisnika je obavezno.");
+                return;
+            }
+        }
+
+        if (newOib && newOib.length === 11 && !isValidOib(newOib)) {
             setNewOibError("Unesite ispravan OIB (11 znamenki).");
             return;
         }
+
         adminCreateUser.mutate({
-            email: newEmail,
-            firstName: newFirstName,
-            lastName: newLastName,
-            phone: newPhone,
-            oib: newOib,
+            isLegalEntity: newIsLegalEntity,
+            companyName: newIsLegalEntity ? newCompanyName.trim() : undefined,
+            contactPerson: newIsLegalEntity ? newContactPerson.trim() : undefined,
+            firstName: !newIsLegalEntity ? newFirstName.trim() : undefined,
+            lastName: !newIsLegalEntity ? newLastName.trim() : undefined,
+            email: newEmail.trim() || undefined,
+            phone: newPhone.trim() || undefined,
+            oib: newOib.trim() || undefined,
+            address: newAddress.trim() || undefined,
+            city: newCity.trim() || "Split",
+            postalCode: newPostalCode.trim() || "21000",
             role: newRole,
+            vessels: newVessels.map(v => ({
+                name: v.name,
+                registration: v.registration || undefined,
+                type: v.type,
+            })),
         });
     };
     
@@ -716,93 +793,275 @@ export default function AdminUsers() {
 
             {/* Create User Dialog */}
             <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-                <DialogContent>
+                <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>{t.admin.addNewUser}</DialogTitle>
                         <DialogDescription>
-                            {t.admin.newUserDesc}
+                            Unesite podatke o novom korisniku. Jedino obavezno polje je Ime i prezime (ili Naziv tvrtke).
                         </DialogDescription>
                     </DialogHeader>
-                    <div className="py-4 space-y-4">
-                        <div className="space-y-2">
-                            <Label htmlFor="newEmail">{t.auth.email}</Label>
-                            <Input
-                                id="newEmail"
-                                type="email"
-                                value={newEmail}
-                                onChange={(e) => setNewEmail(e.target.value)}
-                                placeholder="korisnik@example.com"
-                            />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="newFirstName">{t.auth.firstName}</Label>
-                                <Input
-                                    id="newFirstName"
-                                    value={newFirstName}
-                                    onChange={(e) => setNewFirstName(e.target.value)}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="newLastName">{t.auth.lastName}</Label>
-                                <Input
-                                    id="newLastName"
-                                    value={newLastName}
-                                    onChange={(e) => setNewLastName(e.target.value)}
-                                />
+
+                    <div className="py-2 space-y-4">
+                        {/* Entity Type Toggle */}
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-muted-foreground">Tip korisnika</Label>
+                            <div className="flex bg-muted/60 p-1 rounded-xl gap-1">
+                                <button
+                                    type="button"
+                                    className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                                        !newIsLegalEntity ? "bg-white shadow text-primary border border-gray-200" : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                    onClick={() => setNewIsLegalEntity(false)}
+                                >
+                                    <span>👤 Fizička osoba</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
+                                        newIsLegalEntity ? "bg-white shadow text-primary border border-gray-200" : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                    onClick={() => setNewIsLegalEntity(true)}
+                                >
+                                    <span>🏢 Pravna osoba / Tvrtka</span>
+                                </button>
                             </div>
                         </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="newPhone">{t.auth.phone}</Label>
-                            <Input
-                                id="newPhone"
-                                value={newPhone}
-                                onChange={(e) => setNewPhone(e.target.value)}
-                            />
+
+                        {/* Name / Company Details */}
+                        {!newIsLegalEntity ? (
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <Label htmlFor="newFirstName" className="text-xs font-semibold">Ime *</Label>
+                                    <Input
+                                        id="newFirstName"
+                                        value={newFirstName}
+                                        onChange={(e) => setNewFirstName(e.target.value)}
+                                        placeholder="npr. Ivan"
+                                        required
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="newLastName" className="text-xs font-semibold">Prezime</Label>
+                                    <Input
+                                        id="newLastName"
+                                        value={newLastName}
+                                        onChange={(e) => setNewLastName(e.target.value)}
+                                        placeholder="npr. Horvat"
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <Label htmlFor="newCompanyName" className="text-xs font-semibold">Naziv tvrtke / pravne osobe *</Label>
+                                    <Input
+                                        id="newCompanyName"
+                                        value={newCompanyName}
+                                        onChange={(e) => setNewCompanyName(e.target.value)}
+                                        placeholder="npr. Jadran d.o.o."
+                                        required
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="newContactPerson" className="text-xs font-semibold">Osoba za kontakt (opcionalno)</Label>
+                                    <Input
+                                        id="newContactPerson"
+                                        value={newContactPerson}
+                                        onChange={(e) => setNewContactPerson(e.target.value)}
+                                        placeholder="npr. Marko Marković"
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Contact & Identifiers */}
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="newOib" className="text-xs font-semibold">OIB (opcionalno)</Label>
+                                <Input
+                                    id="newOib"
+                                    value={newOib}
+                                    onChange={(e) => {
+                                        const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+                                        setNewOib(val);
+                                        if (val.length === 11) {
+                                            setNewOibError(isValidOib(val) ? null : "Neispravna kontrolna znamenka");
+                                        } else {
+                                            setNewOibError(null);
+                                        }
+                                    }}
+                                    placeholder="11 znamenki"
+                                    maxLength={11}
+                                />
+                                {newOibError && <p className="text-[10px] text-destructive">{newOibError}</p>}
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label htmlFor="newEmail" className="text-xs font-semibold">Email (opcionalno)</Label>
+                                <Input
+                                    id="newEmail"
+                                    type="email"
+                                    value={newEmail}
+                                    onChange={(e) => setNewEmail(e.target.value)}
+                                    placeholder="korisnik@example.com"
+                                />
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label htmlFor="newPhone" className="text-xs font-semibold">Telefon (opcionalno)</Label>
+                                <Input
+                                    id="newPhone"
+                                    value={newPhone}
+                                    onChange={(e) => setNewPhone(e.target.value)}
+                                    placeholder="091 234 5678"
+                                />
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="newOib">OIB *</Label>
-                            <Input
-                                id="newOib"
-                                value={newOib}
-                                onChange={(e) => {
-                                    const val = e.target.value.replace(/\D/g, "").slice(0, 11);
-                                    setNewOib(val);
-                                    if (val.length === 11) {
-                                        setNewOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
-                                    } else {
-                                        setNewOibError(null);
-                                    }
-                                }}
-                                placeholder="12345678901"
-                                maxLength={11}
-                                inputMode="numeric"
-                                required
-                            />
-                            {newOibError && <p className="text-xs text-destructive">{newOibError}</p>}
-                            {newOib.length === 11 && !newOibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}
+
+                        {/* Address */}
+                        <div className="border-t pt-3 space-y-2">
+                            <Label className="text-xs font-semibold text-muted-foreground">Adresa i prebivalište / sjedište</Label>
+                            <div className="grid grid-cols-3 gap-3">
+                                <div className="space-y-1 col-span-1">
+                                    <Label htmlFor="newAddress" className="text-xs">Ulica i broj</Label>
+                                    <Input
+                                        id="newAddress"
+                                        value={newAddress}
+                                        onChange={(e) => setNewAddress(e.target.value)}
+                                        placeholder="npr. Obala 1"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="newCity" className="text-xs">Grad</Label>
+                                    <Input
+                                        id="newCity"
+                                        value={newCity}
+                                        onChange={(e) => setNewCity(e.target.value)}
+                                        placeholder="Split"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <Label htmlFor="newPostalCode" className="text-xs">Poštanski broj</Label>
+                                    <Input
+                                        id="newPostalCode"
+                                        value={newPostalCode}
+                                        onChange={(e) => setNewPostalCode(e.target.value)}
+                                        placeholder="21000"
+                                    />
+                                </div>
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="newRole">{t.admin.userRole}</Label>
-                            <Select
-                                value={newRole}
-                                onValueChange={(val) => setNewRole(val as "user" | "admin" | "operator")}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="user">{t.admin.roleUser}</SelectItem>
-                                    <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
-                                    <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
-                                </SelectContent>
-                            </Select>
+
+                        {/* Role & Access */}
+                        <div className="grid grid-cols-2 gap-3 border-t pt-3">
+                            <div className="space-y-1">
+                                <Label htmlFor="newRole" className="text-xs font-semibold">{t.admin.userRole}</Label>
+                                <Select
+                                    value={newRole}
+                                    onValueChange={(val) => setNewRole(val as "user" | "admin" | "operator")}
+                                >
+                                    <SelectTrigger className="h-9 text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="user">{t.admin.roleUser}</SelectItem>
+                                        <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
+                                        <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        {/* User Vessels Section */}
+                        <div className="border-t pt-3 space-y-2">
+                            <div className="flex items-center justify-between">
+                                <Label className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                                    ⛵ Plovila korisnika (opcionalno)
+                                </Label>
+                                <span className="text-[10px] text-muted-foreground">
+                                    {newVessels.length} {newVessels.length === 1 ? "dodano plovilo" : "dodanih plovila"}
+                                </span>
+                            </div>
+
+                            {/* Added Vessels List */}
+                            {newVessels.length > 0 && (
+                                <div className="space-y-1.5 bg-muted/30 p-2 rounded-xl border">
+                                    {newVessels.map((v) => (
+                                        <div key={v.id} className="flex items-center justify-between bg-white dark:bg-card p-2 rounded-lg border text-xs shadow-sm">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-bold text-primary">{v.name}</span>
+                                                {v.registration && (
+                                                    <span className="font-mono text-[10px] bg-secondary px-1.5 py-0.5 rounded">
+                                                        {v.registration}
+                                                    </span>
+                                                )}
+                                                <span className="text-[10px] text-muted-foreground capitalize">({v.type})</span>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 rounded-md"
+                                                onClick={() => handleRemoveVesselFromUser(v.id)}
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Mini form row to add vessel */}
+                            <div className="bg-muted/40 p-2.5 rounded-xl border space-y-2">
+                                <p className="text-[11px] font-semibold text-muted-foreground">Dodaj novo plovilo uz korisnika:</p>
+                                <div className="grid grid-cols-12 gap-2">
+                                    <div className="col-span-5">
+                                        <Input
+                                            className="h-8 text-xs bg-white"
+                                            placeholder="Naziv plovila *"
+                                            value={tempVesselName}
+                                            onChange={(e) => setTempVesselName(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-span-4">
+                                        <Input
+                                            className="h-8 text-xs bg-white"
+                                            placeholder="Registracija (npr. ST-123)"
+                                            value={tempVesselReg}
+                                            onChange={(e) => setTempVesselReg(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="col-span-3">
+                                        <Select value={tempVesselType} onValueChange={(val) => setTempVesselType(val as any)}>
+                                            <SelectTrigger className="h-8 text-xs bg-white">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="jedrilica">Jedrilica</SelectItem>
+                                                <SelectItem value="motorni">Motorni</SelectItem>
+                                                <SelectItem value="katamaran">Katamaran</SelectItem>
+                                                <SelectItem value="ostalo">Ostalo</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full h-7 text-xs font-semibold text-primary border-primary/30 hover:bg-primary/5 rounded-lg"
+                                    onClick={handleAddVesselToUser}
+                                >
+                                    + Dodaj plovilo na listu
+                                </Button>
+                            </div>
                         </div>
                     </div>
-                    <DialogFooter>
+
+                    <DialogFooter className="pt-2 border-t">
                         <Button variant="outline" onClick={() => setShowCreateDialog(false)}>{t.admin.cancel}</Button>
                         <Button
-                            disabled={!newEmail || !newFirstName || !newLastName || adminCreateUser.isPending}
+                            disabled={newIsLegalEntity ? !newCompanyName.trim() || adminCreateUser.isPending : !newFirstName.trim() || adminCreateUser.isPending}
                             onClick={handleCreate}
                         >
                             {adminCreateUser.isPending ? t.admin.creating : t.admin.addUser}

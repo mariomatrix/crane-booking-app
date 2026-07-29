@@ -45,24 +45,37 @@ export async function getDb() {
 export async function createLocalUser(data: {
   email: string;
   passwordHash: string;
-  firstName: string;
-  lastName: string;
+  firstName?: string;
+  lastName?: string;
   username?: string;
+  name?: string;
   phone?: string;
   oib?: string;
+  isLegalEntity?: boolean;
+  companyName?: string;
+  contactPerson?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
   mustChangePassword?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const name = data.username || `${data.firstName} ${data.lastName}`.trim();
+  const name = data.name || data.username || (data.isLegalEntity && data.companyName ? data.companyName : `${data.firstName || ""} ${data.lastName || ""}`.trim());
   const res = await db.insert(users).values({
     email: data.email,
     passwordHash: data.passwordHash,
-    firstName: data.firstName,
-    lastName: data.lastName,
+    firstName: data.firstName || null,
+    lastName: data.lastName || null,
     name,
-    phone: data.phone,
-    oib: data.oib,
+    phone: data.phone || null,
+    oib: data.oib || null,
+    isLegalEntity: data.isLegalEntity ?? false,
+    companyName: data.companyName || null,
+    contactPerson: data.contactPerson || null,
+    address: data.address || null,
+    city: data.city || "Split",
+    postalCode: data.postalCode || "21000",
     mustChangePassword: data.mustChangePassword ?? false,
     loginMethod: "email",
     lastSignedIn: new Date(),

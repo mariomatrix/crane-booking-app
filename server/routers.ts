@@ -529,25 +529,64 @@ export const appRouter = router({
 
     create: adminProcedure
       .input(z.object({
-        email: z.string().email(),
-        firstName: z.string().min(1),
-        lastName: z.string().min(1),
+        isLegalEntity: z.boolean().default(false),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        companyName: z.string().optional(),
+        contactPerson: z.string().optional(),
+        email: z.string().optional(),
         phone: z.string().optional(),
-        oib: z.string().length(11).refine(isValidOib, { message: "OIB nije ispravan." }),
+        oib: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        postalCode: z.string().optional(),
         role: z.enum(["user", "operator", "admin"]).default("user"),
+        vessels: z.array(z.object({
+          name: z.string().min(1),
+          registration: z.string().optional(),
+          type: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]).default("jedrilica"),
+          lengthM: z.number().optional(),
+          beamM: z.number().optional(),
+          draftM: z.number().optional(),
+          weightTons: z.number().optional(),
+        })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const existing = await getUserByEmail(input.email);
-        if (existing) {
-          throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        // Validation of mandatory name/companyName
+        if (input.isLegalEntity) {
+          if (!input.companyName || input.companyName.trim() === "") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Naziv pravne osobe / tvrtke je obavezan." });
+          }
+        } else {
+          if (!input.firstName || input.firstName.trim() === "") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Ime je obavezno." });
+          }
         }
 
-        // Check OIB uniqueness
-        const db = await getDb();
-        if (db) {
-          const oibExists = await db.select({ id: users.id }).from(users).where(eq(users.oib, input.oib)).limit(1);
-          if (oibExists.length > 0) {
-            throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+        // Email handling: optional
+        let finalEmail = input.email ? input.email.trim() : "";
+        if (finalEmail !== "") {
+          const existing = await getUserByEmail(finalEmail);
+          if (existing) {
+            throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+          }
+        } else {
+          // Generate technical placeholder email
+          finalEmail = `korisnik_${Date.now()}_${Math.floor(Math.random()*10000)}@placeholder.local`;
+        }
+
+        // OIB handling: optional
+        if (input.oib && input.oib.trim() !== "") {
+          const cleanOib = input.oib.trim();
+          if (cleanOib.length === 11 && !isValidOib(cleanOib)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "OIB nije ispravan." });
+          }
+          const db = await getDb();
+          if (db) {
+            const oibExists = await db.select({ id: users.id }).from(users).where(eq(users.oib, cleanOib)).limit(1);
+            if (oibExists.length > 0) {
+              throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+            }
           }
         }
 
@@ -555,13 +594,24 @@ export const appRouter = router({
         const tempPassword = crypto.randomBytes(5).toString("hex");
         const passwordHash = await bcrypt.hash(tempPassword, 12);
 
+        const fullName = input.isLegalEntity && input.companyName
+          ? input.companyName.trim()
+          : `${input.firstName || ""} ${input.lastName || ""}`.trim();
+
         const userId = await createLocalUser({
-          email: input.email,
+          email: finalEmail,
           passwordHash,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          phone: input.phone,
-          oib: input.oib,
+          firstName: input.firstName || undefined,
+          lastName: input.lastName || undefined,
+          name: fullName,
+          isLegalEntity: input.isLegalEntity,
+          companyName: input.companyName || undefined,
+          contactPerson: input.contactPerson || undefined,
+          phone: input.phone || undefined,
+          oib: input.oib || undefined,
+          address: input.address || undefined,
+          city: input.city || "Split",
+          postalCode: input.postalCode || "21000",
           mustChangePassword: true,
         });
 
@@ -572,19 +622,33 @@ export const appRouter = router({
           await updateUserRole(String(userId), input.role);
         }
 
-        // Send invitation email
-        const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
-        const loginUrl = `${baseUrl}/auth`;
+        // Insert vessels if any were added
+        if (input.vessels && input.vessels.length > 0) {
+          for (const v of input.vessels) {
+            await createVessel({
+              ownerId: String(userId),
+              name: v.name,
+              registration: v.registration || null,
+              type: v.type || "jedrilica",
+              lengthM: v.lengthM ? String(v.lengthM) : null,
+              beamM: v.beamM ? String(v.beamM) : null,
+              draftM: v.draftM ? String(v.draftM) : null,
+              weightTons: v.weightTons ? String(v.weightTons) : null,
+            });
+          }
+        }
 
-        const emailSent = await sendUserInvitation({
-          to: input.email,
-          userName: input.firstName,
-          tempPassword,
-          loginUrl,
-        });
+        // Send invitation email if real email provided
+        if (input.email && input.email.includes("@") && !input.email.endsWith("@placeholder.local")) {
+          const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+          const loginUrl = `${baseUrl}/auth`;
 
-        if (!emailSent) {
-          console.warn(`[Email] Failed to send invitation to ${input.email}`);
+          await sendUserInvitation({
+            to: input.email,
+            userName: input.firstName || fullName,
+            tempPassword,
+            loginUrl,
+          }).catch(err => console.warn(`[Email] Failed to send invitation to ${input.email}:`, err));
         }
 
         await createAuditEntry({
@@ -592,7 +656,7 @@ export const appRouter = router({
           action: "user_created_admin",
           entityType: "user",
           entityId: String(userId),
-          payload: { email: input.email, role: input.role },
+          payload: { email: finalEmail, role: input.role, isLegalEntity: input.isLegalEntity },
         });
 
         return { success: true, tempPassword, userId: String(userId) };

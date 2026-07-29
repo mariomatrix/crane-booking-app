@@ -48,6 +48,12 @@ export const users = pgTable("users", {
     name: text("name"),                                              // display name (full name)
     phone: varchar("phone", { length: 50 }),
     oib: varchar("oib", { length: 11 }).unique(),                    // Osobni identifikacijski broj (HR)
+    isLegalEntity: boolean("is_legal_entity").default(false).notNull(),
+    companyName: varchar("company_name", { length: 255 }),
+    contactPerson: varchar("contact_person", { length: 255 }),
+    address: text("address"),
+    city: varchar("city", { length: 100 }).default("Split").notNull(),
+    postalCode: varchar("postal_code", { length: 20 }).default("21000").notNull(),
     role: roleEnum("role").default("user").notNull(),
     userStatus: userStatusEnum("user_status").default("active").notNull(),
     emailVerifiedAt: timestamp("email_verified_at"),

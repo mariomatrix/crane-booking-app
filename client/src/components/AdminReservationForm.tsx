@@ -626,12 +626,11 @@ export function AdminReservationForm({
                         </div>
 
                         <div className="space-y-2">
-                            <Label>{lang === "hr" ? "Registracija plovila" : "Vessel Registration"} *</Label>
+                            <Label>{lang === "hr" ? "Registracija plovila" : "Vessel Registration"}</Label>
                             <Input
                                 value={vesselRegistration}
                                 onChange={(e) => setVesselRegistration(e.target.value)}
                                 placeholder={lang === "hr" ? "npr. ST-1234" : "e.g. ST-1234"}
-                                required
                                 disabled={selectedVesselId !== "new"}
                             />
                         </div>
