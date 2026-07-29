@@ -1795,7 +1795,7 @@ export const appRouter = router({
               name: landZones.name,
               code: landZones.code,
             },
-            unreadCount: sql<number>`COALESCE(${unreadCountSubquery.count}, 0)`
+            unreadCount: sql<number>`COALESCE("unread_counts"."count", 0)`
           })
           .from(reservations)
           .leftJoin(users, eq(reservations.userId, users.id))
