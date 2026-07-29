@@ -27,18 +27,56 @@ async function runMigration() {
             ADD COLUMN IF NOT EXISTS "address" text,
             ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
             ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS "land_zones" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "name" varchar(100) NOT NULL,
+                "code" varchar(20) NOT NULL UNIQUE,
+                "total_spots" integer DEFAULT 10 NOT NULL,
+                "manual_occupied_spots" integer DEFAULT 0 NOT NULL,
+                "description" text,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            );
+            ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL;
+
+            CREATE TABLE IF NOT EXISTS "land_occupancies" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "vessel_id" uuid NOT NULL REFERENCES "vessels"("id"),
+                "zone_id" uuid NOT NULL REFERENCES "land_zones"("id"),
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "placed_at" timestamp DEFAULT now() NOT NULL,
+                "removed_at" timestamp,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "notes" text,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS "land_waiting_list" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "vessel_id" uuid REFERENCES "vessels"("id"),
+                "vessel_name" varchar(255),
+                "vessel_registration" varchar(100),
+                "preferred_zone_id" uuid REFERENCES "land_zones"("id"),
+                "status" varchar(50) DEFAULT 'waiting' NOT NULL,
+                "contact_phone" varchar(50),
+                "requested_date" date,
+                "note" text,
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            );
         `;
-        console.log("User table columns verified.");
+        console.log("User and land_zones table columns verified.");
     } catch (e: any) {
-        console.warn("User column verification warning:", e?.message || e);
+        console.warn("User/land_zones column verification warning:", e?.message || e);
     }
 
     await migrate(db, { migrationsFolder: "drizzle" });
-    try {
-        await migrationClient`ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL`;
-    } catch (e: any) {
-        console.warn("Could not alter land_zones table for manual_occupied_spots:", e);
-    }
     console.log("Migrations completed.");
 
     // ─── Import schema and helpers ────────────────────────────────────
