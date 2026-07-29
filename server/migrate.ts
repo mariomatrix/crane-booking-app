@@ -26,8 +26,15 @@ async function runMigration() {
             ADD COLUMN IF NOT EXISTS "contact_person" varchar(255),
             ADD COLUMN IF NOT EXISTS "address" text,
             ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
-            ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL;
+            ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL
+        `;
+        console.log("User table columns verified.");
+    } catch (e: any) {
+        console.warn("User column verification warning:", e?.message || e);
+    }
 
+    try {
+        await migrationClient`
             CREATE TABLE IF NOT EXISTS "land_zones" (
                 "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
                 "name" varchar(100) NOT NULL,
@@ -39,9 +46,16 @@ async function runMigration() {
                 "is_active" boolean DEFAULT true NOT NULL,
                 "created_at" timestamp DEFAULT now() NOT NULL,
                 "updated_at" timestamp DEFAULT now() NOT NULL
-            );
-            ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL;
+            )
+        `;
+        await migrationClient`ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL`;
+        console.log("land_zones table verified.");
+    } catch (e: any) {
+        console.warn("land_zones table verification warning:", e?.message || e);
+    }
 
+    try {
+        await migrationClient`
             CREATE TABLE IF NOT EXISTS "land_occupancies" (
                 "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
                 "vessel_id" uuid NOT NULL REFERENCES "vessels"("id"),
@@ -53,8 +67,15 @@ async function runMigration() {
                 "notes" text,
                 "created_at" timestamp DEFAULT now() NOT NULL,
                 "updated_at" timestamp DEFAULT now() NOT NULL
-            );
+            )
+        `;
+        console.log("land_occupancies table verified.");
+    } catch (e: any) {
+        console.warn("land_occupancies table verification warning:", e?.message || e);
+    }
 
+    try {
+        await migrationClient`
             CREATE TABLE IF NOT EXISTS "land_waiting_list" (
                 "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
                 "user_id" uuid NOT NULL REFERENCES "users"("id"),
@@ -69,11 +90,11 @@ async function runMigration() {
                 "reservation_id" uuid REFERENCES "reservations"("id"),
                 "created_at" timestamp DEFAULT now() NOT NULL,
                 "updated_at" timestamp DEFAULT now() NOT NULL
-            );
+            )
         `;
-        console.log("User and land_zones table columns verified.");
+        console.log("land_waiting_list table verified.");
     } catch (e: any) {
-        console.warn("User/land_zones column verification warning:", e?.message || e);
+        console.warn("land_waiting_list table verification warning:", e?.message || e);
     }
 
     await migrate(db, { migrationsFolder: "drizzle" });
