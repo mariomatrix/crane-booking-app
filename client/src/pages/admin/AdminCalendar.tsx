@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -146,6 +146,9 @@ export default function AdminCalendar() {
 
     const workStart = sysSettings?.workdayStart ?? "08:00";
     const workEnd = sysSettings?.workdayEnd ?? "16:00";
+
+    // Create Reservation Dialog State
+    const [isCreateResOpen, setIsCreateResOpen] = useState(false);
 
     // Maintenance Form State
     const [maintCraneId, setMaintCraneId] = useState("");
@@ -607,6 +610,25 @@ export default function AdminCalendar() {
                             Mjesečni
                         </Button>
                     </div>
+                    <Button onClick={() => setIsCreateResOpen(true)} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+                        <Plus className="h-4 w-4" />
+                        <span>Nova rezervacija</span>
+                    </Button>
+                    <Dialog open={isCreateResOpen} onOpenChange={setIsCreateResOpen}>
+                        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Nova rezervacija dizalice</DialogTitle>
+                                <DialogDescription>Unesite podatke za kreiranje nove rezervacije.</DialogDescription>
+                            </DialogHeader>
+                            <AdminReservationForm
+                                onSuccess={() => {
+                                    setIsCreateResOpen(false);
+                                    utils.reservation.listAll.invalidate();
+                                    utils.calendar.events.invalidate();
+                                }}
+                            />
+                        </DialogContent>
+                    </Dialog>
                     <Dialog open={isMaintOpen} onOpenChange={setIsMaintOpen}>
                         <DialogTrigger asChild>
                             <Button variant="outline" className="gap-2">

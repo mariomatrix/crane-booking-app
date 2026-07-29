@@ -1,16 +1,20 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Clock, CheckCircle, XCircle, Users } from "lucide-react";
+import { BarChart3, Clock, CheckCircle, XCircle, Users, Plus } from "lucide-react";
 import { useLang } from "@/contexts/LangContext";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { formatAppDate } from "@/lib/date-utils";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
 
 export default function AdminDashboard() {
   const { t, lang } = useLang();
   const isHr = lang === "hr";
   const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const reservationsQuery = trpc.reservation.listAll.useQuery({ pageSize: 100 });
   const allReservations = reservationsQuery.data?.data || [];
   const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
@@ -28,16 +32,37 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold">{isHr ? "Nadzorna ploča" : "Dashboard"}</h2>
           <p className="text-sm text-muted-foreground">{isHr ? "Pregled sustava rezervacija dizalica." : "Overview of crane reservation system."}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setLocation("/admin/analytics")} className="gap-2">
-          <BarChart3 className="h-4 w-4" />
-          {isHr ? "Detaljna analitika" : "Detailed analytics"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setShowCreateDialog(true)} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+            <Plus className="h-4 w-4" />
+            <span>{isHr ? "Nova rezervacija" : "New Reservation"}</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setLocation("/admin/analytics")} className="gap-2">
+            <BarChart3 className="h-4 w-4" />
+            {isHr ? "Detaljna analitika" : "Detailed analytics"}
+          </Button>
+        </div>
       </div>
+
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Nova rezervacija dizalice</DialogTitle>
+            <DialogDescription>Unesite podatke za kreiranje nove rezervacije.</DialogDescription>
+          </DialogHeader>
+          <AdminReservationForm
+            onSuccess={() => {
+              setShowCreateDialog(false);
+              utils.reservation.listAll.invalidate();
+            }}
+          />
+        </DialogContent>
+      </Dialog>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setLocation("/admin/reservations?status=pending")}>
