@@ -44,13 +44,17 @@ export default function AdminLandZones() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ZoneForm>(emptyForm);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"active" | "waiting">("active");
+  const [activeTab, setActiveTab] = useState<"active" | "reserved" | "waiting">("active");
 
   const utils = trpc.useUtils();
 
   const { data: zones = [], isLoading: zonesLoading } = trpc.landZone.list.useQuery();
   const { data: occupancies = [], isLoading: occupanciesLoading } = trpc.landOccupancy.listActive.useQuery(
     selectedZoneId ? { zoneId: selectedZoneId } : undefined
+  );
+  const { data: reservedVessels = [], isLoading: reservedVesselsLoading } = trpc.landZone.getUpcomingReservedVessels.useQuery(
+    { zoneId: selectedZoneId! },
+    { enabled: !!selectedZoneId && activeTab === "reserved" }
   );
   const { data: zoneWaiting = [], isLoading: zoneWaitingLoading } = trpc.landWaiting.listByZone.useQuery(
     { zoneId: selectedZoneId! },
@@ -187,34 +191,46 @@ export default function AdminLandZones() {
                 </CardHeader>
 
                 <CardContent className="pt-0 pb-5">
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     <div className="flex justify-between text-xs font-semibold">
-                      <span>{isHr ? "Popunjenost" : "Occupancy"}</span>
-                      <span>{zone.activeSpots} / {zone.totalSpots} {isHr ? "mjesta" : "spots"}</span>
+                      <span>{isHr ? "Stanje kapaciteta" : "Capacity state"}</span>
+                      <span>{zone.totalSpots} {isHr ? "ukupno mjesta" : "total spots"}</span>
                     </div>
-                    {zone.manualOccupiedSpots > 0 && (
-                      <p className="text-[10px] text-muted-foreground">
-                        {isHr
-                          ? `(${zone.manualOccupiedSpots} ručno unesenih + ${zone.registeredSpots || 0} registriranih)`
-                          : `(${zone.manualOccupiedSpots} manual + ${zone.registeredSpots || 0} registered)`}
-                      </p>
-                    )}
-                    <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+
+                    <div className="grid grid-cols-3 gap-1 text-[11px] font-medium text-center py-1.5 bg-muted/40 rounded-xl">
+                      <div className="text-emerald-700 dark:text-emerald-400">
+                        <span className="block text-[10px] text-muted-foreground">{isHr ? "Zauzeto" : "Occupied"}</span>
+                        <span className="font-bold text-sm">{zone.activeSpots || 0}</span>
+                      </div>
+                      <div className="text-amber-700 dark:text-amber-400 border-x border-muted-foreground/20">
+                        <span className="block text-[10px] text-muted-foreground">{isHr ? "Rezervirano" : "Reserved"}</span>
+                        <span className="font-bold text-sm">{zone.reservedSpots || 0}</span>
+                      </div>
+                      <div className="text-blue-700 dark:text-blue-400">
+                        <span className="block text-[10px] text-muted-foreground">{isHr ? "Slobodno" : "Available"}</span>
+                        <span className="font-bold text-sm">{zone.availableSpots ?? Math.max(0, zone.totalSpots - (zone.activeSpots || 0) - (zone.reservedSpots || 0))}</span>
+                      </div>
+                    </div>
+
+                    <div className="w-full h-2.5 bg-muted rounded-full overflow-hidden flex">
                       <div
-                        className={`h-full transition-all duration-500 ${utilization >= 90 ? "bg-red-500" : utilization >= 70 ? "bg-amber-500" : "bg-emerald-500"
-                          }`}
-                        style={{ width: `${Math.min(100, utilization)}%` }}
+                        className="h-full bg-emerald-500 transition-all duration-500"
+                        style={{ width: `${Math.min(100, ((zone.activeSpots || 0) / zone.totalSpots) * 100)}%` }}
+                        title={`Zauzeto: ${zone.activeSpots}`}
+                      />
+                      <div
+                        className="h-full bg-amber-500 transition-all duration-500"
+                        style={{ width: `${Math.min(100 - ((zone.activeSpots || 0) / zone.totalSpots) * 100, ((zone.reservedSpots || 0) / zone.totalSpots) * 100)}%` }}
+                        title={`Rezervirano: ${zone.reservedSpots}`}
                       />
                     </div>
+
                     {zone.waitingCount > 0 && (
-                      <div className="flex items-center justify-between text-xs font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/20 px-2 py-1 rounded-lg border border-amber-200 dark:border-amber-900/40 my-1">
+                      <div className="flex items-center justify-between text-xs font-semibold text-amber-600 bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1.5 rounded-lg border border-amber-200 dark:border-amber-900/40 my-1">
                         <span className="flex items-center gap-1">📋 {isHr ? "Na listi čekanja:" : "Waitlist:"}</span>
                         <span>{zone.waitingCount} {isHr ? "plovila" : "vessels"}</span>
                       </div>
                     )}
-                    <p className="text-[10px] text-muted-foreground text-right italic">
-                      {isHr ? `Redoslijed: ${zone.sortOrder}` : `Sort Order: ${zone.sortOrder}`}
-                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -244,7 +260,20 @@ export default function AdminLandZones() {
                 }`}
                 onClick={() => setActiveTab("active")}
               >
-                {isHr ? "Aktivna plovila" : "Active Vessels"} ({occupancies.length})
+                {isHr ? "Aktivna plovila na kopnu" : "Active Vessels"} ({occupancies.length})
+              </button>
+              <button
+                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 mr-4 ${
+                  activeTab === "reserved" ? "border-amber-500 text-amber-700 font-bold" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => setActiveTab("reserved")}
+              >
+                {isHr ? "Rezervirana plovila (Nadolazeće operacije)" : "Reserved Vessels"}
+                {activeZone.reservedSpots > 0 && (
+                  <Badge className="bg-amber-500 text-white border-0 py-0 px-1 text-[9px] h-4">
+                    {activeZone.reservedSpots}
+                  </Badge>
+                )}
               </button>
               <button
                 className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
@@ -315,6 +344,54 @@ export default function AdminLandZones() {
                             {isHr ? "Spusti u more" : "Launch"}
                           </Button>
                         </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )
+            ) : activeTab === "reserved" ? (
+              reservedVesselsLoading ? (
+                <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+              ) : reservedVessels.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Calendar className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                  {isHr ? "Nema nadolazećih rezerviranih plovila za ovu zonu." : "No upcoming reserved vessels for this zone."}
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{isHr ? "Zakazano vađenje" : "Scheduled Lift"}</TableHead>
+                      <TableHead>{isHr ? "Plovilo / Registracija" : "Vessel / Reg"}</TableHead>
+                      <TableHead>{isHr ? "Vlasnik" : "Owner"}</TableHead>
+                      <TableHead>{isHr ? "Vrsta operacije" : "Operation"}</TableHead>
+                      <TableHead>{isHr ? "Broj rezervacije" : "Reservation No."}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reservedVessels.map((res: any) => (
+                      <TableRow key={res.reservationId}>
+                        <TableCell className="font-semibold text-xs">
+                          <span className="flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                            <Calendar className="h-3.5 w-3.5" />
+                            {res.scheduledStart ? formatAppDate(res.scheduledStart) : "—"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="font-medium text-xs">
+                          {res.vesselName || res.vesselRegistration || "—"}
+                          {res.vesselRegistration && (
+                            <Badge variant="outline" className="ml-2 text-[10px]">
+                              {res.vesselRegistration}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs">{res.userName || res.userEmail}</TableCell>
+                        <TableCell className="text-xs">
+                          <Badge className="bg-blue-100 text-blue-800 border-blue-200">
+                            {res.serviceTypeName || "Vađenje iz mora"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground font-mono">{res.reservationNumber}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -901,18 +901,51 @@ export async function listLandZones() {
   if (!db) return [];
   const zones = await db.select().from(landZones).orderBy(landZones.sortOrder);
   const occupancies = await db.select().from(landOccupancies).where(isNull(landOccupancies.returnedAt));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  // Get approved lift_from_sea reservations
+  const allApprovedReservations = await db.select({
+    id: reservations.id,
+    landZoneId: reservations.landZoneId,
+    vesselId: reservations.vesselId,
+    scheduledStart: reservations.scheduledStart,
+  })
+  .from(reservations)
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(serviceTypes.operationCategory, "lift_from_sea"),
+      isNotNull(reservations.landZoneId)
+    )
+  );
+
   const waitingListEntries = await db.select().from(landWaitingList).where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")));
 
   return zones.map(z => {
     const registeredCount = occupancies.filter(o => o.zoneId === z.id).length;
     const manualCount = z.manualOccupiedSpots || 0;
     const activeCount = registeredCount + manualCount;
+
+    const zoneReservedRes = allApprovedReservations.filter(r => 
+      r.landZoneId === z.id && (!r.vesselId || !activeVesselIds.has(r.vesselId))
+    );
+    const reservedCount = zoneReservedRes.length;
+
     const waitingCount = waitingListEntries.filter(w => w.preferredZoneId === z.id).length;
+    const availableSpots = Math.max(0, z.totalSpots - activeCount - reservedCount);
+    const percentFull = z.totalSpots > 0 ? Math.round(((activeCount + reservedCount) / z.totalSpots) * 100) : 0;
+
     return {
       ...z,
       activeSpots: activeCount,
       registeredSpots: registeredCount,
+      reservedSpots: reservedCount,
+      availableSpots,
       waitingCount,
+      percentFull,
+      isOver80: percentFull >= 80,
+      isFull: (activeCount + reservedCount) >= z.totalSpots,
     };
   });
 }
@@ -925,14 +958,37 @@ export async function getLandZoneCapacity(zoneId: string) {
 
   const occupancies = await db.select().from(landOccupancies)
     .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  const allApprovedReservations = await db.select({
+    id: reservations.id,
+    landZoneId: reservations.landZoneId,
+    vesselId: reservations.vesselId,
+    scheduledStart: reservations.scheduledStart,
+  })
+  .from(reservations)
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(reservations.landZoneId, zoneId),
+      eq(serviceTypes.operationCategory, "lift_from_sea")
+    )
+  );
+
+  const zoneReservedRes = allApprovedReservations.filter(r => 
+    !r.vesselId || !activeVesselIds.has(r.vesselId)
+  );
 
   const registeredSpots = occupancies.length;
   const manualSpots = zone.manualOccupiedSpots || 0;
   const activeSpots = registeredSpots + manualSpots;
+  const reservedSpots = zoneReservedRes.length;
   const totalSpots = zone.totalSpots;
-  const availableSpots = Math.max(0, totalSpots - activeSpots);
-  const percentFull = totalSpots > 0 ? Math.round((activeSpots / totalSpots) * 100) : 0;
+  const availableSpots = Math.max(0, totalSpots - activeSpots - reservedSpots);
+  const percentFull = totalSpots > 0 ? Math.round(((activeSpots + reservedSpots) / totalSpots) * 100) : 0;
   const isOver80 = percentFull >= 80;
+  const isFull = (activeSpots + reservedSpots) >= totalSpots;
 
   return {
     id: zone.id,
@@ -942,10 +998,49 @@ export async function getLandZoneCapacity(zoneId: string) {
     activeSpots,
     registeredSpots,
     manualOccupiedSpots: manualSpots,
+    reservedSpots,
     availableSpots,
     percentFull,
     isOver80,
+    isFull,
   };
+}
+
+export async function getUpcomingReservedVesselsForZone(zoneId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const occupancies = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  const items = await db.select({
+    reservationId: reservations.id,
+    reservationNumber: reservations.reservationNumber,
+    scheduledStart: reservations.scheduledStart,
+    durationMin: reservations.durationMin,
+    status: reservations.status,
+    userId: reservations.userId,
+    userName: users.name,
+    userEmail: users.email,
+    vesselId: reservations.vesselId,
+    vesselRegistration: reservations.vesselRegistration,
+    vesselType: reservations.vesselType,
+    vesselName: vessels.name,
+    serviceTypeName: serviceTypes.name,
+  })
+  .from(reservations)
+  .leftJoin(users, eq(reservations.userId, users.id))
+  .leftJoin(vessels, eq(reservations.vesselId, vessels.id))
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(reservations.landZoneId, zoneId),
+      eq(serviceTypes.operationCategory, "lift_from_sea")
+    )
+  );
+
+  return items.filter(r => !r.vesselId || !activeVesselIds.has(r.vesselId));
 }
 
 export async function createLandZone(data: InsertLandZone) {

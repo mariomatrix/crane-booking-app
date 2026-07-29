@@ -70,6 +70,7 @@ import {
   revokeApiKey,
   listLandZones,
   getLandZoneCapacity,
+  getUpcomingReservedVesselsForZone,
   createLandZone,
   updateLandZone,
   deleteLandZone,
@@ -2809,6 +2810,12 @@ export const appRouter = router({
       .input(z.object({ zoneId: z.string().uuid() }))
       .query(async ({ input }) => {
         return getLandZoneCapacity(input.zoneId);
+      }),
+
+    getUpcomingReservedVessels: operatorProcedure
+      .input(z.object({ zoneId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return getUpcomingReservedVesselsForZone(input.zoneId);
       }),
 
     getActiveOccupancy: operatorProcedure

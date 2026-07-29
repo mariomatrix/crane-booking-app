@@ -338,7 +338,11 @@ export function AdminReservationForm({
                                     <Label className="text-xs text-muted-foreground">{lang === "hr" ? "Popunjenost kopnenih zona" : "Dry Berth Occupancy"}</Label>
                                     <div className="grid grid-cols-3 gap-1.5">
                                         {(landZones as any[]).map((lz: any) => {
-                                            const percent = lz.totalSpots > 0 ? Math.round((lz.activeSpots / lz.totalSpots) * 100) : 0;
+                                            const activeCount = lz.activeSpots || 0;
+                                            const reservedCount = lz.reservedSpots || 0;
+                                            const total = lz.totalSpots || 0;
+                                            const avail = lz.availableSpots ?? Math.max(0, total - activeCount - reservedCount);
+                                            const percent = total > 0 ? Math.round(((activeCount + reservedCount) / total) * 100) : 0;
                                             const isOver80 = percent >= 80;
                                             return (
                                                 <div
@@ -349,9 +353,9 @@ export function AdminReservationForm({
                                                     )}
                                                 >
                                                     <span className="font-semibold truncate text-gray-700">{lz.name} ({lz.code})</span>
-                                                    <div className="flex justify-between items-center mt-0.5 text-muted-foreground text-[9px]">
-                                                        <span>{lz.activeSpots}/{lz.totalSpots}</span>
-                                                        <span className={cn(isOver80 && "text-amber-700 font-medium")}>{percent}%</span>
+                                                    <div className="flex flex-col text-muted-foreground text-[9px] mt-0.5">
+                                                        <span>Ukupno {total}: {activeCount} zauzeto, {reservedCount} rezervirano</span>
+                                                        <span className="font-medium text-emerald-700 dark:text-emerald-400">Slobodno: {avail}</span>
                                                     </div>
                                                 </div>
                                             );
@@ -371,10 +375,13 @@ export function AdminReservationForm({
                                         <SelectContent>
                                             <SelectItem value="none">{lang === "hr" ? "Nije odabrano" : "Not selected"}</SelectItem>
                                             {(landZones as any[]).map((lz: any) => {
-                                                const percent = lz.totalSpots > 0 ? Math.round((lz.activeSpots / lz.totalSpots) * 100) : 0;
+                                                const activeCount = lz.activeSpots || 0;
+                                                const reservedCount = lz.reservedSpots || 0;
+                                                const total = lz.totalSpots || 0;
+                                                const avail = lz.availableSpots ?? Math.max(0, total - activeCount - reservedCount);
                                                 return (
                                                     <SelectItem key={lz.id} value={lz.id} className="text-xs">
-                                                        {lz.name} ({lz.code}) — {lz.activeSpots}/{lz.totalSpots} ({percent}%)
+                                                        {lz.name} ({lz.code}) — Ukupno {total}: {activeCount} zauzeto, {reservedCount} rezervirano, {avail} slobodno
                                                     </SelectItem>
                                                 );
                                             })}
@@ -386,8 +393,8 @@ export function AdminReservationForm({
                                     <div className="bg-amber-50 border border-amber-300 rounded-md p-2.5 space-y-2">
                                         <p className="text-amber-800 font-semibold text-[11px] flex items-center gap-1.5">
                                             ⚠ {lang === "hr"
-                                                ? `Zona je popunjena preko 80% (${zoneCapacity.percentFull}%)`
-                                                : `Zone is over 80% full (${zoneCapacity.percentFull}%)`
+                                                ? `Upozorenje o popunjenosti kopnene zone (${zoneCapacity.name}): ${zoneCapacity.activeSpots || 0} zauzeto, ${zoneCapacity.reservedSpots || 0} rezervirano (Ukupno ${zoneCapacity.percentFull}% popunjeno). Preostalo slobodno: ${zoneCapacity.availableSpots || 0} mjesta.`
+                                                : `Zone capacity warning (${zoneCapacity.name}): ${zoneCapacity.activeSpots || 0} occupied, ${zoneCapacity.reservedSpots || 0} reserved (${zoneCapacity.percentFull}% full). Available: ${zoneCapacity.availableSpots || 0} spots.`
                                             }
                                         </p>
                                         <div className="flex flex-col gap-2">

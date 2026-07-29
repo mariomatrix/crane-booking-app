@@ -139,6 +139,37 @@ export default function ReportLandOccupancy() {
                         pdfFileName="Plovila_na_kopnu"
                     />
 
+                    {/* Capacity Summary Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 report-filters-card">
+                        <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 p-3.5 rounded-xl flex justify-between items-center">
+                            <div>
+                                <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Aktivno zauzeto na kopnu</p>
+                                <p className="text-xl font-bold text-emerald-900 dark:text-emerald-200">
+                                    {landZones.reduce((acc, z) => acc + (z.activeSpots || 0), 0)} mjesta
+                                </p>
+                            </div>
+                            <Anchor className="h-6 w-6 text-emerald-600 opacity-80" />
+                        </div>
+                        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-3.5 rounded-xl flex justify-between items-center">
+                            <div>
+                                <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Rezervirano (Nadolazeća vađenja)</p>
+                                <p className="text-xl font-bold text-amber-900 dark:text-amber-200">
+                                    {landZones.reduce((acc, z) => acc + (z.reservedSpots || 0), 0)} mjesta
+                                </p>
+                            </div>
+                            <Badge className="bg-amber-500 text-white font-bold">Rezervirano</Badge>
+                        </div>
+                        <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 p-3.5 rounded-xl flex justify-between items-center">
+                            <div>
+                                <p className="text-xs font-semibold text-blue-800 dark:text-blue-300">Slobodno raspoloživo</p>
+                                <p className="text-xl font-bold text-blue-900 dark:text-blue-200">
+                                    {landZones.reduce((acc, z) => acc + (z.availableSpots ?? Math.max(0, z.totalSpots - (z.activeSpots || 0) - (z.reservedSpots || 0))), 0)} mjesta
+                                </p>
+                            </div>
+                            <span className="text-xs font-semibold text-blue-600">od ukupno {landZones.reduce((acc, z) => acc + (z.totalSpots || 0), 0)}</span>
+                        </div>
+                    </div>
+
                     {/* Printable Preview */}
                     <div className="border rounded-lg bg-card p-6 shadow-sm w-full report-print-container">
                         <ReportHeader title={reportTitle} />
