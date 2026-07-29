@@ -117,29 +117,27 @@ export function AdminReservationForm({
     const { data: userVessels = [], isLoading: userVesselsLoading } =
         trpc.vessel.listByUser.useQuery({ userId }, { enabled: !!userId });
 
-    // Handle user changes / auto-selection
-    const [lastLoadedUserId, setLastLoadedUserId] = useState("");
-    if (userId !== lastLoadedUserId) {
-        setLastLoadedUserId(userId);
-        if (!initialData?.vesselId) {
-            setSelectedVesselId("new");
-            setVesselType("jedrilica");
-            setVesselLength("");
-            setVesselWidth("");
-            setVesselWeight("");
-            setVesselRegistration("");
+    // Handle user changes / vessel auto-selection: default to user's first vessel if available, else "new"
+    useEffect(() => {
+        if (!initialData?.vesselId && !userVesselsLoading && userId) {
+            if (userVessels.length > 0) {
+                const first = userVessels[0];
+                setSelectedVesselId(first.id);
+                setVesselType(first.type || "jedrilica");
+                setVesselLength(first.lengthM ? String(first.lengthM) : "");
+                setVesselWidth(first.beamM ? String(first.beamM) : "");
+                setVesselWeight(first.weightTons ? String(first.weightTons) : "");
+                setVesselRegistration(first.registration || "");
+            } else {
+                setSelectedVesselId("new");
+                setVesselType("jedrilica");
+                setVesselLength("");
+                setVesselWidth("");
+                setVesselWeight("");
+                setVesselRegistration("");
+            }
         }
-    }
-
-    if (userVessels.length > 0 && selectedVesselId === "new" && !vesselRegistration && !userVesselsLoading && !initialData?.vesselId) {
-        const v = userVessels[0];
-        setSelectedVesselId(v.id);
-        setVesselType(v.type || "jedrilica");
-        setVesselLength(v.lengthM ? String(v.lengthM) : "");
-        setVesselWidth(v.beamM ? String(v.beamM) : "");
-        setVesselWeight(v.weightTons ? String(v.weightTons) : "");
-        setVesselRegistration(v.registration || "");
-    }
+    }, [userId, userVessels, userVesselsLoading, initialData?.vesselId]);
 
     const handleVesselSelect = (vesselId: string) => {
         setSelectedVesselId(vesselId);
