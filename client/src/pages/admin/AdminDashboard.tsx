@@ -50,7 +50,7 @@ export default function AdminDashboard() {
       </div>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nova rezervacija dizalice</DialogTitle>
             <DialogDescription>Unesite podatke za kreiranje nove rezervacije.</DialogDescription>

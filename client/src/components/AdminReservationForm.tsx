@@ -471,13 +471,13 @@ export function AdminReservationForm({
                             </label>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold">
                                     {isWaitlisted
-                                        ? (lang === "hr" ? "Početak čekanja" : "Start of Wait")
-                                        : (lang === "hr" ? "Datum odobrenja" : "Approved Date")
-                                    } *
+                                        ? (lang === "hr" ? "Početak čekanja *" : "Start of Wait *")
+                                        : (lang === "hr" ? "Datum odobrenja *" : "Approved Date *")
+                                    }
                                 </Label>
                                 <DatePicker
                                     date={requestedDate}
@@ -487,43 +487,48 @@ export function AdminReservationForm({
                                 />
                             </div>
                             {!isWaitlisted && (
-                                <div className="space-y-2">
-                                    <Label>{lang === "hr" ? "Točno vrijeme" : "Exact Time"} *</Label>
+                                <div className="space-y-1.5">
+                                    <Label className="text-xs font-semibold">{lang === "hr" ? "Točno vrijeme *" : "Exact Time *"}</Label>
                                     <Input
                                         type="time"
                                         step="1800"
                                         value={scheduledTime}
                                         onChange={(e) => setScheduledTime(e.target.value)}
+                                        className="h-9 text-xs"
                                         required
                                     />
                                 </div>
                             )}
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>{lang === "hr" ? "Dizalica" : "Crane"} *</Label>
-                                <Select value={craneId} onValueChange={setCraneId}>
-                                    <SelectTrigger><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
-                                    <SelectContent>
-                                        {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
-                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+
+                        {!isWaitlisted && (
+                            <div className="grid grid-cols-12 gap-3">
+                                <div className="col-span-12 sm:col-span-7 space-y-1.5">
+                                    <Label className="text-xs font-semibold">{lang === "hr" ? "Dizalica *" : "Crane *"}</Label>
+                                    <Select value={craneId} onValueChange={setCraneId}>
+                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
+                                        <SelectContent>
+                                            {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
+                                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="col-span-12 sm:col-span-5 space-y-1.5">
+                                    <Label className="text-xs font-semibold">{lang === "hr" ? "Trajanje (min) *" : "Duration (min) *"}</Label>
+                                    <Input
+                                        type="number"
+                                        min="30"
+                                        step="30"
+                                        placeholder="60"
+                                        value={durationMin}
+                                        onChange={(e) => setDurationMin(e.target.value)}
+                                        className="h-9 text-xs"
+                                        required
+                                    />
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label>{lang === "hr" ? "Trajanje (min)" : "Duration (min)"} *</Label>
-                                <Input
-                                    type="number"
-                                    min="30"
-                                    step="30"
-                                    placeholder="30, 60, 90..."
-                                    value={durationMin}
-                                    onChange={(e) => setDurationMin(e.target.value)}
-                                    required
-                                />
-                            </div>
-                        </div>
+                        )}
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Napomena" : "Note"}</Label>
                             <Textarea

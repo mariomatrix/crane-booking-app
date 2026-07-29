@@ -615,7 +615,7 @@ export default function AdminCalendar() {
                         <span>Nova rezervacija</span>
                     </Button>
                     <Dialog open={isCreateResOpen} onOpenChange={setIsCreateResOpen}>
-                        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
                                 <DialogTitle>Nova rezervacija dizalice</DialogTitle>
                                 <DialogDescription>Unesite podatke za kreiranje nove rezervacije.</DialogDescription>
