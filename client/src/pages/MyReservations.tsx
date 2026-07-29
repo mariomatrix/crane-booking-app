@@ -27,7 +27,7 @@ import { useState } from "react";
 export default function MyReservations() {
   const { user, loading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
-  const { lang } = useLang();
+  const { lang, t } = useLang();
   const utils = trpc.useUtils();
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");

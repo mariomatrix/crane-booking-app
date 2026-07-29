@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { getDb, getUserByEmail, createLocalUser, updateUser } from "./server/db";
+import { getDb, getUserByEmail, createLocalUser, updateUser, updateUserRole } from "./server/db";
 import bcrypt from "bcryptjs";
 import { users } from "./drizzle/schema";
 
@@ -10,30 +10,34 @@ async function fixAdmin() {
     let mario = await getUserByEmail("mario@imagomatrix.hr");
     const passwordHash = await bcrypt.hash("lozinka123", 12);
 
+    let userId: string | undefined;
+
     if (mario) {
         console.log("Mario found, updating...");
+        userId = mario.id;
         await updateUser(mario.id, {
             passwordHash,
-            role: "admin",
             emailVerifiedAt: new Date(),
-            anonymizedAt: null, // just in case it was deleted
+            anonymizedAt: null,
         });
-        console.log("Mario updated.");
     } else {
         console.log("Mario not found, creating...");
-        const id = await createLocalUser({
+        userId = await createLocalUser({
             email: "mario@imagomatrix.hr",
             firstName: "Mario",
             lastName: "Admin",
             passwordHash
         });
-        if (id) {
-            await updateUser(id, {
-                role: "admin",
+        if (userId) {
+            await updateUser(userId, {
                 emailVerifiedAt: new Date()
             });
-            console.log("Mario created.");
         }
+    }
+
+    if (userId) {
+        await updateUserRole(userId, "admin");
+        console.log("Mario role set to admin.");
     }
 
     // Auto verify all users

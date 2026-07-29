@@ -249,7 +249,7 @@ export default function Home() {
                       pendingRequests.slice(0, 3).map((r) => (
                         <div key={r.id} className="flex items-center justify-between text-sm py-1 border-b last:border-0">
                           <span className="truncate max-w-[150px] font-medium">
-                            {r.vessel?.name || (t as any).myReservations.stepper.request}
+                            {(r as any).vessel?.name || (t as any).myReservations.stepper.request}
                           </span>
                           <StatusBadge status={r.status} />
                         </div>

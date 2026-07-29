@@ -17,14 +17,20 @@ async function runMigration() {
     // If __drizzle_migrations exists but key tables are missing, the DB was
     // reset without clearing migration history. Drop the tracking table to
     // force Drizzle to re-run all migrations from scratch.
+    // Ensure new user columns exist prior to ORM queries
     try {
-        await migrationClient`SELECT 1 FROM "service_types" LIMIT 1`;
+        await migrationClient`
+            ALTER TABLE "users" 
+            ADD COLUMN IF NOT EXISTS "is_legal_entity" boolean DEFAULT false NOT NULL,
+            ADD COLUMN IF NOT EXISTS "company_name" varchar(255),
+            ADD COLUMN IF NOT EXISTS "contact_person" varchar(255),
+            ADD COLUMN IF NOT EXISTS "address" text,
+            ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
+            ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL;
+        `;
+        console.log("User table columns verified.");
     } catch (e: any) {
-        if (e?.code === "42P01") {
-            console.log("Key tables missing — resetting migration tracking table...");
-            await migrationClient`DROP TABLE IF EXISTS "drizzle"."__drizzle_migrations"`;
-            console.log("Migration tracking reset done.");
-        }
+        console.warn("User column verification warning:", e?.message || e);
     }
 
     await migrate(db, { migrationsFolder: "drizzle" });
