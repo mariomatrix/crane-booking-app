@@ -50,16 +50,19 @@ export default function AdminDashboard() {
       </div>
 
       <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Nova rezervacija dizalice</DialogTitle>
-            <DialogDescription>Unesite podatke za kreiranje nove rezervacije.</DialogDescription>
+            <DialogTitle>Nova rezervacija</DialogTitle>
+            <DialogDescription>
+              Kreirajte novu rezervaciju za postojećeg ili novog korisnika.
+            </DialogDescription>
           </DialogHeader>
           <AdminReservationForm
             onSuccess={() => {
               setShowCreateDialog(false);
               utils.reservation.listAll.invalidate();
             }}
+            onCancel={() => setShowCreateDialog(false)}
           />
         </DialogContent>
       </Dialog>

@@ -615,10 +615,12 @@ export default function AdminCalendar() {
                         <span>Nova rezervacija</span>
                     </Button>
                     <Dialog open={isCreateResOpen} onOpenChange={setIsCreateResOpen}>
-                        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
                             <DialogHeader>
-                                <DialogTitle>Nova rezervacija dizalice</DialogTitle>
-                                <DialogDescription>Unesite podatke za kreiranje nove rezervacije.</DialogDescription>
+                                <DialogTitle>Nova rezervacija</DialogTitle>
+                                <DialogDescription>
+                                    Kreirajte novu rezervaciju za postojećeg ili novog korisnika.
+                                </DialogDescription>
                             </DialogHeader>
                             <AdminReservationForm
                                 onSuccess={() => {
@@ -626,6 +628,7 @@ export default function AdminCalendar() {
                                     utils.reservation.listAll.invalidate();
                                     utils.calendar.events.invalidate();
                                 }}
+                                onCancel={() => setIsCreateResOpen(false)}
                             />
                         </DialogContent>
                     </Dialog>
