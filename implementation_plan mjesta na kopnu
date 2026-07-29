@@ -1,0 +1,414 @@
+# Plan razvoja v2 — Finalni plan
+
+Sve odluke korisnika su ugrađene. Plan je spreman za odobrenje i kodiranje.
+
+---
+
+## Sažetak odluka
+
+| Pitanje | Odluka |
+|---------|--------|
+| Kalendar za korisnike | **Potpuno ukloniti** — korisnici ne vide kalendar ni u kakvoj formi |
+| Rezervacija | **Isključivo putem forme** — odabir datuma + tip operacije, bez vizualne zauzetosti |
+| Landing page (public) | **Informativno** — radno vrijeme, kontakt, fotografija, logo, gumb za prijavu |
+| Kopno — automatizacija | **Automatski** kreirati `land_occupancy` nakon završenog vađenja, uz mogućnost operaterskog overridea zone |
+| Kopno — popunjenost za korisnika | **Nevidljivo** korisniku |
+| Kopno — dodjela mjesta | Operater provjerava **i kopneno mjesto i dizalicu** — oboje mora biti slobodno |
+| Morski vezovi | **Za sada ne** — sljedeći korak |
+| Ograničenje plovila | **Bez ograničenja** — ali popraviti UX za višestruka plovila |
+| Lista čekanja — tok | Korisnik koji odbije termin **ostaje prvi** na listi; ponuda ide sljedećem |
+| Praćenje rada dizalice | **Novo** — voditi evidenciju ukupnog rada dizalice (sati, operacije) za naplatu/amortizaciju |
+
+---
+
+## Faza 1: Uklanjanje kalendara za korisnike + Landing page
+
+### 1.1 Backend promjene
+
+#### [MODIFY] [routers.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/routers.ts)
+- API `calendar.events` (linija 1539): prebaciti s `publicProcedure` na `operatorProcedure`
+- API `calendar.availableSlots` (linija 1606): prebaciti s `publicProcedure` na `operatorProcedure`
+- Ovo sprječava da bilo koji neautorizirani korisnik dohvati podatke o zauzetosti
+
+### 1.2 Frontend promjene
+
+#### [MODIFY] [Home.tsx](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/client/src/pages/Home.tsx)
+- **Za neprijavljene korisnike** (linije 323–324): umjesto `<Calendar />`, prikazati novu komponentu `<LandingPage />`
+- **Za korisnike s role `user`** (linije 306–321): potpuno ukloniti sekciju kalendara
+- Navigacija (linije 74–82): ukloniti gumb "Calendar" za javnost i korisnike
+
+#### [NEW] `client/src/components/LandingPage.tsx`
+- Informativna stranica za neprijavljene korisnike:
+  - Logo PŠD Špinut + naziv
+  - Kratki opis lučice i sustava rezervacija
+  - Radno vrijeme (sezonsko)
+  - Kontakt podaci (telefon, email, adresa — preuzeti iz `CONTACT_BLOCK` u [email.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/_core/email.ts#L44-L53))
+  - Gumbi za prijavu i registraciju
+  - Fotografija lučice (generirat ćemo placeholder pomoću generate_image)
+
+#### [MODIFY] [BottomNav.tsx](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/client/src/components/BottomNav.tsx)
+- Ukloniti stavku "Calendar" iz mobilne navigacije za korisnika/javnost
+
+---
+
+## Faza 2: Nove tablice u bazi podataka
+
+### 2.1 Drizzle shema — nove tablice
+
+#### [MODIFY] [schema.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/drizzle/schema.ts)
+
+**Nova tablica `land_zones`** — kopnene zone:
+
+```typescript
+export const landZoneStatusEnum = pgEnum("land_zone_status", ["active", "inactive"]);
+
+export const landZones = pgTable("land_zones", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 255 }).notNull(),
+    code: varchar("code", { length: 10 }).unique().notNull(),
+    totalSpots: integer("total_spots").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+```
+
+**Nova tablica `land_occupancies`** — boravak plovila na kopnu:
+
+```typescript
+export const landOccupancies = pgTable("land_occupancies", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    vesselId: uuid("vessel_id").notNull().references(() => vessels.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    zoneId: uuid("zone_id").notNull().references(() => landZones.id),
+    spotNumber: integer("spot_number"),              // opcijski: konkretno mjesto 1–N
+    reservationId: uuid("reservation_id").references(() => reservations.id),  // vađenje
+    returnReservationId: uuid("return_reservation_id").references(() => reservations.id),  // spuštanje
+    liftedAt: timestamp("lifted_at").notNull(),      // kad je brod podignut na kopno
+    returnedAt: timestamp("returned_at"),             // kad je brod vraćen u more (NULL = još na kopnu)
+    note: text("note"),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+```
+
+**Nova tablica `land_waiting_list`** — lista čekanja za kopneno mjesto:
+
+```typescript
+export const landWaitingStatusEnum = pgEnum("land_waiting_status", [
+    "waiting",    // čeka slobodno mjesto
+    "offered",    // ponuđeno mjesto, čeka odgovor korisnika
+    "assigned",   // mjesto dodijeljeno
+    "declined",   // korisnik odbio ponudu (ali ostaje na listi)
+    "cancelled",  // obrisan s liste
+]);
+
+export const landWaitingList = pgTable("land_waiting_list", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    vesselId: uuid("vessel_id").references(() => vessels.id),
+    preferredZoneId: uuid("preferred_zone_id").references(() => landZones.id),
+    position: integer("position").default(0).notNull(),
+    status: landWaitingStatusEnum("status").default("waiting").notNull(),
+    note: text("note"),             // napomena korisnika
+    adminNote: text("admin_note"),  // interna napomena operatera
+    assignedOccupancyId: uuid("assigned_occupancy_id").references(() => landOccupancies.id),
+    offeredAt: timestamp("offered_at"),       // kad je ponuda poslana
+    declinedAt: timestamp("declined_at"),     // kad je korisnik odbio
+    declineCount: integer("decline_count").default(0).notNull(),  // koliko puta je odbio
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+```
+
+**Nova tablica `crane_operation_log`** — evidencija rada dizalice:
+
+```typescript
+export const craneOperationLog = pgTable("crane_operation_log", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    craneId: uuid("crane_id").notNull().references(() => cranes.id),
+    reservationId: uuid("reservation_id").references(() => reservations.id),
+    operationType: varchar("operation_type", { length: 50 }).notNull(), // 'lift' | 'lower' | 'move' | 'maintenance'
+    startTime: timestamp("start_time").notNull(),
+    endTime: timestamp("end_time").notNull(),
+    durationMinutes: integer("duration_minutes").notNull(),
+    operatorId: uuid("operator_id").references(() => users.id),    // tko je upravljao
+    note: text("note"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+```
+
+### 2.2 Seed podaci za zone
+
+#### [MODIFY] [db.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/db.ts)
+
+Nova funkcija `seedLandZones()`:
+```typescript
+const defaultZones = [
+    { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+    { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
+    { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
+    { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
+    { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
+    { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
+];
+```
+
+---
+
+## Faza 3: Backend API — kopnene zone i boravak
+
+#### [MODIFY] [routers.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/routers.ts)
+
+Novi routeri:
+
+### `landZone` router
+| Procedura | Pristup | Opis |
+|-----------|---------|------|
+| `list` | operator+ | Lista svih zona s trenutnom popunjenošću (COUNT aktivnih occupancies po zoni) |
+| `create` | admin | Kreiranje nove zone |
+| `update` | admin | Ažuriranje zone (naziv, broj mjesta, status) |
+| `delete` | admin | Soft-delete zone |
+
+### `landOccupancy` router
+| Procedura | Pristup | Opis |
+|-----------|---------|------|
+| `listActive` | operator+ | Sva plovila trenutno na kopnu (returnedAt IS NULL), s podacima o zoni, vlasniku, datumu podizanja |
+| `listByZone` | operator+ | Filtriranje po zoni |
+| `listByUser` | operator+ | Filtriranje po korisniku |
+| `create` | operator+ | Ručno kreiranje zapisa boravka (override) |
+| `complete` | operator+ | Završi boravak (postavi returnedAt, poveži s return_reservation_id) |
+| `history` | operator+ | Svi završeni boravci s filterima |
+
+### `landWaiting` router
+| Procedura | Pristup | Opis |
+|-----------|---------|------|
+| `listAll` | operator+ | Cijela lista čekanja za kopno, FIFO redoslijed |
+| `add` | operator+ | Dodaj člana na listu čekanja |
+| `offer` | operator+ | Ponudi mjesto korisniku (status → offered, šalje obavijest) |
+| `assignFromOffer` | operator+ | Korisnik prihvatio — kreira occupancy, status → assigned |
+| `declineOffer` | operator+ | Korisnik odbio ponudu — status → declined (ali pozicija ostaje #1), ponudi sljedećem |
+| `remove` | operator+ | Obriši s liste |
+| `reorder` | operator+ | Ručna promjena redoslijeda (rijetko, ali potrebno) |
+
+### `craneOps` router
+| Procedura | Pristup | Opis |
+|-----------|---------|------|
+| `log` | operator+ | Zapiši operaciju dizalice (automatski ili ručno) |
+| `stats` | admin | Statistika po dizalici: ukupni sati rada, broj operacija, zadnji servis |
+| `listByCrane` | operator+ | Povijest operacija za određenu dizalicu |
+
+---
+
+## Faza 4: Integracija s postojećim rezervacijskim tokom
+
+### 4.1 Automatsko kreiranje `land_occupancy` nakon vađenja
+
+#### [MODIFY] [routers.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/routers.ts) — `reservation.complete` procedura
+
+Kada operater označi rezervaciju tipa **„Vađenje"** kao završenu:
+1. Sustav automatski kreira `land_occupancy` zapis s:
+   - `vesselId` iz rezervacije
+   - `userId` iz rezervacije
+   - `reservationId` = ID rezervacije
+   - `liftedAt` = now()
+   - `zoneId` = **operater bira zonu** putem novog modalnog dijaloga koji se otvara pri kliknu na "Završi"
+2. Sustav automatski kreira `crane_operation_log` zapis s:
+   - `craneId`, `reservationId`, trajanje, operater
+3. Ako operater ne želi odmah odabrati zonu, sustav koristi prvu zonu s slobodnim mjestom (override)
+
+### 4.2 Automatsko zatvaranje `land_occupancy` nakon spuštanja
+
+Kada operater označi rezervaciju tipa **„Spuštanje"** kao završenu:
+1. Sustav traži aktivni `land_occupancy` za to plovilo (`returnedAt IS NULL`)
+2. Postavlja `returnedAt = now()` i `returnReservationId`
+3. Kreira `crane_operation_log` zapis
+4. **Provjerava listu čekanja za kopno** — ako postoji sljedeći čekatelj i sada ima slobodnog mjesta, šalje obavijest operateru
+
+### 4.3 Provjera pri odobravanju vađenja
+
+Kada operater odobrava zahtjev za vađenje:
+- Sustav provjerava:
+  - ✅ Ima li slobodnog mjesta na kopnu? (ukupna mjesta - aktivne occupancies)
+  - ✅ Ima li slobodna dizalica u traženom terminu?
+- Ako **nema** kopnenog mjesta → operater ima opciju staviti na listu čekanja za kopno
+- Ovo su informativni podaci za operatera, ne blokiraju odobrenje (operater može override)
+
+---
+
+## Faza 5: UX poboljšanje — odabir plovila za višestruka plovila
+
+### Problem
+Kada operater kreira rezervaciju putem [AdminReservationForm.tsx](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/client/src/components/AdminReservationForm.tsx):
+1. Izabere korisnika putem `UserSearchCombobox`
+2. Ručno upisuje podatke o plovilu (tip, registracija, dimenzije, težina)
+
+Za **~5 članova koji imaju dva broda**, ali i za **sve ostale**, bilo bi mnogo bolje automatski dohvatiti plovila odabranog korisnika.
+
+### Rješenje
+
+#### [MODIFY] [AdminReservationForm.tsx](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/client/src/components/AdminReservationForm.tsx)
+
+1. Kada operater izabere korisnika (`userId`), automatski dohvatiti **sva plovila tog korisnika** putem `trpc.vessel.list`
+2. Ako korisnik ima **1 plovilo** → automatski popuniti sva polja (tip, registracija, dimenzije, težina, telefon)
+3. Ako korisnik ima **2+ plovila** → prikazati `<Select>` dropdown s popisom plovila (naziv + registracija); nakon odabira, popuniti polja
+4. Ako korisnik **nema plovila** → ostavi ručni unos (kao sad)
+5. Operater i dalje može ručno promijeniti popunjene podatke (override)
+
+---
+
+## Faza 6: Admin UI — pregled kopnenih zona
+
+#### [NEW] `client/src/pages/admin/AdminLandZones.tsx`
+
+Ekran s pregledom svih kopnenih zona:
+- **Kartice po zonama** — svaka kartica prikazuje:
+  - Naziv zone i kod
+  - Popunjenost: progress bar + brojčano (npr. „22 / 30 mjesta")
+  - Lista brodova trenutno u toj zoni (ime broda, vlasnik, datum podizanja, dani na kopnu)
+- **Akcije na kartici**:
+  - Klik → otvori detaljni popis svih plovila u zoni
+  - Gumb „Završi boravak" pored svakog broda
+- **Admin only**: dodaj/uredi/briši zone
+
+#### [NEW] `client/src/pages/admin/AdminLandWaiting.tsx`
+
+Ekran s listom čekanja za kopneno mjesto:
+- **FIFO lista** s kolonama: pozicija, član, plovilo, preferirana zona, status, datum prijave
+- **Akcije**: 
+  - „Ponudi mjesto" → otvara dijalog za odabir zone → šalje obavijest korisniku
+  - „Korisnik odbio" → status=declined, pozicija ostaje, ponudi sljedećem
+  - „Dodijeljeno" → kreira occupancy
+  - „Obriši s liste"
+
+#### [NEW] `client/src/pages/admin/AdminCraneOps.tsx`
+
+Ekran s evidencijom rada dizalice:
+- **Filtriranje** po dizalici, datumu
+- **Tablica**: datum, dizalica, tip operacije, trajanje, operater, plovilo
+- **Statistika**: ukupni sati rada po dizalici (KPI kartice)
+
+### Routing
+
+#### [MODIFY] [App.tsx](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/client/src/App.tsx)
+
+Dodati rute:
+- `/admin/land-zones` → `AdminLandZones`
+- `/admin/land-waiting` → `AdminLandWaiting`
+- `/admin/crane-ops` → `AdminCraneOps`
+
+### Navigacija
+
+Dodati stavke u admin sidebar/navigaciju:
+- 🏗️ Kopnene zone
+- 📋 Lista čekanja (kopno)
+- ⚙️ Rad dizalica
+
+---
+
+## Faza 7: Obavijesti korisnicima
+
+### Novi email predlošci
+
+#### [MODIFY] [email.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/_core/email.ts)
+
+1. **`sendLandWaitingNotification`** — „Vaš zahtjev za dizanje broda je na listi čekanja"
+2. **`sendLandSpotAvailable`** — „Kopneno mjesto i dizalica su slobodni — operater vas kontaktira za dogovor termina"
+3. **`sendCraneOperationSummary`** — Dnevni/tjedni sažetak rada dizalice (admin)
+
+### SMS obavijesti
+
+#### [MODIFY] [sms.ts](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/server/_core/sms.ts)
+
+Analogne SMS poruke za 1. i 2. gore.
+
+---
+
+## Faza 8: Tok korisničkog dashboarda
+
+#### [MODIFY] [Home.tsx](file:///c:/Users/Kiko/GITHUB/crane-booking-app/crane-booking-app/client/src/pages/Home.tsx)
+
+Novi info panel na korisničkom dashboardu (role=user):
+- Ako je korisnik na listi čekanja za kopno → prikazati karticu:
+  > 🕐 **Na listi čekanja za dizanje broda**
+  > Vaš zahtjev je zaprimljen. Obavijestit ćemo vas kada bude slobodan termin.
+- **Bez** informacija o poziciji, broju čekatelja, ili slobodnim mjestima
+
+---
+
+## Faza 9: Testiranje i deploy
+
+### Migracija baze
+```bash
+npx drizzle-kit push
+```
+
+### Testiranje
+- Kreirati zonu, dodati occupancy, zatvoriti occupancy
+- Lista čekanja: dodati, ponuditi, odbiti, ponuditi sljedećem
+- Automatsko kreiranje occupancy pri završetku vađenja
+- Automatsko zatvaranje occupancy pri završetku spuštanja
+- Crane operation log: provjeriti da se bilježi svaka operacija
+- Višestruka plovila: testirati s korisnikom koji ima 2 broda
+
+### Deploy na Coolify (development)
+- Push na `development` branch
+- Coolify automatski gradi i deploira
+
+---
+
+## Procjena opsega rada (ažurirano)
+
+| Cjelina | Procjena |
+|---------|----------|
+| Faza 1: Uklanjanje kalendara + Landing page | ~3h |
+| Faza 2: Nove DB tablice + migracija + seed | ~3h |
+| Faza 3: Backend API (zone, occupancy, waiting, crane ops) | ~5h |
+| Faza 4: Integracija s rezervacijskim tokom | ~4h |
+| Faza 5: UX — odabir plovila za višestruka plovila | ~2h |
+| Faza 6: Admin UI (3 nova ekrana) | ~6h |
+| Faza 7: Obavijesti (email + SMS) | ~3h |
+| Faza 8: Korisnički dashboard — info panel | ~2h |
+| Faza 9: Testiranje i deploy | ~4h |
+| **Ukupno** | **~32h** |
+
+---
+
+## Dijagram toka — vađenje broda
+
+```mermaid
+flowchart TD
+    A["Korisnik podnosi zahtjev\n(Tip: Vađenje)"] --> B{"Operater pregledava"}
+    B --> C{"Slobodna dizalica?"}
+    C -->|Da| D{"Slobodno kopneno\nmjesto?"}
+    C -->|Ne| E["Odgodi ili stavi\nna listu čekanja\n(dizalica)"]
+    D -->|Da| F["Odobri rezervaciju\n+ dodijeli dizalicu"]
+    D -->|Ne| G["Stavi na listu\nčekanja (kopno)"]
+    F --> H["Dizalica podiže brod"]
+    H --> I["Operater označava\nrezervaciju ZAVRŠENO"]
+    I --> J["Sustav automatski:\n1. Kreira land_occupancy\n2. Logira rad dizalice\n3. Operater bira zonu"]
+    G --> K["Obavijesti korisnika\n(email + SMS)"]
+    K --> L{"Oslobodi se mjesto?"}
+    L -->|Da| M["Operater nudi\nmjesto korisniku"]
+    M --> N{"Korisnik prihvaća?"}
+    N -->|Da| F
+    N -->|Ne| O["Korisnik ostaje #1\nPonudi sljedećem"]
+    O --> M
+```
+
+## Dijagram toka — spuštanje broda
+
+```mermaid
+flowchart TD
+    A["Korisnik podnosi zahtjev\n(Tip: Spuštanje)"] --> B["Operater odobrava"]
+    B --> C["Dizalica spušta brod"]
+    C --> D["Operater označava\nrezervaciju ZAVRŠENO"]
+    D --> E["Sustav automatski:\n1. Zatvara land_occupancy\n2. Logira rad dizalice"]
+    E --> F{"Postoji čekatelj\nna listi čekanja?"}
+    F -->|Da| G["Obavijesti operatera\no slobodnom mjestu"]
+    G --> H["Operater nudi\nmjesto čekatelju"]
+    F -->|Ne| I["Gotovo"]
+```

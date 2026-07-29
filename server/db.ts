@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql, ilike, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -15,6 +15,10 @@ import {
   seasons,
   holidays,
   apiKeys,
+  landZones,
+  landOccupancies,
+  landWaitingList,
+  craneOperationLog,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -22,6 +26,10 @@ import {
   type InsertWaitingList,
   type InsertAuditLog,
   type InsertServiceType,
+  type InsertLandZone,
+  type InsertLandOccupancy,
+  type InsertLandWaitingList,
+  type InsertCraneOperationLog,
 } from "../drizzle/schema";
 
 // ─── DB Connection ────────────────────────────────────────────────────
@@ -37,22 +45,37 @@ export async function getDb() {
 export async function createLocalUser(data: {
   email: string;
   passwordHash: string;
-  firstName: string;
-  lastName: string;
+  firstName?: string;
+  lastName?: string;
   username?: string;
+  name?: string;
   phone?: string;
+  oib?: string;
+  isLegalEntity?: boolean;
+  companyName?: string;
+  contactPerson?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
   mustChangePassword?: boolean;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  const name = data.username || `${data.firstName} ${data.lastName}`.trim();
+  const name = data.name || data.username || (data.isLegalEntity && data.companyName ? data.companyName : `${data.firstName || ""} ${data.lastName || ""}`.trim());
   const res = await db.insert(users).values({
     email: data.email,
     passwordHash: data.passwordHash,
-    firstName: data.firstName,
-    lastName: data.lastName,
+    firstName: data.firstName || null,
+    lastName: data.lastName || null,
     name,
-    phone: data.phone,
+    phone: data.phone || null,
+    oib: data.oib || null,
+    isLegalEntity: data.isLegalEntity ?? false,
+    companyName: data.companyName || null,
+    contactPerson: data.contactPerson || null,
+    address: data.address || null,
+    city: data.city || "Split",
+    postalCode: data.postalCode || "21000",
     mustChangePassword: data.mustChangePassword ?? false,
     loginMethod: "email",
     lastSignedIn: new Date(),
@@ -85,21 +108,67 @@ export async function getUserById(id: string) {
   return res[0];
 }
 
-export async function listAllUsers(limit = 100, offset = 0) {
+export async function listAllUsers(
+  limit = 100,
+  offset = 0,
+  search?: string,
+  role?: string,
+  status?: string,
+  vesselFilter?: string
+) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
-  
+
+  let conditions = [isNull(users.anonymizedAt)];
+
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(or(
+      ilike(users.firstName, pattern),
+      ilike(users.lastName, pattern),
+      ilike(users.email, pattern),
+      ilike(users.oib, pattern),
+      sql`exists (
+        select 1 from vessels 
+        where vessels.owner_id = ${users.id} 
+          and (vessels.name ilike ${pattern} or vessels.registration ilike ${pattern})
+      )`
+    ) as any);
+  }
+
+  if (role && role !== "all") {
+    conditions.push(eq(users.role, role as any));
+  }
+
+  if (status && status !== "all") {
+    if (status === "verified") {
+      conditions.push(isNotNull(users.emailVerifiedAt));
+    } else if (status === "unverified") {
+      conditions.push(isNull(users.emailVerifiedAt));
+    }
+  }
+
+  if (vesselFilter && vesselFilter !== "all") {
+    if (vesselFilter === "has_vessel") {
+      conditions.push(sql`exists (select 1 from vessels where vessels.owner_id = ${users.id})`);
+    } else if (vesselFilter === "no_vessel") {
+      conditions.push(sql`not exists (select 1 from vessels where vessels.owner_id = ${users.id})`);
+    }
+  }
+
+  const whereClause = and(...conditions);
+
   const [countRes] = await db.select({ count: sql<number>`count(*)` })
     .from(users)
-    .where(isNull(users.anonymizedAt));
-    
+    .where(whereClause);
+
   const data = await db.select().from(users)
-    .where(isNull(users.anonymizedAt))
+    .where(whereClause)
     .orderBy(users.name, users.email)
     .limit(limit)
     .offset(offset);
-    
-  return { data, total: Number(countRes.count) };
+
+  return { data, total: Number(countRes?.count || 0) };
 }
 
 export async function updateUserRole(id: string, role: "user" | "operator" | "admin") {
@@ -230,18 +299,18 @@ export async function listReservationsByUser(userId: string) {
 export async function listAllReservations(status?: string, limit = 50, offset = 0) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
-  
+
   let countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
   let dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(limit).offset(offset);
-  
+
   if (status) {
     countQuery.where(eq(reservations.status, status as any));
     dataQuery.where(eq(reservations.status, status as any));
   }
-  
+
   const [countRes] = await countQuery;
   const data = await dataQuery;
-  
+
   return { data, total: Number(countRes.count) };
 }
 
@@ -267,6 +336,13 @@ export async function updateReservationStatus(
       updatedAt: new Date(),
     })
     .where(eq(reservations.id, id));
+
+  if (status === "cancelled" || status === "rejected") {
+    const { landWaitingList } = await import("../drizzle/schema");
+    await db.update(landWaitingList)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(eq(landWaitingList.reservationId, id));
+  }
 }
 
 /**
@@ -329,10 +405,10 @@ export async function listWaitingListByUser(userId: string) {
 export async function listAllWaiting(limit = 50, offset = 0) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
-  
+
   const [countRes] = await db.select({ count: sql<number>`count(*)` }).from(waitingList);
   const data = await db.select().from(waitingList).orderBy(desc(waitingList.createdAt)).limit(limit).offset(offset);
-  
+
   return { data, total: Number(countRes.count) };
 }
 
@@ -364,10 +440,12 @@ export async function removeFromWaitingList(id: string, userId: string) {
 
 // ─── Settings ─────────────────────────────────────────────────────────
 const DEFAULT_SETTINGS: Record<string, string> = {
-  slotDurationMinutes: "60",
+  slotDurationMinutes: "30",
   bufferMinutes: "15",
   workdayStart: "08:00",
   workdayEnd: "16:00",
+  marinaName: "PŠD Špinut",
+  marinaLogo: "",
 };
 
 export async function getAllSettings(): Promise<Record<string, string>> {
@@ -486,6 +564,22 @@ export async function seedServiceTypes() {
     { name: "Ostalo", description: "Ostale operacije dizalicom", defaultDurationMin: 60, sortOrder: 4 },
   ];
   await db.insert(serviceTypes).values(defaults);
+}
+
+export async function seedLandZones() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(landZones).limit(1);
+  if (existing.length > 0) return; // already seeded
+  const defaultZones = [
+    { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+    { name: "Arla 1", code: "A1", totalSpots: 18, sortOrder: 1 },
+    { name: "Arla 2", code: "A2", totalSpots: 30, sortOrder: 2 },
+    { name: "Arla 3", code: "A3", totalSpots: 50, sortOrder: 3 },
+    { name: "Zapadna obala", code: "ZO", totalSpots: 16, sortOrder: 4 },
+    { name: "Lukobran", code: "LB", totalSpots: 50, sortOrder: 5 },
+  ];
+  await db.insert(landZones).values(defaultZones);
 }
 
 // ─── Email Verification ───────────────────────────────────────────────
@@ -811,4 +905,488 @@ export async function upsertUser(data: {
       lastSignedIn: data.lastSignedIn ?? new Date(),
     });
   }
+}
+
+// ─── Dry Berths (Mjesta na kopnu) Queries ──────────────────────────────
+
+export async function listLandZones() {
+  const db = await getDb();
+  if (!db) return [];
+  const zones = await db.select().from(landZones).orderBy(landZones.sortOrder);
+  const occupancies = await db.select().from(landOccupancies).where(isNull(landOccupancies.returnedAt));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  // Get approved lift_from_sea reservations
+  const allApprovedReservations = await db.select({
+    id: reservations.id,
+    landZoneId: reservations.landZoneId,
+    vesselId: reservations.vesselId,
+    scheduledStart: reservations.scheduledStart,
+  })
+  .from(reservations)
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(serviceTypes.operationCategory, "lift_from_sea"),
+      isNotNull(reservations.landZoneId)
+    )
+  );
+
+  const waitingListEntries = await db.select().from(landWaitingList).where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")));
+
+  return zones.map(z => {
+    const registeredCount = occupancies.filter(o => o.zoneId === z.id).length;
+    const manualCount = z.manualOccupiedSpots || 0;
+    const activeCount = registeredCount + manualCount;
+
+    const zoneReservedRes = allApprovedReservations.filter(r => 
+      r.landZoneId === z.id && (!r.vesselId || !activeVesselIds.has(r.vesselId))
+    );
+    const reservedCount = zoneReservedRes.length;
+
+    const waitingCount = waitingListEntries.filter(w => w.preferredZoneId === z.id).length;
+    const availableSpots = Math.max(0, z.totalSpots - activeCount - reservedCount);
+    const percentFull = z.totalSpots > 0 ? Math.round(((activeCount + reservedCount) / z.totalSpots) * 100) : 0;
+
+    return {
+      ...z,
+      activeSpots: activeCount,
+      registeredSpots: registeredCount,
+      reservedSpots: reservedCount,
+      availableSpots,
+      waitingCount,
+      percentFull,
+      isOver80: percentFull >= 80,
+      isFull: (activeCount + reservedCount) >= z.totalSpots,
+    };
+  });
+}
+
+export async function getLandZoneCapacity(zoneId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [zone] = await db.select().from(landZones).where(eq(landZones.id, zoneId)).limit(1);
+  if (!zone) throw new Error(`Kopnena zona s ID-em ${zoneId} ne postoji.`);
+
+  const occupancies = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  const allApprovedReservations = await db.select({
+    id: reservations.id,
+    landZoneId: reservations.landZoneId,
+    vesselId: reservations.vesselId,
+    scheduledStart: reservations.scheduledStart,
+  })
+  .from(reservations)
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(reservations.landZoneId, zoneId),
+      eq(serviceTypes.operationCategory, "lift_from_sea")
+    )
+  );
+
+  const zoneReservedRes = allApprovedReservations.filter(r => 
+    !r.vesselId || !activeVesselIds.has(r.vesselId)
+  );
+
+  const registeredSpots = occupancies.length;
+  const manualSpots = zone.manualOccupiedSpots || 0;
+  const activeSpots = registeredSpots + manualSpots;
+  const reservedSpots = zoneReservedRes.length;
+  const totalSpots = zone.totalSpots;
+  const availableSpots = Math.max(0, totalSpots - activeSpots - reservedSpots);
+  const percentFull = totalSpots > 0 ? Math.round(((activeSpots + reservedSpots) / totalSpots) * 100) : 0;
+  const isOver80 = percentFull >= 80;
+  const isFull = (activeSpots + reservedSpots) >= totalSpots;
+
+  return {
+    id: zone.id,
+    name: zone.name,
+    code: zone.code,
+    totalSpots,
+    activeSpots,
+    registeredSpots,
+    manualOccupiedSpots: manualSpots,
+    reservedSpots,
+    availableSpots,
+    percentFull,
+    isOver80,
+    isFull,
+  };
+}
+
+export async function getUpcomingReservedVesselsForZone(zoneId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const occupancies = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  const items = await db.select({
+    reservationId: reservations.id,
+    reservationNumber: reservations.reservationNumber,
+    scheduledStart: reservations.scheduledStart,
+    durationMin: reservations.durationMin,
+    status: reservations.status,
+    userId: reservations.userId,
+    userName: users.name,
+    userEmail: users.email,
+    vesselId: reservations.vesselId,
+    vesselRegistration: reservations.vesselRegistration,
+    vesselType: reservations.vesselType,
+    vesselName: vessels.name,
+    serviceTypeName: serviceTypes.name,
+  })
+  .from(reservations)
+  .leftJoin(users, eq(reservations.userId, users.id))
+  .leftJoin(vessels, eq(reservations.vesselId, vessels.id))
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(reservations.landZoneId, zoneId),
+      eq(serviceTypes.operationCategory, "lift_from_sea")
+    )
+  );
+
+  return items.filter(r => !r.vesselId || !activeVesselIds.has(r.vesselId));
+}
+
+export async function createLandZone(data: InsertLandZone) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  // Check if code already exists
+  const existing = await db
+    .select()
+    .from(landZones)
+    .where(eq(landZones.code, data.code))
+    .limit(1);
+  if (existing.length > 0) {
+    throw new Error(`Kopnena zona s kodom "${data.code}" već postoji.`);
+  }
+
+  const res = await db.insert(landZones).values(data).returning({ id: landZones.id });
+  return res[0].id;
+}
+
+export async function updateLandZone(id: string, data: Partial<InsertLandZone>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  if (data.code) {
+    const existing = await db
+      .select()
+      .from(landZones)
+      .where(and(eq(landZones.code, data.code), ne(landZones.id, id)))
+      .limit(1);
+    if (existing.length > 0) {
+      throw new Error(`Kopnena zona s kodom "${data.code}" već postoji.`);
+    }
+  }
+
+  await db.update(landZones).set({ ...data, updatedAt: new Date() }).where(eq(landZones.id, id));
+}
+
+export async function deleteLandZone(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landZones).set({ isActive: false, updatedAt: new Date() }).where(eq(landZones.id, id));
+}
+
+export async function listActiveOccupancies(filters?: { zoneId?: string; userId?: string }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [isNull(landOccupancies.returnedAt)];
+  if (filters?.zoneId) conditions.push(eq(landOccupancies.zoneId, filters.zoneId));
+  if (filters?.userId) conditions.push(eq(landOccupancies.userId, filters.userId));
+
+  return db
+    .select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      reservationId: landOccupancies.reservationId,
+      returnReservationId: landOccupancies.returnReservationId,
+      liftedAt: landOccupancies.liftedAt,
+      returnedAt: landOccupancies.returnedAt,
+      note: landOccupancies.note,
+      createdBy: landOccupancies.createdBy,
+      createdAt: landOccupancies.createdAt,
+      updatedAt: landOccupancies.updatedAt,
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+        lengthM: vessels.lengthM,
+        beamM: vessels.beamM,
+        draftM: vessels.draftM,
+        weightTons: vessels.weightTons,
+      },
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      zone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(...conditions))
+    .orderBy(desc(landOccupancies.liftedAt));
+}
+
+export async function listOccupancyHistory(filters?: { zoneId?: string; userId?: string; limit?: number; offset?: number }) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const conditions = [sql`${landOccupancies.returnedAt} IS NOT NULL`];
+  if (filters?.zoneId) conditions.push(eq(landOccupancies.zoneId, filters.zoneId));
+  if (filters?.userId) conditions.push(eq(landOccupancies.userId, filters.userId));
+
+  const countRes = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(landOccupancies)
+    .where(and(...conditions));
+
+  const data = await db
+    .select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      reservationId: landOccupancies.reservationId,
+      returnReservationId: landOccupancies.returnReservationId,
+      liftedAt: landOccupancies.liftedAt,
+      returnedAt: landOccupancies.returnedAt,
+      note: landOccupancies.note,
+      createdBy: landOccupancies.createdBy,
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+      },
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      },
+      zone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(...conditions))
+    .orderBy(desc(landOccupancies.returnedAt))
+    .limit(filters?.limit ?? 50)
+    .offset(filters?.offset ?? 0);
+
+  return { data, total: Number(countRes[0]?.count ?? 0) };
+}
+
+export async function createLandOccupancy(data: InsertLandOccupancy) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(landOccupancies).values(data).returning({ id: landOccupancies.id });
+  return res[0].id;
+}
+
+export async function completeLandOccupancy(id: string, returnReservationId?: string, returnedAt = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landOccupancies).set({
+    returnedAt,
+    returnReservationId,
+    updatedAt: new Date()
+  }).where(eq(landOccupancies.id, id));
+}
+
+export async function getActiveOccupancyByVessel(vesselId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.vesselId, vesselId), isNull(landOccupancies.returnedAt)))
+    .limit(1);
+  return res[0];
+}
+
+export async function listLandWaitingList() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: landWaitingList.id,
+      userId: landWaitingList.userId,
+      vesselId: landWaitingList.vesselId,
+      preferredZoneId: landWaitingList.preferredZoneId,
+      position: landWaitingList.position,
+      status: landWaitingList.status,
+      note: landWaitingList.note,
+      adminNote: landWaitingList.adminNote,
+      assignedOccupancyId: landWaitingList.assignedOccupancyId,
+      reservationId: landWaitingList.reservationId,
+      offeredAt: landWaitingList.offeredAt,
+      declinedAt: landWaitingList.declinedAt,
+      declineCount: landWaitingList.declineCount,
+      createdAt: landWaitingList.createdAt,
+      updatedAt: landWaitingList.updatedAt,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+      },
+      preferredZone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landWaitingList)
+    .innerJoin(users, eq(landWaitingList.userId, users.id))
+    .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
+    .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+    .where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined")))
+    .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
+}
+
+export async function addLandWaitingListEntry(data: Omit<InsertLandWaitingList, "position">) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  const existing = await db.select().from(landWaitingList)
+    .where(and(
+      eq(landWaitingList.userId, data.userId),
+      or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+    ));
+  if (existing.length > 0) return existing[0].id;
+
+  const maxPosRes = await db.select({ maxPos: sql<number>`max(position)` }).from(landWaitingList);
+  const nextPos = (maxPosRes[0]?.maxPos ?? 0) + 1;
+
+  const res = await db.insert(landWaitingList).values({
+    ...data,
+    position: nextPos,
+  } as any).returning({ id: landWaitingList.id });
+  return res[0].id;
+}
+
+export async function updateLandWaitingListStatus(id: string, status: "waiting" | "offered" | "assigned" | "declined" | "cancelled", extra?: Partial<InsertLandWaitingList>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landWaitingList).set({
+    status,
+    ...extra,
+    updatedAt: new Date()
+  }).where(eq(landWaitingList.id, id));
+}
+
+export async function reorderWaitingList(ids: string[]) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  for (let i = 0; i < ids.length; i++) {
+    await db.update(landWaitingList).set({ position: i + 1, updatedAt: new Date() }).where(eq(landWaitingList.id, ids[i]));
+  }
+}
+
+export async function logCraneOperation(data: InsertCraneOperationLog) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(craneOperationLog).values(data).returning({ id: craneOperationLog.id });
+  return res[0].id;
+}
+
+export async function listCraneOps(filters?: { craneId?: string; limit?: number; offset?: number }) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const conditions = [];
+  if (filters?.craneId) conditions.push(eq(craneOperationLog.craneId, filters.craneId));
+
+  const countRes = await db.select({ count: sql<number>`count(*)` })
+    .from(craneOperationLog)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+  const data = await db
+    .select({
+      id: craneOperationLog.id,
+      craneId: craneOperationLog.craneId,
+      reservationId: craneOperationLog.reservationId,
+      operationType: craneOperationLog.operationType,
+      startTime: craneOperationLog.startTime,
+      endTime: craneOperationLog.endTime,
+      durationMinutes: craneOperationLog.durationMinutes,
+      operatorId: craneOperationLog.operatorId,
+      note: craneOperationLog.note,
+      createdAt: craneOperationLog.createdAt,
+      crane: {
+        id: cranes.id,
+        name: cranes.name,
+      },
+      operator: {
+        id: users.id,
+        name: users.name,
+      }
+    })
+    .from(craneOperationLog)
+    .innerJoin(cranes, eq(craneOperationLog.craneId, cranes.id))
+    .leftJoin(users, eq(craneOperationLog.operatorId, users.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(craneOperationLog.startTime))
+    .limit(filters?.limit ?? 50)
+    .offset(filters?.offset ?? 0);
+
+  return { data, total: Number(countRes[0]?.count ?? 0) };
+}
+
+export async function getCraneStats() {
+  const db = await getDb();
+  if (!db) return [];
+  const stats = await db
+    .select({
+      craneId: craneOperationLog.craneId,
+      totalDuration: sql<number>`sum(${craneOperationLog.durationMinutes})::int`,
+      opsCount: sql<number>`count(*)::int`,
+    })
+    .from(craneOperationLog)
+    .groupBy(craneOperationLog.craneId);
+
+  const allCranes = await db.select().from(cranes);
+  return allCranes.map(c => {
+    const crStat = stats.find(s => s.craneId === c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      location: c.location,
+      status: c.craneStatus,
+      totalHours: Number(((crStat?.totalDuration ?? 0) / 60).toFixed(1)),
+      opsCount: crStat?.opsCount ?? 0,
+    };
+  });
 }

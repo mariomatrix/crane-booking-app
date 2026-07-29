@@ -83,6 +83,32 @@
   --sidebar-ring: oklch(0.42 0.12 250);
 }
 
+.dark {
+  --background: oklch(0.145 0.015 250);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0.015 250);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0.015 250);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.65 0.15 250);
+  --primary-foreground: oklch(0.145 0.015 250);
+  --secondary: oklch(0.2 0.015 250);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.2 0.015 250);
+  --muted-foreground: oklch(0.65 0.01 250);
+  --accent: oklch(0.2 0.015 250);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(0.25 0.015 250);
+  --input: oklch(0.25 0.015 250);
+  --ring: oklch(0.65 0.15 250);
+  --sidebar: oklch(0.125 0.015 250);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.2 0.015 250);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.2 0.015 250);
+  --sidebar-ring: oklch(0.65 0.15 250);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -212,4 +238,139 @@
 .status-badge-cancelled {
   background-color: oklch(0.92 0.02 286);
   color: oklch(0.4 0.02 286);
+}
+
+/* ─── Print Media Styles ────────────────────────────────────────────── */
+@media print {
+  html, body, :root, .dark {
+    background: white !important;
+    background-color: white !important;
+    color: black !important;
+    --background: oklch(1 0 0) !important;
+    --foreground: oklch(0.18 0.02 250) !important;
+    --card: oklch(1 0 0) !important;
+    --card-foreground: oklch(0.18 0.02 250) !important;
+    --popover: oklch(1 0 0) !important;
+    --popover-foreground: oklch(0.18 0.02 250) !important;
+    --primary: oklch(0.42 0.12 250) !important;
+    --primary-foreground: oklch(0.98 0 0) !important;
+    --secondary: oklch(0.96 0.005 250) !important;
+    --secondary-foreground: oklch(0.35 0.02 250) !important;
+    --muted: oklch(0.96 0.005 250) !important;
+    --muted-foreground: oklch(0.5 0.02 250) !important;
+    --accent: oklch(0.94 0.01 250) !important;
+    --accent-foreground: oklch(0.18 0.02 250) !important;
+    --border: oklch(0.91 0.005 250) !important;
+    --input: oklch(0.91 0.005 250) !important;
+  }
+
+  /* Force background colors and texts to look normal for printing */
+  * {
+    color: black !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Hide navigation, sidebars, buttons, and settings */
+  nav, 
+  aside, 
+  header:not(.print-header), 
+  footer, 
+  .no-print,
+  button:not(.print-btn), 
+  [role="combobox"], 
+  .export-buttons,
+  .sidebar-trigger,
+  [data-sidebar="sidebar"],
+  .report-filters-card {
+    display: none !important;
+  }
+
+  /* Main content container adjustments */
+  .main-content, 
+  main, 
+  .container, 
+  .report-print-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    background-color: white !important;
+  }
+
+  /* Un-wrap overflow containers for printing */
+  .overflow-x-auto, 
+  [class*="overflow-"],
+  div, 
+  main, 
+  section {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  /* Tables formatting for print */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+  }
+  
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+  
+  th, td {
+    padding: 6px 8px !important;
+    border: 1px solid #ddd !important;
+    font-size: 9pt !important;
+    color: black !important;
+    background: transparent !important;
+  }
+
+  th {
+    background-color: #f5f5f5 !important;
+    font-weight: bold !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Preserve colors/backgrounds for badges in print */
+  .status-badge-pending {
+    background-color: #fef3c7 !important;
+    color: #d97706 !important;
+  }
+  .status-badge-approved {
+    background-color: #dcfce7 !important;
+    color: #15803d !important;
+  }
+  .status-badge-rejected {
+    background-color: #fee2e2 !important;
+    color: #b91c1c !important;
+  }
+  .status-badge-cancelled {
+    background-color: #f3f4f6 !important;
+    color: #4b5563 !important;
+  }
+
+  /* Page margins and layout */
+  @page {
+    size: A4 portrait;
+    margin: 15mm 15mm 15mm 15mm;
+  }
+
+  .page-break {
+    page-break-before: always !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+}
+
+.print-only {
+  display: none;
 }

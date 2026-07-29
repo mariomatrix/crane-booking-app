@@ -19,16 +19,23 @@ interface DatePickerProps {
     onChange?: (date: Date | undefined) => void;
     placeholder?: string;
     className?: string;
+    disabled?: boolean;
+    disablePastDates?: boolean;
 }
 
-export function DatePicker({ date, onChange, placeholder, className }: DatePickerProps) {
+export function DatePicker({ date, onChange, placeholder, className, disabled, disablePastDates = false }: DatePickerProps) {
     const { lang } = useLang();
+    const [open, setOpen] = React.useState(false);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
     return (
-        <Popover>
+        <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
                 <Button
                     variant={"outline"}
+                    disabled={disabled}
                     className={cn(
                         "w-full justify-start text-left font-normal",
                         !date && "text-muted-foreground",
@@ -43,7 +50,13 @@ export function DatePicker({ date, onChange, placeholder, className }: DatePicke
                 <Calendar
                     mode="single"
                     selected={date}
-                    onSelect={onChange}
+                    disabled={disablePastDates ? (d) => d < startOfToday : undefined}
+                    onSelect={(selectedDate) => {
+                        onChange?.(selectedDate);
+                        if (selectedDate) {
+                            setOpen(false);
+                        }
+                    }}
                     initialFocus
                     locale={lang === "hr" ? hr : enUS}
                 />

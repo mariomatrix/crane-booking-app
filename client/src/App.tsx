@@ -24,9 +24,21 @@ import AdminSeasons from "./pages/admin/AdminSeasons";
 import AdminHolidays from "./pages/admin/AdminHolidays";
 import AdminAuditLog from "./pages/admin/AdminAuditLog";
 import AdminUserCard from "./pages/admin/AdminUserCard";
+import AdminLandZones from "./pages/admin/AdminLandZones";
+import AdminLandWaiting from "./pages/admin/AdminLandWaiting";
+import AdminCraneOps from "./pages/admin/AdminCraneOps";
 import Profile from "./pages/Profile";
 import MyCard from "./pages/MyCard";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+
+// Reports
+import ReportHub from "@/pages/admin/reports/ReportHub";
+import ReportSchedule from "@/pages/admin/reports/ReportSchedule";
+import ReportUtilization from "@/pages/admin/reports/ReportUtilization";
+import ReportUsers from "@/pages/admin/reports/ReportUsers";
+import ReportOperations from "@/pages/admin/reports/ReportOperations";
+import ReportLandOccupancy from "@/pages/admin/reports/ReportLandOccupancy";
+import ReportWaitingList from "@/pages/admin/reports/ReportWaitingList";
 
 function Router() {
   return (
@@ -77,6 +89,38 @@ function Router() {
       </Route>
       <Route path="/admin/audit-log">
         <AdminLayout><AdminAuditLog /></AdminLayout>
+      </Route>
+      <Route path="/admin/land-zones">
+        <AdminLayout><AdminLandZones /></AdminLayout>
+      </Route>
+      <Route path="/admin/land-waiting">
+        <AdminLayout><AdminLandWaiting /></AdminLayout>
+      </Route>
+      <Route path="/admin/crane-ops">
+        <AdminLayout><AdminCraneOps /></AdminLayout>
+      </Route>
+
+      {/* Reports Routes */}
+      <Route path="/admin/reports">
+        <AdminLayout><ReportHub /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/schedule">
+        <AdminLayout><ReportSchedule /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/utilization">
+        <AdminLayout><ReportUtilization /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/users">
+        <AdminLayout><ReportUsers /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/operations">
+        <AdminLayout><ReportOperations /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/land-occupancy">
+        <AdminLayout><ReportLandOccupancy /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/waiting-list">
+        <AdminLayout><ReportWaitingList /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />

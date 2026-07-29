@@ -7,10 +7,11 @@ export interface EmailPayload {
 }
 
 function getTransporter() {
+    const port = Number(process.env.SMTP_PORT) || 587;
     return nodemailer.createTransport({
         host: process.env.SMTP_HOST || "smtp.gmail.com",
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
+        port: port,
+        secure: port === 465,
         auth: {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS,
@@ -351,6 +352,31 @@ export async function sendNewMessageNotification(opts: {
         <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;background-color:#f9fafb;">${opts.messageBody}</blockquote>
         <p>${isHr ? "Prijavite se na platformu za odgovor." : "Please log in to the platform to respond."}</p>
     `;
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+
+export async function sendLandSpotAvailable(opts: {
+    to: string;
+    userName: string;
+    zoneName: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? `Slobodno mjesto na kopnu — ${opts.zoneName}`
+        : `Dry Berth Spot Available — ${opts.zoneName}`;
+    const content = `
+    <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
+    <p>${isHr
+            ? `Slobodno mjesto na kopnu u zoni <strong>${opts.zoneName}</strong> je sada dostupno za Vaše plovilo.`
+            : `A dry berth slot in zone <strong>${opts.zoneName}</strong> is now available for your vessel.`
+        }</p>
+    <p>${isHr 
+            ? "Molimo kontaktirajte lučku kapetaniju ili posjetite aplikaciju kako biste potvrdili prihvaćanje." 
+            : "Please contact the harbor master or visit the application to confirm acceptance."
+        }</p>
+  `;
     return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 

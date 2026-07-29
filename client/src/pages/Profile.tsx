@@ -152,6 +152,18 @@ export default function Profile() {
                             />
                         </div>
 
+                        <div className="space-y-2">
+                            <Label htmlFor="oib">OIB</Label>
+                            <Input
+                                id="oib"
+                                value={(user as any)?.oib || ""}
+                                disabled
+                                className="bg-muted font-mono"
+                                placeholder="Nije unesen"
+                            />
+                            <p className="text-xs text-muted-foreground">OIB se može izmijeniti samo kontaktiranjem administratora marine.</p>
+                        </div>
+
                         <div className="pt-4 flex justify-end">
                             <Button type="submit" disabled={updateMutation.isPending}>
                                 {updateMutation.isPending ? (

@@ -34,10 +34,15 @@ async function runMigration() {
     }
 
     await migrate(db, { migrationsFolder: "drizzle" });
+    try {
+        await migrationClient`ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL`;
+    } catch (e: any) {
+        console.warn("Could not alter land_zones table for manual_occupied_spots:", e);
+    }
     console.log("Migrations completed.");
 
     // ─── Import schema and helpers ────────────────────────────────────
-    const { cranes, users, serviceTypes, holidays } = await import("../drizzle/schema");
+    const { cranes, users, serviceTypes, holidays, landZones } = await import("../drizzle/schema");
     const { eq } = await import("drizzle-orm");
     const bcrypt = await import("bcryptjs");
 
@@ -46,13 +51,31 @@ async function runMigration() {
     if (existingServiceTypes.length === 0) {
         console.log("Seeding service types...");
         await db.insert(serviceTypes).values([
-            { name: "Spuštanje u more", description: "Spuštanje plovila s kopna ili brodogradilišta u more", defaultDurationMin: 60, sortOrder: 1 },
-            { name: "Vađenje iz mora", description: "Vađenje plovila iz mora na kopno ili brodogradilište", defaultDurationMin: 60, sortOrder: 2 },
-            { name: "Premještanje unutar marine", description: "Premještanje plovila unutar prostora marine", defaultDurationMin: 45, sortOrder: 3 },
-            { name: "Zimovanje (dugotrajna pohrana)", description: "Izvlačenje plovila za zimsko odlaganje", defaultDurationMin: 90, sortOrder: 4 },
-            { name: "Ostalo", description: "Ostale operacije — opis u napomeni", defaultDurationMin: 60, sortOrder: 5 },
+            { name: "Spuštanje u more", description: "Spuštanje plovila s kopna ili brodogradilišta u more", defaultDurationMin: 60, sortOrder: 1, operationCategory: "lower_to_sea" },
+            { name: "Vađenje iz mora", description: "Vađenje plovila iz mora na kopno ili brodogradilište", defaultDurationMin: 60, sortOrder: 2, operationCategory: "lift_from_sea" },
+            { name: "Premještanje unutar marine", description: "Premještanje plovila unutar prostora marine", defaultDurationMin: 45, sortOrder: 3, operationCategory: "move" },
+            { name: "Zimovanje (dugotrajna pohrana)", description: "Izvlačenje plovila za zimsko odlaganje", defaultDurationMin: 90, sortOrder: 4, operationCategory: "lift_from_sea" },
+            { name: "Ostalo", description: "Ostale operacije — opis u napomeni", defaultDurationMin: 60, sortOrder: 5, operationCategory: "other" },
         ]);
         console.log("Service types seeded.");
+    } else {
+        // Upgrade existing ones
+        console.log("Updating existing service types with operation categories...");
+        for (const st of existingServiceTypes) {
+            let cat: "lift_from_sea" | "lower_to_sea" | "move" | "maintenance" | "other" = "other";
+            const nameLower = st.name.toLowerCase();
+            if (nameLower.includes("vađenje") || nameLower.includes("vadenje") || nameLower.includes("zimovanje")) {
+                cat = "lift_from_sea";
+            } else if (nameLower.includes("spuštanje") || nameLower.includes("spustanje")) {
+                cat = "lower_to_sea";
+            } else if (nameLower.includes("premještanje") || nameLower.includes("premjestanje")) {
+                cat = "move";
+            } else if (nameLower.includes("održavanje") || nameLower.includes("odrzavanje") || nameLower.includes("servis")) {
+                cat = "maintenance";
+            }
+            await db.update(serviceTypes).set({ operationCategory: cat }).where(eq(serviceTypes.id, st.id));
+        }
+        console.log("Service types updated.");
     }
 
     // ─── Seed: Cranes ────────────────────────────────────────────────
@@ -111,6 +134,21 @@ async function runMigration() {
         console.log("HR holidays seeded.");
     }
 
+    // ─── Seed: Land Zones ────────────────────────────────────────────
+    const existingLandZones = await db.select().from(landZones);
+    if (existingLandZones.length === 0) {
+        console.log("Seeding land zones...");
+        await db.insert(landZones).values([
+            { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+            { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
+            { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
+            { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
+            { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
+            { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
+        ]);
+        console.log("Land zones seeded.");
+    }
+
     // ─── Seed: Admin Users ───────────────────────────────────────────
     console.log("Checking administrator accounts...");
     const admins = [
@@ -134,12 +172,14 @@ async function runMigration() {
                 role: "admin",
                 loginMethod: "email",
                 userStatus: "active",
+                emailVerifiedAt: new Date(),
             });
         } else {
             console.log(`Ensuring admin role and updating password: ${admin.email}`);
             await db.update(users).set({
                 role: "admin",
                 passwordHash,
+                emailVerifiedAt: new Date(),
                 updatedAt: new Date()
             }).where(eq(users.email, admin.email));
         }

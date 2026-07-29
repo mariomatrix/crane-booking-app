@@ -72,3 +72,15 @@ export async function sendReservationRejectionSms(opts: {
         : `MARINA: Reservation for ${opts.craneName} was rejected.${opts.reason ? " Reason: " + opts.reason : ""}`;
     return sendSms(opts.phone, msg);
 }
+
+export async function sendLandSpotAvailableSms(opts: {
+    phone: string;
+    zoneName: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const msg = lang === "hr"
+        ? `MARINA: Slobodno mjesto na kopnu u zoni ${opts.zoneName} je dostupno za Vase plovilo. Prijavite se u aplikaciju za detalje.`
+        : `MARINA: A dry berth slot in zone ${opts.zoneName} is available for your vessel. Log in to the application for details.`;
+    return sendSms(opts.phone, msg);
+}

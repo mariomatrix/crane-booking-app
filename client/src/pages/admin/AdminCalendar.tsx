@@ -8,6 +8,8 @@ import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { PDFDownloadLink } from "@react-pdf/renderer";
+import { CalendarSchedulePdf } from "@/components/ReportPdfTemplates";
 import {
     Dialog,
     DialogContent,
@@ -26,6 +28,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { addDays, addMonths, addWeeks, startOfDay, endOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
@@ -102,9 +105,10 @@ export default function AdminCalendar() {
     });
     const allReservations = reservationsQuery.data?.data || [];
     const isResLoading = reservationsQuery.isLoading;
-    const waitingListQuery = trpc.waitingList.listAll.useQuery({ pageSize: 200 });
-    const waitingList = waitingListQuery.data?.data || [];
+    const landWaitingQuery = trpc.landWaiting.listAll.useQuery();
+    const landWaitingList = (landWaitingQuery.data || []).filter((w: any) => w.status === "waiting" || w.status === "offered");
     const { data: sysSettings } = trpc.settings.get.useQuery();
+    const { data: landZones = [] } = trpc.landZone.list.useQuery();
     const utils = trpc.useUtils();
 
     const workStart = sysSettings?.workdayStart ?? "08:00";
@@ -125,19 +129,22 @@ export default function AdminCalendar() {
     const [editStart, setEditStart] = useState("");
     const [editEnd, setEditEnd] = useState("");
     const [editCraneId, setEditCraneId] = useState("");
+    const [editLandZoneId, setEditLandZoneId] = useState("none");
+
+    const updateLandZoneMutation = trpc.reservation.updateLandZone.useMutation();
 
     // Edit Waiting List Form State
     const [isWaitingEditOpen, setIsWaitingEditOpen] = useState(false);
     const [editingWaiting, setEditingWaiting] = useState<any>(null);
-    const [waitEditDate, setWaitEditDate] = useState<string>("");
-    const [waitEditCraneId, setWaitEditCraneId] = useState("");
-    const [waitEditSlots, setWaitEditSlots] = useState(1);
+    const [waitEditPreferredZoneId, setWaitEditPreferredZoneId] = useState("none");
+    const [waitEditNote, setWaitEditNote] = useState("");
 
     // Mutations
     const rescheduleMutation = trpc.reservation.reschedule.useMutation({
         onSuccess: () => {
             toast.success("Termin je premješten.");
             utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
         },
         onError: (err: any) => {
             toast.error(err.message);
@@ -149,6 +156,7 @@ export default function AdminCalendar() {
         onSuccess: () => {
             toast.success("Održavanje je zabilježeno.");
             utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
             setIsMaintOpen(false);
             setMaintDesc("");
             setMaintDateObj(new Date());
@@ -161,52 +169,61 @@ export default function AdminCalendar() {
         onSuccess: () => {
             toast.success("Rezervacija je odobrena.");
             utils.reservation.listAll.invalidate();
-            utils.waitingList.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
+            utils.calendar.events.invalidate();
         },
         onError: (err: any) => toast.error(err.message),
     });
 
-    const updateWaitingMutation = trpc.waitingList.update.useMutation({
+    const updateLandWaitingMutation = trpc.landWaiting.update.useMutation({
         onSuccess: () => {
-            toast.success("Zahtjev je ažuriran.");
-            utils.waitingList.listAll.invalidate();
+            toast.success("Zahtjev na listi čekanja za suhi vez je ažuriran.");
+            utils.landWaiting.listAll.invalidate();
             setIsWaitingEditOpen(false);
         },
         onError: (err: any) => toast.error(err.message),
     });
 
-    const toReservationMutation = trpc.waitingList.toReservation.useMutation({
+    const directAssignMutation = trpc.landWaiting.directAssign.useMutation({
         onSuccess: () => {
-            toast.success("Zahtjev je pretvoren u rezervaciju.");
+            toast.success("Rezervacija je uspješno zakazana s liste čekanja.");
             utils.reservation.listAll.invalidate();
-            utils.waitingList.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
+            utils.calendar.events.invalidate();
         },
         onError: (err: any) => {
             toast.error(err.message);
             utils.reservation.listAll.invalidate();
+            utils.landWaiting.listAll.invalidate();
         },
+    });
+
+    const removeLandWaitingMutation = trpc.landWaiting.remove.useMutation({
+        onSuccess: () => {
+            toast.success("Zahtjev s liste čekanja za suhi vez je odbijen i uklonjen.");
+            utils.landWaiting.listAll.invalidate();
+            utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
+            setIsWaitingEditOpen(false);
+        },
+        onError: (err: any) => toast.error(err.message),
     });
 
     const handleEditWaiting = (w: any) => {
         setEditingWaiting(w);
-        setWaitEditDate(w.requestedDate);
-        setWaitEditCraneId(String(w.craneId));
-        setWaitEditSlots(w.slotCount);
+        setWaitEditPreferredZoneId(w.preferredZoneId || "none");
+        setWaitEditNote(w.note || "");
         setIsWaitingEditOpen(true);
     };
 
     const handleUpdateWaiting = (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingWaiting) return;
-        updateWaitingMutation.mutate({
+        updateLandWaitingMutation.mutate({
             id: editingWaiting.id,
-            requestedDate: waitEditDate,
-            craneId: waitEditCraneId,
+            preferredZoneId: waitEditPreferredZoneId === "none" ? null : waitEditPreferredZoneId,
+            note: waitEditNote,
         });
-    };
-
-    const handleApproveWaiting = (w: any) => {
-        toast.info("Povucite zahtjev na kalendar za brzu rezervaciju.");
     };
 
     // Initialize Draggable
@@ -218,7 +235,7 @@ export default function AdminCalendar() {
                 const data = JSON.parse(eventEl.getAttribute("data-event") || "{}");
                 return {
                     title: data.title,
-                    duration: { hours: data.slotCount },
+                    duration: { minutes: 30 },
                     extendedProps: {
                         isFromWaitingList: true,
                         waitingId: data.id,
@@ -227,7 +244,7 @@ export default function AdminCalendar() {
             }
         });
         return () => draggable.destroy();
-    }, [waitingList]);
+    }, [landWaitingList]);
 
     const rejectMutation = trpc.reservation.reject.useMutation({
         onSuccess: () => {
@@ -260,6 +277,7 @@ export default function AdminCalendar() {
             setEditStart(format(new Date(String(res.scheduledStart)), "HH:mm"));
             setEditEnd(format(new Date(String(res.scheduledEnd)), "HH:mm"));
             setEditCraneId(String(res.craneId));
+            setEditLandZoneId(res.landZoneId || "none");
             setIsEditOpen(true);
         }
     };
@@ -280,7 +298,22 @@ export default function AdminCalendar() {
             scheduledEnd: endDate,
             craneId: editCraneId
         }, {
-            onSuccess: () => setIsEditOpen(false)
+            onSuccess: () => {
+                const finalZoneId = editLandZoneId === "none" ? null : editLandZoneId;
+                if (finalZoneId !== (editingRes.landZoneId || null)) {
+                    updateLandZoneMutation.mutate({
+                        id: editingRes.id,
+                        landZoneId: finalZoneId,
+                    }, {
+                        onSuccess: () => {
+                            utils.reservation.listAll.invalidate();
+                            setIsEditOpen(false);
+                        }
+                    });
+                } else {
+                    setIsEditOpen(false);
+                }
+            }
         });
     };
 
@@ -322,7 +355,7 @@ export default function AdminCalendar() {
                 id: String(r.id),
                 title: r.isMaintenance
                     ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselRegistration || "Plovilo"} - ${r.vesselWeightKg} t`,
+                    : `${r.vesselRegistration || "Plovilo"}${r.landZone ? ` (${r.landZone.code})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
                 start,
                 end,
                 backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
@@ -336,6 +369,11 @@ export default function AdminCalendar() {
                     craneId: r.craneId,
                     originalStart: r.scheduledStart,
                     cancelReason: r.cancelReason,
+                    vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
+                    landZoneCode: r.landZone?.code || r.landZone?.name || "",
+                    operationCategory: r.serviceType?.operationCategory || "",
+                    serviceTypeName: r.serviceType?.name || "",
+                    adminNote: r.adminNote || "",
                 },
             };
         }).filter(Boolean);
@@ -371,29 +409,56 @@ export default function AdminCalendar() {
         return [...resEvents, ...holidayEvents];
     }, [allReservations, activeCranes, viewDate, lang, viewMode, holidays]);
 
+    const pdfCranes = useMemo(() => {
+        if (selectedCrane === "all") return cranesList;
+        return cranesList.filter((c: any) => String(c.id) === String(selectedCrane));
+    }, [cranesList, selectedCrane]);
+
+    const pdfReservations = useMemo(() => {
+        let res = allReservations;
+        if (selectedCrane !== "all") {
+            res = res.filter((r: any) => String(r.craneId) === String(selectedCrane));
+        }
+        return res;
+    }, [allReservations, selectedCrane]);
+
     const handleEventDrop = (info: EventDropArg) => {
+        if (info.event.extendedProps.isMaintenance) {
+            info.revert();
+            return;
+        }
+
+        const id = String(info.event.extendedProps.reservationId || info.event.id);
+
         if (viewMode !== 'master') {
-            // Standard move (only if not maintenance)
-            if (info.event.extendedProps.isMaintenance) {
-                info.revert();
-                return;
+            const origStart = info.oldEvent.start!;
+            const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
+            const durationMs = origEnd.getTime() - origStart.getTime();
+
+            let newStart = info.event.start!;
+            if (viewMode === 'dayGridMonth') {
+                newStart = new Date(info.event.start!);
+                newStart.setHours(origStart.getHours(), origStart.getMinutes(), 0, 0);
             }
+            const newEnd = new Date(newStart.getTime() + durationMs);
+
             rescheduleMutation.mutate({
-                id: info.event.id,
-                scheduledStart: info.event.start!,
-                scheduledEnd: info.event.end!,
+                id,
+                scheduledStart: newStart,
+                scheduledEnd: newEnd,
                 craneId: info.event.extendedProps.craneId
+            }, {
+                onError: (err: any) => {
+                    info.revert();
+                    toast.error(err.message);
+                }
             });
             return;
         }
 
-        const id = String(info.event.extendedProps.reservationId);
-
-        // Calculate new date and time
         const newOffsetDate = info.event.start!;
         const diffDays = Math.round((newOffsetDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
 
-        // Ensure within range of cranes
         if (diffDays < 0 || diffDays >= activeCranes.length) {
             info.revert();
             return;
@@ -401,16 +466,61 @@ export default function AdminCalendar() {
 
         const newTargetCrane = activeCranes[diffDays];
         const newStart = new Date(viewDate);
-        newStart.setHours(newOffsetDate.getHours(), newOffsetDate.getMinutes(), 0);
+        newStart.setHours(newOffsetDate.getHours(), newOffsetDate.getMinutes(), 0, 0);
 
-        const duration = info.event.end ? (info.event.end.getTime() - info.event.start!.getTime()) : 3600000;
-        const newEnd = new Date(newStart.getTime() + duration);
+        const origStart = info.oldEvent.start!;
+        const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
+        const durationMs = origEnd.getTime() - origStart.getTime();
+        const newEnd = new Date(newStart.getTime() + durationMs);
 
         rescheduleMutation.mutate({
             id,
             scheduledStart: newStart,
             scheduledEnd: newEnd,
             craneId: newTargetCrane.id
+        }, {
+            onError: (err: any) => {
+                info.revert();
+                toast.error(err.message);
+            }
+        });
+    };
+
+    const handleEventResize = (info: any) => {
+        if (info.event.extendedProps.isMaintenance) {
+            info.revert();
+            return;
+        }
+        const id = String(info.event.extendedProps.reservationId || info.event.id);
+        let newStart = info.event.start!;
+        let newEnd = info.event.end!;
+        let craneId = info.event.extendedProps.craneId;
+
+        if (viewMode === 'master') {
+            const diffDays = Math.round((newStart.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+            if (diffDays < 0 || diffDays >= activeCranes.length) {
+                info.revert();
+                return;
+            }
+            craneId = activeCranes[diffDays].id;
+            const realStart = new Date(viewDate);
+            realStart.setHours(newStart.getHours(), newStart.getMinutes(), 0, 0);
+
+            const durationMs = newEnd.getTime() - newStart.getTime();
+            newStart = realStart;
+            newEnd = new Date(realStart.getTime() + durationMs);
+        }
+
+        rescheduleMutation.mutate({
+            id,
+            scheduledStart: newStart,
+            scheduledEnd: newEnd,
+            craneId
+        }, {
+            onError: (err: any) => {
+                info.revert();
+                toast.error(err.message);
+            }
         });
     };
 
@@ -646,6 +756,18 @@ export default function AdminCalendar() {
                                                 </SelectContent>
                                             </Select>
                                         </div>
+                                        <div className="grid gap-2">
+                                            <Label>Kopnena zona (Mjesto na kopnu)</Label>
+                                            <Select value={editLandZoneId} onValueChange={setEditLandZoneId}>
+                                                <SelectTrigger><SelectValue placeholder="Odaberi zonu (opcionalno)" /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="none">Nije odabrano</SelectItem>
+                                                    {landZones.map((lz: any) => (
+                                                        <SelectItem key={lz.id} value={String(lz.id)}>{lz.name} ({lz.code})</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
                                     </div>
                                     <DialogFooter className="px-6 pb-6">
                                         <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
@@ -659,49 +781,67 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <Dialog open={isWaitingEditOpen} onOpenChange={setIsWaitingEditOpen}>
-                        <DialogContent className="max-w-md">
-                            <form onSubmit={handleUpdateWaiting}>
-                                <DialogHeader>
-                                    <DialogTitle>Uredi listu čekanja</DialogTitle>
-                                    <DialogDescription>
-                                        ID #{editingWaiting?.id} - {editingWaiting?.user?.name}
-                                    </DialogDescription>
-                                </DialogHeader>
-                                <div className="grid gap-5 py-6">
-                                    <div className="grid gap-2">
-                                        <Label>Željeni datum</Label>
-                                        <Input type="date" value={waitEditDate} onChange={(e) => setWaitEditDate(e.target.value)} required />
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Dizalica</Label>
-                                        <Select value={waitEditCraneId} onValueChange={setWaitEditCraneId} required>
-                                            <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
-                                            <SelectContent>
-                                                {cranesList.map((c: any) => (
-                                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="grid gap-2">
-                                        <Label>Broj slotova (60 min)</Label>
-                                        <Input type="number" min={1} max={8} value={waitEditSlots} onChange={(e) => setWaitEditSlots(Number(e.target.value))} required />
-                                    </div>
-                                </div>
-                                <DialogFooter>
-                                    <Button variant="outline" type="button" onClick={() => setIsWaitingEditOpen(false)}>Odustani</Button>
-                                    <Button type="submit" disabled={updateWaitingMutation.isPending}>
-                                        {updateWaitingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                        Spremi promjene
-                                    </Button>
-                                </DialogFooter>
-                            </form>
+                        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                            <DialogHeader>
+                                <DialogTitle>Definiranje suhog veza i termina dizalice za zahtjev</DialogTitle>
+                                <DialogDescription>
+                                    Korisnik: {editingWaiting?.user?.name || "Nepoznat"} — Plovilo: {editingWaiting?.vessel?.registration || editingWaiting?.vessel?.name || "Plovilo"}
+                                </DialogDescription>
+                            </DialogHeader>
+                            {editingWaiting && (
+                                <AdminReservationForm
+                                    initialData={{
+                                        landWaitingId: editingWaiting.id,
+                                        userId: editingWaiting.userId,
+                                        vesselId: editingWaiting.vesselId,
+                                        landZoneId: editingWaiting.preferredZoneId || "none",
+                                        requestedDate: viewDate || new Date(),
+                                        scheduledTime: "08:00",
+                                        durationMin: "30",
+                                        adminNote: editingWaiting.note || "",
+                                    }}
+                                    onSuccess={() => {
+                                        setIsWaitingEditOpen(false);
+                                        utils.landWaiting.listAll.invalidate();
+                                        utils.reservation.listAll.invalidate();
+                                        utils.calendar.events.invalidate();
+                                    }}
+                                    onCancel={() => setIsWaitingEditOpen(false)}
+                                    onRejectWaitlist={() => {
+                                        removeLandWaitingMutation.mutate({ id: editingWaiting.id });
+                                    }}
+                                    isRejectPending={removeLandWaitingMutation.isPending}
+                                    submitButtonText="Spremi i potvrdi rezervaciju"
+                                />
+                            )}
                         </DialogContent>
                     </Dialog>
-                    <Button variant="secondary" onClick={() => window.print()} className="gap-2">
-                        <Printer className="h-4 w-4" />
-                        <span className="hidden sm:inline">Ispiši plan</span>
-                    </Button>
+                    <PDFDownloadLink
+                        key={`${viewDate.toISOString()}-${selectedCrane}-${pdfReservations.length}-${pdfReservations.map(r => r.id + '-' + r.status).join(',')}`}
+                        document={
+                            <CalendarSchedulePdf
+                                date={viewDate}
+                                cranes={pdfCranes}
+                                reservations={pdfReservations}
+                                workStart={workStart}
+                                workEnd={workEnd}
+                                marinaName={sysSettings?.marinaName || "PŠD Špinut"}
+                                marinaLogo={sysSettings?.marinaLogo || undefined}
+                            />
+                        }
+                        fileName={`Plan_rada_dizalica_${format(viewDate, "yyyy-MM-dd")}.pdf`}
+                    >
+                        {({ loading }: { loading: boolean }) => (
+                            <Button variant="secondary" disabled={loading} className="gap-2">
+                                {loading ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Printer className="h-4 w-4" />
+                                )}
+                                <span className="hidden sm:inline">Ispiši plan</span>
+                            </Button>
+                        )}
+                    </PDFDownloadLink>
                 </div>
             </div>
 
@@ -718,9 +858,9 @@ export default function AdminCalendar() {
                                     variant={statusFilters.includes(s) ? "secondary" : "ghost"}
                                     size="sm"
                                     onClick={() => toggleStatus(s)}
-                                    className="px-2 py-0 h-7 text-[10px] uppercase font-bold"
+                                    className="h-7 text-xs px-2.5 rounded-sm"
                                 >
-                                    <span
+                                    <div
                                         className="h-2 w-2 rounded-full mr-1.5"
                                         style={{ backgroundColor: STATUS_COLORS[s] }}
                                     />
@@ -771,26 +911,32 @@ export default function AdminCalendar() {
                         }}>
                             <ChevronRight className="h-4 w-4" />
                         </Button>
+                        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs font-semibold ml-1 border-l rounded-none" onClick={() => {
+                            const today = startOfDay(new Date());
+                            setViewDate(today);
+                            calendarRef.current?.getApi().gotoDate(today);
+                        }}>
+                            Danas
+                        </Button>
                     </div>
                 </CardContent>
             </Card>
 
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1">
-                {/* Calendar View */}
-                <div className="lg:col-span-3 h-[700px] bg-background border rounded-lg overflow-hidden shadow-sm relative">
+            {/* Calendar Container */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-3 bg-background border rounded-xl p-4 shadow-sm h-[700px] relative">
                     {isResLoading && (
-                        <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-50 flex items-center justify-center">
-                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] z-10 flex items-center justify-center rounded-xl">
+                            <Loader2 className="h-6 w-6 animate-spin text-primary" />
                         </div>
                     )}
-                    <style dangerouslySetInnerHTML={{
-                        __html: `
-                        .fc .fc-timegrid-axis-cushion { font-size: 0.75rem; color: #666; }
-                        .fc .fc-col-header-cell-cushion { 
-                            padding: 10px; font-weight: 700; color: #333; 
-                            text-transform: uppercase; font-size: 0.85rem;
-                        }
-                        .fc-theme-standard td, .fc-theme-standard th { border: 1px solid #e5e7eb !important; }
+                    <style dangerouslySetInnerHTML={{ __html: `
+                        .fc-theme-standard td, .fc-theme-standard th { border-color: var(--border) !important; }
+                        .fc-timegrid-slot { height: 40px !important; }
+                        .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 11px; color: var(--muted-foreground); }
+                        .fc-col-header-cell { background-color: var(--muted); padding: 8px 0; font-size: 12px; font-weight: 600; }
+                        .fc-event { cursor: pointer; transition: transform 0.1s ease; }
+                        .fc-event:hover { transform: scale(1.01); z-index: 5; }
                         .fc-timegrid-event { border-radius: 4px; border: none !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
                         .fc-v-event .fc-event-main { padding: 4px; }
                     `}} />
@@ -817,7 +963,7 @@ export default function AdminCalendar() {
                                 // Calculate crane and time
                                 const dropDate = info.event.start!;
 
-                                let targetCrane = activeCranes[0];
+                                let targetCrane = activeCranes[0] || cranesList[0];
                                 let startDate = dropDate;
 
                                 if (viewMode === 'master') {
@@ -828,38 +974,52 @@ export default function AdminCalendar() {
                                     }
                                     targetCrane = activeCranes[diffDays];
                                     startDate = new Date(viewDate);
-                                    startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0);
+                                    startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0, 0);
+                                } else if (selectedCrane !== "all") {
+                                    const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
+                                    if (found) targetCrane = found;
                                 }
 
-                                const durationHours = info.event.end ? (info.event.end.getTime() - dropDate.getTime()) / 3600000 : 1;
-                                const endDate = new Date(startDate.getTime() + durationHours * 3600000);
+                                info.revert(); // Remove the temp DOM element
 
-                                info.revert(); // Remove the temp event
-
-                                toReservationMutation.mutate({
+                                directAssignMutation.mutate({
                                     id: String(p.waitingId),
                                     scheduledStart: startDate,
-                                    scheduledEnd: endDate,
+                                    durationMin: 30,
                                     craneId: targetCrane.id
                                 });
                             }
                         }}
                         eventDrop={handleEventDrop}
+                        eventResize={handleEventResize}
                         eventClick={handleEventClick}
                         datesSet={handleDatesSet}
                         events={calendarEvents as any}
                         dayHeaderContent={(arg: any) => {
-                            if (viewMode !== 'master') return undefined;
-                            const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
-                            const crane = activeCranes[diff];
-                            return crane ? (
-                                <div className="flex flex-col items-center">
-                                    <span className="text-xs font-bold">{crane.name}</span>
-                                    <span className="text-[10px] opacity-60 font-normal normal-case">
-                                        {format(arg.date, "eee dd.MM.", { locale: lang === 'hr' ? hr : enUS })}
-                                    </span>
-                                </div>
-                            ) : "";
+                            if (viewMode === 'master') {
+                                const diff = Math.round((arg.date.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+                                const crane = activeCranes[diff];
+                                return crane ? (
+                                    <div className="flex flex-col items-center py-1">
+                                        <span className="text-xs font-bold">{crane.name}</span>
+                                        <span className="text-[10px] opacity-60 font-normal normal-case">
+                                            {format(viewDate, "eee dd.MM.", { locale: lang === 'hr' ? hr : enUS })}
+                                        </span>
+                                    </div>
+                                ) : "";
+                            }
+
+                            // Weekly view - show day name and date
+                            if (viewMode === 'timeGridWeek') {
+                                return (
+                                    <div className="flex flex-col items-center py-1">
+                                        <span className="text-xs font-bold uppercase">{format(arg.date, "eee", { locale: lang === 'hr' ? hr : enUS })}</span>
+                                        <span className="text-[10px] opacity-60 font-normal">{format(arg.date, "dd.MM.", { locale: lang === 'hr' ? hr : enUS })}</span>
+                                    </div>
+                                );
+                            }
+
+                            return undefined;
                         }}
                         eventContent={(arg: any) => {
                             const p = arg.event.extendedProps;
@@ -867,24 +1027,48 @@ export default function AdminCalendar() {
                                 return <div className="text-[10px] font-bold p-1 text-red-700/50">{arg.event.title}</div>
                             }
                             const statusColor = STATUS_COLORS[p.status] ?? '#6b7280';
+
+                            // Format registration and dry berth zone direction
+                            const reg = p.vesselRegistration || "";
+                            let zoneDirection = "";
+                            if (p.landZoneCode) {
+                                if (p.operationCategory === "lift_from_sea") {
+                                    zoneDirection = `➡️ ${p.landZoneCode}`;
+                                } else if (p.operationCategory === "lower_to_sea") {
+                                    zoneDirection = `⬅️ ${p.landZoneCode}`;
+                                } else {
+                                    zoneDirection = `${p.landZoneCode}`;
+                                }
+                            }
+                            const details = [reg, zoneDirection].filter(Boolean).join(" • ");
+
                             return (
                                 <div
-                                    className="flex flex-col h-full overflow-hidden p-1 rounded-sm text-white"
+                                    className="flex flex-col h-full overflow-hidden p-1 rounded-sm text-white leading-tight"
                                     style={{ backgroundColor: statusColor }}
                                 >
-                                    <div className="flex items-center justify-between mb-0.5">
-                                        <span className="text-[10px] font-black uppercase opacity-95 truncate">{arg.event.title}</span>
-                                        {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse" />}
+                                    <div className="flex items-center justify-between font-bold text-[10px] truncate">
+                                        <span className="truncate">{p.user}</span>
+                                        {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse shrink-0 ml-0.5" />}
                                     </div>
-                                    <div className="text-[10px] font-bold opacity-85 leading-tight truncate">{p.user}</div>
-                                    <div className="mt-0.5">
-                                        <span className="inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/25 text-white leading-none">
-                                            {STATUS_LABELS[p.status] || p.status}
-                                        </span>
-                                    </div>
+                                    {p.serviceTypeName && (
+                                        <div className="text-[9px] font-semibold opacity-95 truncate">
+                                            {p.serviceTypeName}
+                                        </div>
+                                    )}
+                                    {details && (
+                                        <div className="text-[9px] font-medium opacity-90 truncate">
+                                            {details}
+                                        </div>
+                                    )}
+                                    {p.adminNote && (
+                                        <div className="text-[9px] italic opacity-85 truncate">
+                                            📝 {p.adminNote}
+                                        </div>
+                                    )}
                                     {p.status === 'cancelled' && p.cancelReason && (
-                                        <div className="text-[9px] italic opacity-90 leading-tight mt-1 border-t border-white/20 pt-1">
-                                            Razlog: {p.cancelReason}
+                                        <div className="text-[9px] italic opacity-90 truncate mt-0.5 border-t border-white/20 pt-0.5">
+                                            {p.cancelReason}
                                         </div>
                                     )}
                                     {!p.isMaintenance && p.status === 'pending' && (
@@ -899,13 +1083,14 @@ export default function AdminCalendar() {
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); rejectMutation.mutate({ id: p.reservationId, adminNote: "Preko kalendara" }); }}
                                                 className="hover:bg-red-600/50 rounded p-0.5"
+                                                title="Odbij"
                                             >
                                                 <XCircle className="h-3 w-3" />
                                             </button>
                                         </div>
                                     )}
                                 </div>
-                            )
+                            );
                         }}
                         dayMaxEvents={true}
                         locale={lang === "hr" ? "hr" : "en"}
@@ -919,37 +1104,43 @@ export default function AdminCalendar() {
                             <div className="flex items-center justify-between">
                                 <CardTitle className="text-sm font-bold flex items-center gap-2">
                                     <ListTodo className="h-4 w-4 text-blue-500" />
-                                    Lista čekanja
+                                    Lista čekanja za suhi vez
                                 </CardTitle>
-                                <Badge variant="outline" className="bg-background">{waitingList.length}</Badge>
+                                <Badge variant="outline" className="bg-background">{landWaitingList.length}</Badge>
                             </div>
                         </CardHeader>
                         <CardContent className="p-0 flex-1 overflow-hidden">
                             <ScrollArea className="h-full">
                                 <div className="p-4 space-y-3" ref={draggableRef}>
-                                    {waitingList.length === 0 ? (
+                                    {landWaitingList.length === 0 ? (
                                         <div className="text-center py-8 text-sm text-muted-foreground italic">
-                                            Nema aktivnih zahtjeva u listi čekanja.
+                                            Nema aktivnih zahtjeva na listi čekanja za suhi vez.
                                         </div>
                                     ) : (
-                                        waitingList.map((w: any) => (
+                                        landWaitingList.map((w: any) => (
                                             <div
                                                 key={w.id}
                                                 className="waiting-list-item p-3 border rounded-lg bg-background hover:border-primary/50 transition-colors shadow-sm group cursor-grab active:cursor-grabbing"
                                                 data-event={JSON.stringify({
                                                     id: w.id,
-                                                    title: `${w.user?.name || "Korisnik"} (${w.crane?.name})`,
-                                                    slotCount: w.slotCount
+                                                    title: `${w.user?.name || "Korisnik"} (${w.vessel?.registration || w.vessel?.name || "Plovilo"})`,
                                                 })}
                                             >
                                                 <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase">{w.crane?.name}</span>
-                                                    <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{formatAppDate(parseISO(w.requestedDate), lang as any)}</span>
+                                                    <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                                                        {w.preferredZone?.name ? `Zona: ${w.preferredZone.name}` : "Bilo koja zona"}
+                                                    </span>
+                                                    <span className="text-[10px] font-medium bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                                                        #{w.position || 1}
+                                                    </span>
                                                 </div>
                                                 <div className="font-semibold text-sm mb-1">{w.user?.name || "Korisnik"}</div>
-                                                <div className="text-xs text-muted-foreground flex items-center gap-1 mb-3">
-                                                    <Clock className="h-3 w-3" />
-                                                    {w.slotCount}x 60 min slots
+                                                <div className="text-xs text-muted-foreground flex items-center justify-between mb-3">
+                                                    <span>{w.vessel?.registration || w.vessel?.name || "—"}</span>
+                                                    <span className="flex items-center gap-1">
+                                                        <Clock className="h-3 w-3" />
+                                                        30 min
+                                                    </span>
                                                 </div>
                                                 <div className="flex gap-2">
                                                     <Button

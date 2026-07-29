@@ -12,6 +12,13 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { Loader2, Pencil, Plus, Trash2, Settings2 } from "lucide-react";
 import { useState } from "react";
@@ -23,6 +30,7 @@ interface ServiceTypeForm {
     defaultDurationMin: number;
     isActive: boolean;
     sortOrder: number;
+    operationCategory: "lift_from_sea" | "lower_to_sea" | "move" | "maintenance" | "other";
 }
 
 const emptyForm: ServiceTypeForm = {
@@ -31,6 +39,15 @@ const emptyForm: ServiceTypeForm = {
     defaultDurationMin: 60,
     isActive: true,
     sortOrder: 0,
+    operationCategory: "other",
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+    lift_from_sea: "Dizanje iz mora",
+    lower_to_sea: "Spuštanje u more",
+    move: "Premještanje",
+    maintenance: "Održavanje",
+    other: "Ostalo",
 };
 
 export default function AdminServiceTypes() {
@@ -98,6 +115,7 @@ export default function AdminServiceTypes() {
             defaultDurationMin: st.defaultDurationMin,
             isActive: st.isActive,
             sortOrder: st.sortOrder,
+            operationCategory: st.operationCategory || "other",
         });
         setDialogOpen(true);
     };
@@ -168,8 +186,11 @@ export default function AdminServiceTypes() {
                                 <Card key={st.id} className={!st.isActive ? "opacity-60" : ""}>
                                     <CardContent className="p-4 flex items-center justify-between gap-4">
                                         <div className="flex-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-medium">{st.name}</span>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-medium text-sm sm:text-base">{st.name}</span>
+                                                <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded font-medium">
+                                                    {CATEGORY_LABELS[st.operationCategory] || "Ostalo"}
+                                                </span>
                                                 {!st.isActive && (
                                                     <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded">
                                                         Neaktivan
@@ -217,6 +238,24 @@ export default function AdminServiceTypes() {
                                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                                 placeholder="npr. Spuštanje, Vađenje..."
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Kategorija operacije *</Label>
+                            <Select
+                                value={form.operationCategory}
+                                onValueChange={(v) => setForm((f) => ({ ...f, operationCategory: v as any }))}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Odaberite kategoriju" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="lift_from_sea">Dizanje iz mora (vađenje na kopno)</SelectItem>
+                                    <SelectItem value="lower_to_sea">Spuštanje u more (s kopna)</SelectItem>
+                                    <SelectItem value="move">Premještanje (na kopnu)</SelectItem>
+                                    <SelectItem value="maintenance">Održavanje</SelectItem>
+                                    <SelectItem value="other">Ostalo</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div className="space-y-2">
                             <Label>Opis</Label>

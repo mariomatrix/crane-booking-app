@@ -4,6 +4,8 @@ import { getJwtSecret, getRefreshSecret } from "./_core/context";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, operatorProcedure, router } from "./_core/trpc";
 import { z } from "zod";
+import { isValidOib } from "../shared/oib";
+import { reportsRouter } from "./reports.router";
 import {
   listCranes,
   getCraneById,
@@ -66,6 +68,24 @@ import {
   createApiKey,
   listApiKeys,
   revokeApiKey,
+  listLandZones,
+  getLandZoneCapacity,
+  getUpcomingReservedVesselsForZone,
+  createLandZone,
+  updateLandZone,
+  deleteLandZone,
+  listActiveOccupancies,
+  listOccupancyHistory,
+  createLandOccupancy,
+  completeLandOccupancy,
+  getActiveOccupancyByVessel,
+  listLandWaitingList,
+  addLandWaitingListEntry,
+  updateLandWaitingListStatus,
+  reorderWaitingList,
+  logCraneOperation,
+  listCraneOps,
+  getCraneStats,
 } from "./db";
 import { TRPCError } from "@trpc/server";
 import {
@@ -92,8 +112,12 @@ import {
   maintenanceBlocks,
   holidays,
   seasons,
+  landWaitingList,
+  landOccupancies,
+  landZones,
+  vessels,
 } from "../drizzle/schema";
-import { and, eq, gte, isNull, or, lte, desc, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, or, lte, desc, asc, sql, ne } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
@@ -135,10 +159,37 @@ async function validateSlotAgainstSettings(
   endDate: Date,
   sysSettings: Record<string, string>
 ) {
-  const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-  const slotMin = Number(sysSettings.slotDurationMinutes ?? "60");
-  const { h: wsH, m: wsM } = parseHHMM(sysSettings.workdayStart ?? "08:00");
-  const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
+  // 1. Past date check (No past dates allowed)
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  if (startDate < startOfToday) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Rezervaciju nije moguće ugovoriti ili odobriti za datum u prošlosti. Najraniji datum je današnji dan.",
+    });
+  }
+
+  // 2. Active Season & Working Hours check
+  const year = startDate.getFullYear();
+  const month = String(startDate.getMonth() + 1).padStart(2, "0");
+  const day = String(startDate.getDate()).padStart(2, "0");
+  const dateStr = `${year}-${month}-${day}`;
+
+  const activeSeason = await getActiveSeason(dateStr);
+
+  let workStartStr = sysSettings.workdayStart ?? "08:00";
+  let workEndStr = sysSettings.workdayEnd ?? "18:00";
+
+  if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
+    const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    const dayKey = dayKeys[startDate.getDay()];
+    const dayHours = (activeSeason.workingHours as any)[dayKey];
+    if (dayHours?.from) workStartStr = dayHours.from;
+    if (dayHours?.to) workEndStr = dayHours.to;
+  }
+
+  const { h: wsH, m: wsM } = parseHHMM(workStartStr);
+  const { h: weH, m: weM } = parseHHMM(workEndStr);
 
   const startH = startDate.getHours() * 60 + startDate.getMinutes();
   const endH = endDate.getHours() * 60 + endDate.getMinutes();
@@ -146,30 +197,31 @@ async function validateSlotAgainstSettings(
   const workEnd = weH * 60 + weM;
 
   if (startH < workStart || endH > workEnd) {
+    const startFormatted = `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`;
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: `Termini su dostupni između ${sysSettings.workdayStart} i ${sysSettings.workdayEnd}.`,
+      message: `Odabrani termin (${startFormatted}) je izvan radnog vremena za taj dan (${workStartStr} - ${workEndStr}).`,
     });
   }
 
-  // Phase 2: Strictly hourly slots (XX:00)
-  if (startDate.getMinutes() !== 0 || startDate.getSeconds() !== 0) {
+  // Strictly 30-minute interval slots (XX:00 or XX:30)
+  if (startDate.getMinutes() % 30 !== 0 || startDate.getSeconds() !== 0) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Termini moraju početi točno na puni sat (npr. 08:00).",
+      message: "Termini moraju početi na svakih 30 minuta (npr. 08:00 ili 08:30).",
     });
   }
 
-  // Duration must be a multiple of 60
+  // Duration must be a multiple of 30 minutes (minimum 30 min)
   const durationMin = (endDate.getTime() - startDate.getTime()) / 60000;
-  if (durationMin <= 0 || durationMin % 60 !== 0) {
+  if (durationMin < 30 || durationMin % 30 !== 0) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "Trajanje mora biti višekratnik od 60 minuta (1, 2 ili 3 sata).",
+      message: "Trajanje mora biti najmanje 30 minuta i višekratnik od 30 minuta (30, 60, 90 min...).",
     });
   }
 
-  return { bufferMin: 0 }; // No separate buffer in Phase 2
+  return { bufferMin: 0 };
 }
 
 // ─── Main Router ──────────────────────────────────────────────────────
@@ -188,11 +240,20 @@ export const appRouter = router({
         lastName: z.string().min(1).max(100),
         username: z.string().optional(),
         phone: z.string().min(1),
+        oib: z.string().length(11).refine(isValidOib, { message: "OIB nije ispravan." }),
       }))
       .mutation(async ({ input, ctx }) => {
         const existing = await getUserByEmail(input.email);
         if (existing) {
           throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        }
+        // Check OIB uniqueness
+        const db = await getDb();
+        if (db) {
+          const oibExists = await db.select({ id: users.id }).from(users).where(eq(users.oib, input.oib)).limit(1);
+          if (oibExists.length > 0) {
+            throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+          }
         }
         const passwordHash = await bcrypt.hash(input.password, 12);
         const userId = await createLocalUser({
@@ -202,6 +263,7 @@ export const appRouter = router({
           lastName: input.lastName,
           username: input.username,
           phone: input.phone,
+          oib: input.oib,
         });
         if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
@@ -361,6 +423,12 @@ export const appRouter = router({
       return listVesselsByUser(ctx.user.id);
     }),
 
+    listByUser: operatorProcedure
+      .input(z.object({ userId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return listVesselsByUser(input.userId);
+      }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.string().uuid() }))
       .query(async ({ input, ctx }) => {
@@ -380,11 +448,16 @@ export const appRouter = router({
         draftM: z.number().positive().optional(),
         weightTons: z.number().positive().optional(),
         registration: z.string().optional(),
+        ownerId: z.string().uuid().optional(),
       }))
       .mutation(async ({ input, ctx }: any) => {
+        const targetOwnerId = (input.ownerId && (ctx.user.role === "admin" || ctx.user.role === "operator"))
+          ? input.ownerId
+          : ctx.user.id;
+
         const id = await createVessel({
           ...input,
-          ownerId: ctx.user.id,
+          ownerId: targetOwnerId,
         } as any);
         await createAuditEntry({ actorId: ctx.user.id, action: "vessel_created", entityType: "vessel", entityId: id });
         return { id };
@@ -403,7 +476,17 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }: any) => {
         const { id, ...data } = input;
-        await updateVessel(id, ctx.user.id, data as any);
+        const vessel = await getVesselById(id);
+        if (!vessel) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Plovilo nije pronađeno." });
+        }
+
+        const isAuthorized = ctx.user.role === "admin" || ctx.user.role === "operator" || vessel.ownerId === ctx.user.id;
+        if (!isAuthorized) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Nemate ovlasti za izmjenu ovog plovila." });
+        }
+
+        await updateVessel(id, vessel.ownerId, data as any);
         await createAuditEntry({ actorId: ctx.user.id, action: "vessel_updated", entityType: "vessel", entityId: id });
         return { success: true };
       }),
@@ -411,7 +494,17 @@ export const appRouter = router({
     delete: protectedProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
-        await deleteVessel(input.id, ctx.user.id);
+        const vessel = await getVesselById(input.id);
+        if (!vessel) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Plovilo nije pronađeno." });
+        }
+
+        const isAuthorized = ctx.user.role === "admin" || ctx.user.role === "operator" || vessel.ownerId === ctx.user.id;
+        if (!isAuthorized) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Nemate ovlasti za brisanje ovog plovila." });
+        }
+
+        await deleteVessel(input.id, vessel.ownerId);
         await createAuditEntry({ actorId: ctx.user.id, action: "vessel_deleted", entityType: "vessel", entityId: input.id });
         return { success: true };
       }),
@@ -423,37 +516,102 @@ export const appRouter = router({
       .input(z.object({
         page: z.number().int().min(1).default(1),
         pageSize: z.number().int().min(1).max(1000).default(100),
+        search: z.string().optional(),
+        role: z.string().optional(),
+        status: z.string().optional(),
+        vesselFilter: z.string().optional(),
       }).optional().default({ page: 1, pageSize: 100 }))
       .query(async ({ input }) => {
-        const { page, pageSize } = input;
+        const { page, pageSize, search, role, status, vesselFilter } = input;
         const offset = (page - 1) * pageSize;
-        return listAllUsers(pageSize, offset);
+        return listAllUsers(pageSize, offset, search, role, status, vesselFilter);
       }),
 
     create: adminProcedure
       .input(z.object({
-        email: z.string().email(),
-        firstName: z.string().min(1),
-        lastName: z.string().min(1),
+        isLegalEntity: z.boolean().default(false),
+        firstName: z.string().optional(),
+        lastName: z.string().optional(),
+        companyName: z.string().optional(),
+        contactPerson: z.string().optional(),
+        email: z.string().optional(),
         phone: z.string().optional(),
+        oib: z.string().optional(),
+        address: z.string().optional(),
+        city: z.string().optional(),
+        postalCode: z.string().optional(),
         role: z.enum(["user", "operator", "admin"]).default("user"),
+        vessels: z.array(z.object({
+          name: z.string().min(1),
+          registration: z.string().optional(),
+          type: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]).default("jedrilica"),
+          lengthM: z.number().optional(),
+          beamM: z.number().optional(),
+          draftM: z.number().optional(),
+          weightTons: z.number().optional(),
+        })).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const existing = await getUserByEmail(input.email);
-        if (existing) {
-          throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        // Validation of mandatory name/companyName
+        if (input.isLegalEntity) {
+          if (!input.companyName || input.companyName.trim() === "") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Naziv pravne osobe / tvrtke je obavezan." });
+          }
+        } else {
+          if (!input.firstName || input.firstName.trim() === "") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Ime je obavezno." });
+          }
+        }
+
+        // Email handling: optional
+        let finalEmail = input.email ? input.email.trim() : "";
+        if (finalEmail !== "") {
+          const existing = await getUserByEmail(finalEmail);
+          if (existing) {
+            throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+          }
+        } else {
+          // Generate technical placeholder email
+          finalEmail = `korisnik_${Date.now()}_${Math.floor(Math.random()*10000)}@placeholder.local`;
+        }
+
+        // OIB handling: optional
+        if (input.oib && input.oib.trim() !== "") {
+          const cleanOib = input.oib.trim();
+          if (cleanOib.length === 11 && !isValidOib(cleanOib)) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "OIB nije ispravan." });
+          }
+          const db = await getDb();
+          if (db) {
+            const oibExists = await db.select({ id: users.id }).from(users).where(eq(users.oib, cleanOib)).limit(1);
+            if (oibExists.length > 0) {
+              throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+            }
+          }
         }
 
         // Generate random 10 char password
         const tempPassword = crypto.randomBytes(5).toString("hex");
         const passwordHash = await bcrypt.hash(tempPassword, 12);
 
+        const fullName = input.isLegalEntity && input.companyName
+          ? input.companyName.trim()
+          : `${input.firstName || ""} ${input.lastName || ""}`.trim();
+
         const userId = await createLocalUser({
-          email: input.email,
+          email: finalEmail,
           passwordHash,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          phone: input.phone,
+          firstName: input.firstName || undefined,
+          lastName: input.lastName || undefined,
+          name: fullName,
+          isLegalEntity: input.isLegalEntity,
+          companyName: input.companyName || undefined,
+          contactPerson: input.contactPerson || undefined,
+          phone: input.phone || undefined,
+          oib: input.oib || undefined,
+          address: input.address || undefined,
+          city: input.city || "Split",
+          postalCode: input.postalCode || "21000",
           mustChangePassword: true,
         });
 
@@ -464,19 +622,33 @@ export const appRouter = router({
           await updateUserRole(String(userId), input.role);
         }
 
-        // Send invitation email
-        const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
-        const loginUrl = `${baseUrl}/auth`;
+        // Insert vessels if any were added
+        if (input.vessels && input.vessels.length > 0) {
+          for (const v of input.vessels) {
+            await createVessel({
+              ownerId: String(userId),
+              name: v.name,
+              registration: v.registration || null,
+              type: v.type || "jedrilica",
+              lengthM: v.lengthM ? String(v.lengthM) : null,
+              beamM: v.beamM ? String(v.beamM) : null,
+              draftM: v.draftM ? String(v.draftM) : null,
+              weightTons: v.weightTons ? String(v.weightTons) : null,
+            });
+          }
+        }
 
-        const emailSent = await sendUserInvitation({
-          to: input.email,
-          userName: input.firstName,
-          tempPassword,
-          loginUrl,
-        });
+        // Send invitation email if real email provided
+        if (input.email && input.email.includes("@") && !input.email.endsWith("@placeholder.local")) {
+          const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+          const loginUrl = `${baseUrl}/auth`;
 
-        if (!emailSent) {
-          console.warn(`[Email] Failed to send invitation to ${input.email}`);
+          await sendUserInvitation({
+            to: input.email,
+            userName: input.firstName || fullName,
+            tempPassword,
+            loginUrl,
+          }).catch(err => console.warn(`[Email] Failed to send invitation to ${input.email}:`, err));
         }
 
         await createAuditEntry({
@@ -484,10 +656,213 @@ export const appRouter = router({
           action: "user_created_admin",
           entityType: "user",
           entityId: String(userId),
-          payload: { email: input.email, role: input.role },
+          payload: { email: finalEmail, role: input.role, isLegalEntity: input.isLegalEntity },
         });
 
-        return { success: true, tempPassword };
+        return { success: true, tempPassword, userId: String(userId) };
+      }),
+
+    importCsv: adminProcedure
+      .input(z.object({ csvContent: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        const { csvContent } = input;
+        const lines = csvContent.split(/\r?\n/);
+        if (lines.length < 2) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "CSV datoteka je prazna." });
+        }
+
+        const db = await getDb();
+        if (!db) {
+          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza podataka nije dostupna." });
+        }
+
+        const defaultPassword = "Spinut1234!";
+        const defaultPasswordHash = await bcrypt.hash(defaultPassword, 10);
+
+        let successCount = 0;
+        let skippedCount = 0;
+        let errorCount = 0;
+        let vesselCount = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          try {
+            const cols: string[] = [];
+            let current = '';
+            let inQuotes = false;
+            for (let j = 0; j < line.length; j++) {
+              const char = line[j];
+              if (char === '"') {
+                inQuotes = !inQuotes;
+              } else if (char === ',' && !inQuotes) {
+                cols.push(current);
+                current = '';
+              } else {
+                current += char;
+              }
+            }
+            cols.push(current);
+            const cleanCols = cols.map(c => c.trim().replace(/^"|"$/g, ''));
+
+            if (cleanCols.length < 2) {
+              skippedCount++;
+              continue;
+            }
+
+            const id = cleanCols[0];
+            const fullName = cleanCols[1];
+            const rawEmail = cleanCols[2];
+            const phone = cleanCols[3];
+
+            let oib: string | null = null;
+            let vesselName: string | null = null;
+            let vesselRegistration: string | null = null;
+
+            // Dynamically detect column layout (up to 7 columns)
+            if (cleanCols.length >= 7) {
+              oib = cleanCols[4] || null;
+              vesselName = cleanCols[5] || null;
+              vesselRegistration = cleanCols[6] || null;
+            } else if (cleanCols.length === 6) {
+              const col4 = cleanCols[4];
+              // Heuristic check: is 5th column an 11-digit OIB?
+              if (col4 && /^\d{11}$/.test(col4)) {
+                oib = col4;
+                vesselName = cleanCols[5] || null;
+              } else {
+                vesselName = col4 || null;
+                vesselRegistration = cleanCols[5] || null;
+              }
+            } else {
+              vesselName = cleanCols[4] || null;
+            }
+
+            if (!id || !fullName) {
+              skippedCount++;
+              continue;
+            }
+
+            const nameParts = fullName.split(/\s+/);
+            const firstName = nameParts[0] || "";
+            const lastName = nameParts.slice(1).join(" ") || "";
+
+            let email = rawEmail.split(/[\s,;]+/)[0]?.trim();
+            if (!email || !email.includes("@")) {
+              const cleanId = id.toLowerCase().replace(/[^a-z0-9]/g, "");
+              email = `clan_${cleanId}@psd-spinut.hr`;
+            } else {
+              email = email.toLowerCase();
+            }
+
+            // OIB validation
+            const cleanOib = oib ? oib.trim() : null;
+            const validOib = cleanOib && isValidOib(cleanOib) ? cleanOib : null;
+
+            let existingUser: any = null;
+
+            // 1. Try matching by valid OIB first
+            if (validOib) {
+              const byOib = await db.select().from(users).where(eq(users.oib, validOib)).limit(1);
+              if (byOib.length > 0) {
+                existingUser = byOib[0];
+              }
+            }
+
+            // 2. Fallback to matching by Email
+            if (!existingUser) {
+              const byEmail = await db.select().from(users).where(eq(users.email, email)).limit(1);
+              if (byEmail.length > 0) {
+                existingUser = byEmail[0];
+              }
+            }
+
+            let userId: string;
+
+            if (existingUser) {
+              userId = existingUser.id;
+              
+              // Handle email change safety if matched by OIB
+              let finalEmail = email;
+              if (existingUser.email !== email) {
+                const emailConflict = await db.select().from(users).where(eq(users.email, email)).limit(1);
+                if (emailConflict.length > 0) {
+                  finalEmail = existingUser.email; // Fallback to avoid constraint error
+                }
+              }
+
+              await db.update(users).set({
+                name: fullName,
+                firstName,
+                lastName,
+                email: finalEmail,
+                phone: phone || existingUser.phone,
+                oib: validOib || existingUser.oib,
+                emailVerifiedAt: existingUser.emailVerifiedAt || new Date(),
+                updatedAt: new Date(),
+              }).where(eq(users.id, userId));
+            } else {
+              // Create new user
+              const newUserRows = await db.insert(users).values({
+                email,
+                passwordHash: defaultPasswordHash,
+                name: fullName,
+                firstName,
+                lastName,
+                phone: phone || null,
+                oib: validOib || null,
+                role: "user",
+                userStatus: "active",
+                emailVerifiedAt: new Date(),
+                mustChangePassword: true,
+              }).returning({ id: users.id });
+              userId = newUserRows[0].id;
+              successCount++;
+            }
+
+            // 3. Process vessel (supports multiple vessels per user)
+            if (vesselName || vesselRegistration) {
+              const finalVesselName = vesselName || vesselRegistration || "Plovilo";
+              const finalVesselReg = vesselRegistration || vesselName || null;
+
+              const existingVessels = await db.select().from(vessels).where(eq(vessels.ownerId, userId));
+              const hasVessel = existingVessels.some(v => 
+                (vesselName && v.name.toLowerCase() === vesselName.toLowerCase()) ||
+                (vesselRegistration && v.registration && v.registration.toLowerCase() === vesselRegistration.toLowerCase())
+              );
+
+              if (!hasVessel) {
+                await db.insert(vessels).values({
+                  ownerId: userId,
+                  name: finalVesselName,
+                  type: "ostalo",
+                  registration: finalVesselReg,
+                });
+                vesselCount++;
+              }
+            }
+          } catch (err: any) {
+            console.error("Failed to import user on line " + (i + 1), err);
+            errorCount++;
+          }
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "users_imported_csv",
+          entityType: "user",
+          entityId: ctx.user.id,
+          payload: { successCount, skippedCount, errorCount, vesselCount },
+        });
+
+        return {
+          success: true,
+          successCount,
+          skippedCount,
+          errorCount,
+          vesselCount,
+        };
       }),
 
     setRole: adminProcedure
@@ -533,14 +908,28 @@ export const appRouter = router({
         lastName: z.string().optional(),
         name: z.string().optional(),
         phone: z.string().optional(),
+        oib: z.string().length(11).refine(isValidOib, { message: "OIB nije ispravan." }).optional(),
         role: z.enum(["user", "operator", "admin"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const { updateUser: updateUserDb, updateUserRole } = await import("./db");
-        const { id, role, ...data } = input;
+        const { id, role, oib, ...data } = input;
 
-        if (Object.keys(data).length > 0) {
-          await updateUserDb(id, data);
+        // Check OIB uniqueness if being updated
+        if (oib) {
+          const db = await getDb();
+          if (db) {
+            const oibExists = await db.select({ id: users.id }).from(users)
+              .where(and(eq(users.oib, oib), ne(users.id, id)))
+              .limit(1);
+            if (oibExists.length > 0) {
+              throw new TRPCError({ code: "CONFLICT", message: "Korisnik s tim OIB-om već postoji." });
+            }
+          }
+        }
+
+        if (Object.keys(data).length > 0 || oib) {
+          await updateUserDb(id, { ...data, ...(oib ? { oib } : {}) });
         }
 
         if (role) {
@@ -555,6 +944,25 @@ export const appRouter = router({
           action: "user_updated_admin",
           entityType: "user",
           entityId: id,
+          payload: oib ? { oib_updated: true } : undefined,
+        });
+        return { success: true };
+      }),
+
+    verifyEmail: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        await db.update(users)
+          .set({ emailVerifiedAt: new Date(), userStatus: "active", updatedAt: new Date() })
+          .where(eq(users.id, input.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "user_email_verified_admin",
+          entityType: "user",
+          entityId: input.id,
         });
         return { success: true };
       }),
@@ -814,6 +1222,7 @@ export const appRouter = router({
         requestedDate: z.string().min(1), // YYYY-MM-DD
         requestedTimeSlot: z.enum(["jutro", "poslijepodne", "po_dogovoru"]).default("po_dogovoru"),
         userNote: z.string().max(1000).optional(),
+        adminNote: z.string().max(1000).optional(),
         // Vessel data
         vesselId: z.string().uuid().optional(),
         vesselType: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
@@ -823,28 +1232,47 @@ export const appRouter = router({
         vesselDraftM: z.number().positive().optional(),
         vesselWeightTons: z.number().nonnegative().optional(),
         // Contact
-        contactPhone: z.string().min(6),
+        contactPhone: z.string().optional(),
+        // Land zone
+        landZoneId: z.string().uuid().optional(),
+        landWaitingId: z.string().uuid().optional(),
+        overrideCapacityCheck: z.boolean().optional(),
+        status: z.enum(["pending", "waitlisted"]).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        // 0. Email verification check
-        if (!ctx.user.emailVerifiedAt) {
+        const isAdminOrOperator = ctx.user.role === "admin" || ctx.user.role === "operator";
+
+        // 0. Email verification check (administrators and operators are exempt)
+        if (!ctx.user.emailVerifiedAt && !isAdminOrOperator) {
           throw new TRPCError({
             code: "FORBIDDEN",
             message: "Molimo potvrdite svoju email adresu prije kreiranja rezervacije.",
           });
         }
 
-        // 1. Limit check: Max 3 active reservations
-        const myActive = await listReservationsByUser(ctx.user.id);
-        const activeCount = myActive.filter(r => r.status === "pending" || r.status === "approved").length;
-        if (activeCount >= 3) {
+        // 1. Limit check: Max 3 active reservations (administrators and operators are exempt)
+        if (!isAdminOrOperator) {
+          const myActive = await listReservationsByUser(ctx.user.id);
+          const activeCount = myActive.filter(r => r.status === "pending" || r.status === "approved").length;
+          if (activeCount >= 3) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Imate maksimalni broj aktivnih rezervacija (3). Molimo pričekajte završetak ili otkažite postojeće.",
+            });
+          }
+        }
+
+        // 2. Check date is not in the past
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        if (input.requestedDate < todayStr) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "Imate maksimalni broj aktivnih rezervacija (3). Molimo pričekajte završetak ili otkažite postojeće.",
+            message: "Rezervaciju nije moguće napraviti za datum u prošlosti. Najraniji datum je današnji dan.",
           });
         }
 
-        // 2. Check date is not a holiday or outside season
+        // 3. Check date is not a holiday or outside season
         const dateIsHoliday = await isHoliday(input.requestedDate);
         if (dateIsHoliday) {
           throw new TRPCError({
@@ -865,6 +1293,37 @@ export const appRouter = router({
         const serviceType = await getServiceTypeById(input.serviceTypeId);
         if (!serviceType || !serviceType.isActive) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrani tip operacije nije dostupan." });
+        }
+
+        // Capacity check for lift_from_sea
+        if (serviceType.operationCategory === "lift_from_sea" && input.landZoneId) {
+          const db = await getDb();
+          if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
+
+          // Check if there is an active waiting list queue for this zone
+          const existingQueue = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(landWaitingList)
+            .where(and(
+              eq(landWaitingList.preferredZoneId, input.landZoneId),
+              or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"))
+            ));
+          const queueCount = Number(existingQueue[0]?.count ?? 0);
+
+          if (queueCount > 0 && !input.overrideCapacityCheck && input.status !== "waitlisted") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Upozorenje: Na listi čekanja za ovu zonu već čeka ${queueCount} klijenata. Želite li nastaviti i preskočiti listu čekanja? Potvrdite override za nastavak.`,
+            });
+          }
+
+          const cap = await getLandZoneCapacity(input.landZoneId);
+          if (cap.isOver80 && !input.overrideCapacityCheck && input.status !== "waitlisted") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Zona ${cap.name} (${cap.code}) je popunjena ${cap.percentFull}% (${cap.activeSpots}/${cap.totalSpots} mjesta). Molimo potvrdite override ako želite nastaviti.`,
+            });
+          }
         }
 
         // 3. Build vessel snapshot
@@ -912,7 +1371,7 @@ export const appRouter = router({
         const targetUser = await getUserById(targetUserId);
         if (!targetUser) throw new TRPCError({ code: "BAD_REQUEST", message: "Korisnik nije pronađen." });
 
-        let finalStatus = "pending";
+        let finalStatus = input.status === "waitlisted" ? "waitlisted" : "pending";
         let finalCraneId = undefined;
         let finalScheduledStart = undefined;
         let finalScheduledEnd = undefined;
@@ -921,7 +1380,23 @@ export const appRouter = router({
         let finalApprovedAt = undefined;
         let autoApproveCrane = null;
 
-        if (input.isAutoApprove && (ctx.user.role === 'admin' || ctx.user.role === 'operator')) {
+        // Validate crane capacity for waitlisted reservations (crane is known, schedule is not)
+        if (finalStatus === "waitlisted" && input.craneId) {
+          const waitlistedCrane = await getCraneById(input.craneId);
+          if (!waitlistedCrane || waitlistedCrane.craneStatus !== "active") {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+          }
+          if (vesselSnapshot.vesselWeightTons && (Number(vesselSnapshot.vesselWeightTons) * 10) > Number(waitlistedCrane.maxCapacityKN)) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Težina plovila (${vesselSnapshot.vesselWeightTons} t) prelazi kapacitet dizalice (${waitlistedCrane.maxCapacityKN} kN).`,
+            });
+          }
+          finalCraneId = input.craneId;
+          finalDurationMin = input.durationMin;
+        }
+
+        if (finalStatus !== "waitlisted" && input.isAutoApprove && (ctx.user.role === 'admin' || ctx.user.role === 'operator')) {
           if (!input.craneId || !input.scheduledStart || !input.durationMin) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Nedostaju podaci za automatsko odobrenje." });
           }
@@ -973,10 +1448,70 @@ export const appRouter = router({
           vesselWeightTons: vesselSnapshot.vesselWeightTons,
           contactPhone: input.contactPhone,
           userNote: input.userNote,
+          adminNote: input.adminNote,
+          landZoneId: input.landZoneId,
         }).returning({ id: resTable.id });
 
         const resId = created[0]?.id;
         if (!resId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        if (finalStatus === "waitlisted") {
+          let nextPos = 1;
+          if (input.landZoneId) {
+            const maxPosRes = await db
+              .select({ maxPos: sql<number>`max(position)` })
+              .from(landWaitingList)
+              .where(eq(landWaitingList.preferredZoneId, input.landZoneId));
+            nextPos = (Number(maxPosRes[0]?.maxPos) || 0) + 1;
+          } else {
+            const maxPosRes = await db
+              .select({ maxPos: sql<number>`max(position)` })
+              .from(landWaitingList);
+            nextPos = (Number(maxPosRes[0]?.maxPos) || 0) + 1;
+          }
+
+          await db.insert(landWaitingList).values({
+            userId: targetUserId,
+            vesselId: input.vesselId,
+            preferredZoneId: input.landZoneId,
+            position: nextPos,
+            status: "waiting",
+            reservationId: resId,
+            note: input.userNote,
+            adminNote: input.adminNote,
+          });
+
+          // Also add to waiting_list table so it appears in the calendar sidebar
+          if (input.craneId) {
+            const wlMaxPos = await db.select({ maxPos: sql<number>`max(position)` }).from(waitingList);
+            const wlNextPos = (Number(wlMaxPos[0]?.maxPos) || 0) + 1;
+            await db.insert(waitingList).values({
+              userId: targetUserId,
+              vesselId: input.vesselId,
+              craneId: input.craneId,
+              serviceTypeId: input.serviceTypeId,
+              requestedDate: input.requestedDate,
+              position: wlNextPos,
+              status: "waiting",
+              vesselData: {
+                type: vesselSnapshot.vesselType,
+                registration: vesselSnapshot.vesselRegistration,
+                weightTons: vesselSnapshot.vesselWeightTons,
+                lengthM: vesselSnapshot.vesselLengthM,
+                beamM: vesselSnapshot.vesselBeamM,
+                draftM: vesselSnapshot.vesselDraftM,
+              },
+            });
+          }
+
+          await createAuditEntry({
+            actorId: ctx.user.id,
+            action: "land_waiting_added_auto",
+            entityType: "land_waiting_list",
+            entityId: resId,
+            payload: { zoneId: input.landZoneId, craneId: input.craneId },
+          });
+        }
 
         await createAuditEntry({
           actorId: ctx.user.id,
@@ -1017,6 +1552,15 @@ export const appRouter = router({
           }).catch(console.warn);
         }
 
+        if (input.landWaitingId) {
+          await db.update(landWaitingList).set({
+            reservationId: resId,
+            preferredZoneId: input.landZoneId || undefined,
+            status: "assigned",
+            updatedAt: new Date(),
+          }).where(eq(landWaitingList.id, input.landWaitingId));
+        }
+
         return { id: resId, reservationNumber };
       }),
 
@@ -1043,7 +1587,40 @@ export const appRouter = router({
         }
         const crane = reservation.craneId ? await getCraneById(reservation.craneId) : null;
         const user = await getUserById(reservation.userId);
-        return { ...reservation, crane, user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null };
+
+        let landZone = null;
+        if (reservation.landZoneId) {
+          const db = await getDb();
+          if (db) {
+            const [lz] = await db.select().from(landZones).where(eq(landZones.id, reservation.landZoneId)).limit(1);
+            if (lz) landZone = { id: lz.id, name: lz.name, code: lz.code };
+          }
+        }
+
+        let activeLandOccupancy = null;
+        if (reservation.vesselId) {
+          const occ = await getActiveOccupancyByVessel(reservation.vesselId);
+          if (occ) {
+            const db = await getDb();
+            let occZone = null;
+            if (db) {
+              const [lz] = await db.select().from(landZones).where(eq(landZones.id, occ.zoneId)).limit(1);
+              if (lz) occZone = { id: lz.id, name: lz.name, code: lz.code };
+            }
+            activeLandOccupancy = {
+              ...occ,
+              zone: occZone,
+            };
+          }
+        }
+
+        return {
+          ...reservation,
+          crane,
+          user: user ? { id: user.id, name: user.name, email: user.email, phone: user.phone } : null,
+          landZone,
+          activeLandOccupancy,
+        };
       }),
 
     cancel: protectedProcedure
@@ -1147,15 +1724,26 @@ export const appRouter = router({
               name: cranes.name,
               location: cranes.location,
             },
+            serviceType: {
+              id: serviceTypes.id,
+              name: serviceTypes.name,
+            },
             approver: {
               id: sql<string>`approver_users.id`,
               name: sql<string>`approver_users.name`,
+            },
+            landZone: {
+              id: landZones.id,
+              name: landZones.name,
+              code: landZones.code,
             },
             unreadCount: sql<number>`COALESCE(${unreadCountSubquery.count}, 0)`
           })
           .from(reservations)
           .leftJoin(users, eq(reservations.userId, users.id))
           .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+          .leftJoin(landZones, eq(reservations.landZoneId, landZones.id))
           .leftJoin(sql`${users} as approver_users`, eq(reservations.approvedBy, sql`approver_users.id`))
           .leftJoin(unreadCountSubquery, eq(reservations.id, unreadCountSubquery.reservationId))
           .where(conditions.length > 0 ? and(...conditions) : undefined)
@@ -1167,7 +1755,9 @@ export const appRouter = router({
             ...row.reservation,
             crane: row.crane?.id ? row.crane : null,
             user: row.user?.id ? row.user : null,
+            serviceType: row.serviceType?.id ? row.serviceType : null,
             approver: row.approver?.id ? row.approver : null,
+            landZone: row.landZone?.id ? row.landZone : null,
             unreadCount: row.unreadCount
         }));
 
@@ -1181,11 +1771,50 @@ export const appRouter = router({
         scheduledStart: z.date(),
         durationMin: z.number().int().positive().default(60),
         adminNote: z.string().optional(),
+        vesselRegistration: z.string().optional(),
+        contactPhone: z.string().optional(),
+        ignoreNoSpace: z.boolean().optional().default(false),
       }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
-        if (reservation.status !== "pending") throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju se mogu odobriti." });
+        if (reservation.status !== "pending" && reservation.status !== "waitlisted") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Samo rezervacije na čekanju ili na listi čekanja se mogu odobriti." });
+        }
+
+        // Check dry berth capacity if it is a haul-out (Dizanje iz mora)
+        const serviceType = reservation.serviceTypeId ? await getServiceTypeById(reservation.serviceTypeId) : null;
+        const isLiftFromSea = serviceType?.operationCategory === "lift_from_sea";
+        if (isLiftFromSea && reservation.landZoneId) {
+          const db = await getDb();
+          if (db) {
+            // Check if there is an active waiting list queue for this zone that contains other entries
+            const existingQueue = await db
+              .select({ count: sql<number>`count(*)` })
+              .from(landWaitingList)
+              .where(and(
+                eq(landWaitingList.preferredZoneId, reservation.landZoneId),
+                or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")),
+                ne(landWaitingList.reservationId, input.id)
+              ));
+            const queueCount = Number(existingQueue[0]?.count ?? 0);
+
+            if (queueCount > 0 && !input.ignoreNoSpace) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Upozorenje: Na listi čekanja za ovu zonu već čeka ${queueCount} drugih klijenata. Potvrdite ignoriranje limita ako želite preskočiti listu.`,
+              });
+            }
+
+            const cap = await getLandZoneCapacity(reservation.landZoneId);
+            if (cap.isOver80 && !input.ignoreNoSpace) {
+              throw new TRPCError({
+                code: "PRECONDITION_FAILED",
+                message: `Zona ${cap.name} (${cap.code}) je popunjena ${cap.percentFull}% (${cap.activeSpots}/${cap.totalSpots} mjesta). Potvrdite ignoriranje limita za nastavak.`,
+              });
+            }
+          }
+        }
 
         // Validate crane
         const crane = await getCraneById(input.craneId);
@@ -1195,6 +1824,10 @@ export const appRouter = router({
 
         // Compute scheduled end
         const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
+
+        // Validate slot date and working hours against active season
+        const sysSettings = await getAllSettings();
+        await validateSlotAgainstSettings(input.scheduledStart, scheduledEnd, sysSettings);
 
         // Validate weight vs crane capacity
         if (reservation.vesselWeightTons && (Number(reservation.vesselWeightTons) * 10) > Number(crane.maxCapacityKN)) {
@@ -1217,11 +1850,28 @@ export const appRouter = router({
             scheduledEnd,
             durationMin: input.durationMin,
             status: "approved",
-            adminNote: input.adminNote,
+            adminNote: input.adminNote !== undefined ? input.adminNote : reservation.adminNote,
+            vesselRegistration: input.vesselRegistration !== undefined ? input.vesselRegistration : reservation.vesselRegistration,
+            contactPhone: input.contactPhone !== undefined ? input.contactPhone : reservation.contactPhone,
             approvedBy: ctx.user.id,
             approvedAt: new Date(),
             updatedAt: new Date(),
           }).where(eq(reservations.id, input.id));
+
+          if (reservation.vesselId && input.vesselRegistration) {
+            const { vessels } = await import("../drizzle/schema");
+            await db.update(vessels)
+              .set({ registration: input.vesselRegistration, updatedAt: new Date() })
+              .where(eq(vessels.id, reservation.vesselId));
+          }
+
+          // Update linked waiting list entry to assigned
+          await db.update(landWaitingList)
+            .set({
+              status: "assigned",
+              updatedAt: new Date()
+            })
+            .where(eq(landWaitingList.reservationId, input.id));
         }
 
         await createAuditEntry({ actorId: ctx.user.id, action: "reservation_approved", entityType: "reservation", entityId: input.id });
@@ -1342,13 +1992,75 @@ export const appRouter = router({
 
     // Mark reservation as completed
     complete: operatorProcedure
-      .input(z.object({ id: z.string().uuid() }))
+      .input(z.object({
+        id: z.string().uuid(),
+        zoneId: z.string().uuid().optional(),
+        spotNumber: z.number().int().positive().optional(),
+        note: z.string().optional(),
+      }))
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
         if (reservation.status !== "approved") {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Samo odobrene rezervacije se mogu označiti kao završene." });
         }
+
+        const serviceType = reservation.serviceTypeId ? await getServiceTypeById(reservation.serviceTypeId) : null;
+        const isLiftFromSea = serviceType?.operationCategory === "lift_from_sea";
+        const isLowerToSea = serviceType?.operationCategory === "lower_to_sea";
+
+        // 1. Dry Berth (Kopnene zone) logic
+        if (isLiftFromSea && reservation.vesselId && reservation.userId) {
+          // Haul out: place boat on dry berth
+          let targetZoneId = input.zoneId || reservation.landZoneId;
+          if (!targetZoneId) {
+            // Find first zone with available capacity
+            const zones = await listLandZones();
+            const freeZone = zones.find(z => z.activeSpots < z.totalSpots && z.isActive);
+            if (freeZone) {
+              targetZoneId = freeZone.id;
+            } else if (zones.length > 0) {
+              targetZoneId = zones[0].id;
+            }
+          }
+          if (targetZoneId) {
+            await createLandOccupancy({
+              vesselId: reservation.vesselId,
+              userId: reservation.userId,
+              zoneId: targetZoneId,
+              spotNumber: input.spotNumber,
+              reservationId: reservation.id,
+              liftedAt: new Date(),
+              createdBy: ctx.user.id,
+              note: input.note,
+            });
+          }
+        } else if (isLowerToSea && reservation.vesselId) {
+          // Launch: remove boat from dry berth
+          const activeOccupancy = await getActiveOccupancyByVessel(reservation.vesselId);
+          if (activeOccupancy) {
+            await completeLandOccupancy(activeOccupancy.id, reservation.id, new Date());
+          }
+        }
+
+        // 2. Log crane operation
+        if (reservation.craneId) {
+          const startTime = reservation.scheduledStart ? new Date(reservation.scheduledStart) : new Date();
+          const endTime = new Date();
+          const durationMinutes = reservation.durationMin ?? Math.max(1, Math.round((endTime.getTime() - startTime.getTime()) / 60000));
+          await logCraneOperation({
+            craneId: reservation.craneId,
+            reservationId: reservation.id,
+            operationType: isLiftFromSea ? "lift" : isLowerToSea ? "lower" : "move",
+            startTime,
+            endTime,
+            durationMinutes,
+            operatorId: ctx.user.id,
+            note: input.note,
+          });
+        }
+
+        // 3. Mark reservation completed
         const db = await getDb();
         if (db) {
           await db.update(reservations).set({
@@ -1357,12 +2069,15 @@ export const appRouter = router({
             updatedAt: new Date(),
           }).where(eq(reservations.id, input.id));
         }
+
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "reservation_completed",
           entityType: "reservation",
           entityId: input.id,
+          payload: { zoneId: input.zoneId, spotNumber: input.spotNumber }
         });
+
         return { success: true };
       }),
 
@@ -1399,6 +2114,87 @@ export const appRouter = router({
 
         const { notifyStatusChange } = await import("./services/notifications");
         notifyStatusChange(input.id).catch(console.error);
+
+        return { success: true };
+      }),
+
+    updateLandZone: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        landZoneId: z.string().uuid().nullable(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        await db.update(reservations)
+          .set({ landZoneId: input.landZoneId, updatedAt: new Date() })
+          .where(eq(reservations.id, input.id));
+
+        // Update corresponding active land occupancy if it exists
+        const { landOccupancies } = await import("../drizzle/schema");
+        const active = await db.select().from(landOccupancies)
+          .where(and(eq(landOccupancies.reservationId, input.id), isNull(landOccupancies.returnedAt)))
+          .limit(1);
+        if (active.length > 0 && input.landZoneId) {
+          await db.update(landOccupancies)
+            .set({ zoneId: input.landZoneId, updatedAt: new Date() })
+            .where(eq(landOccupancies.id, active[0].id));
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_land_zone_updated",
+          entityType: "reservation",
+          entityId: input.id,
+          payload: { landZoneId: input.landZoneId },
+        });
+
+        return { success: true };
+      }),
+
+    updateDetails: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        vesselRegistration: z.string().optional(),
+        contactPhone: z.string().optional(),
+        userNote: z.string().optional(),
+        adminNote: z.string().optional(),
+        landZoneId: z.string().uuid().nullable().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        await db.update(reservations).set({
+          vesselRegistration: input.vesselRegistration !== undefined ? input.vesselRegistration : reservation.vesselRegistration,
+          contactPhone: input.contactPhone !== undefined ? input.contactPhone : reservation.contactPhone,
+          userNote: input.userNote !== undefined ? input.userNote : reservation.userNote,
+          adminNote: input.adminNote !== undefined ? input.adminNote : reservation.adminNote,
+          landZoneId: input.landZoneId !== undefined ? input.landZoneId : reservation.landZoneId,
+          updatedAt: new Date(),
+        }).where(eq(reservations.id, input.id));
+
+        if (reservation.vesselId && input.vesselRegistration) {
+          const { vessels } = await import("../drizzle/schema");
+          await db.update(vessels)
+            .set({ registration: input.vesselRegistration, updatedAt: new Date() })
+            .where(eq(vessels.id, reservation.vesselId));
+        }
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_details_updated",
+          entityType: "reservation",
+          entityId: input.id,
+          payload: input,
+        });
 
         return { success: true };
       }),
@@ -1494,6 +2290,7 @@ export const appRouter = router({
         name: z.string().min(1).max(255),
         description: z.string().optional(),
         defaultDurationMin: z.number().int().positive().default(60),
+        operationCategory: z.enum(["lift_from_sea", "lower_to_sea", "move", "maintenance", "other"]).default("other"),
         isActive: z.boolean().default(true),
         sortOrder: z.number().int().default(0),
       }))
@@ -1509,6 +2306,7 @@ export const appRouter = router({
         name: z.string().min(1).max(255).optional(),
         description: z.string().optional(),
         defaultDurationMin: z.number().int().positive().optional(),
+        operationCategory: z.enum(["lift_from_sea", "lower_to_sea", "move", "maintenance", "other"]).optional(),
         isActive: z.boolean().optional(),
         sortOrder: z.number().int().optional(),
       }))
@@ -1536,7 +2334,7 @@ export const appRouter = router({
 
   // ─── Public Calendar ───────────────────────────────────────────────────
   calendar: router({
-    events: publicProcedure
+    events: operatorProcedure
       .input(z.object({
         scheduledStart: z.date().optional(),
         scheduledEnd: z.date().optional(),
@@ -1603,7 +2401,7 @@ export const appRouter = router({
         });
       }),
 
-    availableSlots: publicProcedure
+    availableSlots: operatorProcedure
       .input(z.object({
         craneId: z.string().uuid(),
         date: z.string(), // YYYY-MM-DD
@@ -1773,7 +2571,7 @@ export const appRouter = router({
 
     update: adminProcedure
       .input(z.object({
-        key: z.enum(["slotDurationMinutes", "bufferMinutes", "workdayStart", "workdayEnd"]),
+        key: z.enum(["slotDurationMinutes", "bufferMinutes", "workdayStart", "workdayEnd", "marinaName", "marinaLogo"]),
         value: z.string(),
       }))
       .mutation(async ({ input, ctx }) => {
@@ -2064,6 +2862,497 @@ export const appRouter = router({
         };
       }),
   }),
+
+  // ─── Land Zones (Kopnene zone) ────────────────────────────────────────
+  landZone: router({
+    list: operatorProcedure
+      .query(async () => {
+        return listLandZones();
+      }),
+
+    checkCapacity: operatorProcedure
+      .input(z.object({ zoneId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return getLandZoneCapacity(input.zoneId);
+      }),
+
+    getUpcomingReservedVessels: operatorProcedure
+      .input(z.object({ zoneId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        return getUpcomingReservedVesselsForZone(input.zoneId);
+      }),
+
+    getActiveOccupancy: operatorProcedure
+      .input(z.object({ vesselId: z.string().uuid() }))
+      .query(async ({ input }) => {
+        const occ = await getActiveOccupancyByVessel(input.vesselId);
+        if (!occ) return null;
+        const db = await getDb();
+        if (db) {
+          const [lz] = await db.select().from(landZones).where(eq(landZones.id, occ.zoneId)).limit(1);
+          return {
+            ...occ,
+            zone: lz ? { id: lz.id, name: lz.name, code: lz.code } : null,
+          };
+        }
+        return { ...occ, zone: null };
+      }),
+
+    create: operatorProcedure
+      .input(z.object({
+        name: z.string().min(1).max(255),
+        code: z.string().min(1).max(10),
+        totalSpots: z.number().int().positive(),
+        manualOccupiedSpots: z.number().int().nonnegative().optional().default(0),
+        description: z.string().optional(),
+        sortOrder: z.number().int().default(0),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await createLandZone(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_zone_created", entityType: "land_zone", entityId: id });
+        return { id };
+      }),
+
+    update: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        name: z.string().min(1).max(255).optional(),
+        code: z.string().min(1).max(10).optional(),
+        totalSpots: z.number().int().positive().optional(),
+        manualOccupiedSpots: z.number().int().nonnegative().optional(),
+        description: z.string().optional(),
+        sortOrder: z.number().int().optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { id, ...data } = input;
+        await updateLandZone(id, data);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_zone_updated", entityType: "land_zone", entityId: id });
+        return { success: true };
+      }),
+
+    delete: adminProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        await deleteLandZone(input.id);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_zone_deleted", entityType: "land_zone", entityId: input.id });
+        return { success: true };
+      }),
+  }),
+
+  // ─── Land Occupancies (Boravak na kopnu) ──────────────────────────────────
+  landOccupancy: router({
+    listActive: operatorProcedure
+      .input(z.object({
+        zoneId: z.string().uuid().optional(),
+        userId: z.string().uuid().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        return listActiveOccupancies(input);
+      }),
+
+    create: operatorProcedure
+      .input(z.object({
+        vesselId: z.string().uuid(),
+        userId: z.string().uuid(),
+        zoneId: z.string().uuid(),
+        spotNumber: z.number().int().positive().optional(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await createLandOccupancy({
+          ...input,
+          liftedAt: new Date(),
+          createdBy: ctx.user.id,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_occupancy_created", entityType: "land_occupancy", entityId: id });
+        return { id };
+      }),
+
+    complete: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        returnReservationId: z.string().uuid().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        await completeLandOccupancy(input.id, input.returnReservationId);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_occupancy_completed", entityType: "land_occupancy", entityId: input.id });
+        return { success: true };
+      }),
+
+    history: operatorProcedure
+      .input(z.object({
+        zoneId: z.string().uuid().optional(),
+        userId: z.string().uuid().optional(),
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(100).default(50),
+      }).optional().default({ page: 1, pageSize: 50 }))
+      .query(async ({ input }) => {
+        const { page, pageSize, ...filters } = input;
+        const offset = (page - 1) * pageSize;
+        return listOccupancyHistory({
+          ...filters,
+          limit: pageSize,
+          offset,
+        });
+      }),
+  }),
+
+  // ─── Land Waiting List (Lista čekanja za kopno) ─────────────────────────
+  landWaiting: router({
+    listAll: operatorProcedure
+      .query(async () => {
+        return listLandWaitingList();
+      }),
+
+    getMyStatus: protectedProcedure
+      .query(async ({ ctx }) => {
+        const db = await getDb();
+        if (!db) return null;
+
+        const entry = await db
+          .select({
+            id: landWaitingList.id,
+            position: landWaitingList.position,
+            status: landWaitingList.status,
+            createdAt: landWaitingList.createdAt,
+            preferredZoneName: landZones.name,
+          })
+          .from(landWaitingList)
+          .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+          .where(and(
+            eq(landWaitingList.userId, ctx.user.id),
+            or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+          ))
+          .limit(1);
+
+        if (entry.length === 0) return null;
+        return entry[0];
+      }),
+
+    add: operatorProcedure
+      .input(z.object({
+        userId: z.string().uuid(),
+        vesselId: z.string().uuid().optional(),
+        preferredZoneId: z.string().uuid().optional(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await addLandWaitingListEntry(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_added", entityType: "land_waiting_list", entityId: id });
+        return { id };
+      }),
+
+    offer: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const waitlistEntry = await db
+          .select({
+            id: landWaitingList.id,
+            userId: landWaitingList.userId,
+            userName: users.name,
+            userEmail: users.email,
+            userPhone: users.phone,
+            preferredZoneId: landWaitingList.preferredZoneId,
+            zoneName: landZones.name,
+          })
+          .from(landWaitingList)
+          .innerJoin(users, eq(landWaitingList.userId, users.id))
+          .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+          .where(eq(landWaitingList.id, input.id))
+          .limit(1);
+
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const row = waitlistEntry[0];
+
+        await updateLandWaitingListStatus(input.id, "offered", { offeredAt: new Date() });
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_offered", entityType: "land_waiting_list", entityId: input.id });
+
+        // Send notifications asynchronously
+        if (row.userEmail) {
+          const { sendLandSpotAvailable } = await import("./_core/email");
+          sendLandSpotAvailable({
+            to: row.userEmail,
+            userName: row.userName || row.userEmail,
+            zoneName: row.zoneName || "Slobodna zona",
+          }).catch(console.error);
+        }
+
+        if (row.userPhone) {
+          const { sendLandSpotAvailableSms } = await import("./_core/sms");
+          sendLandSpotAvailableSms({
+            phone: row.userPhone,
+            zoneName: row.zoneName || "Slobodna zona",
+          }).catch(console.error);
+        }
+
+        return { success: true };
+      }),
+
+    assignFromOffer: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        zoneId: z.string().uuid(),
+        spotNumber: z.number().int().positive().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const waitlistEntry = await db.select().from(landWaitingList).where(eq(landWaitingList.id, input.id)).limit(1);
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const entry = waitlistEntry[0];
+
+        if (!entry.vesselId) throw new TRPCError({ code: "BAD_REQUEST", message: "Zahtjev na listi čekanja nema povezano plovilo." });
+
+        const occupancyId = await createLandOccupancy({
+          vesselId: entry.vesselId,
+          userId: entry.userId,
+          zoneId: input.zoneId,
+          spotNumber: input.spotNumber,
+          createdBy: ctx.user.id,
+          liftedAt: new Date(),
+        });
+
+        await updateLandWaitingListStatus(input.id, "assigned", {
+          assignedOccupancyId: occupancyId,
+        });
+
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_assigned", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true, occupancyId };
+      }),
+
+    declineOffer: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        const waitlistEntry = await db.select().from(landWaitingList).where(eq(landWaitingList.id, input.id)).limit(1);
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const entry = waitlistEntry[0];
+
+        await updateLandWaitingListStatus(input.id, "declined", {
+          declinedAt: new Date(),
+          declineCount: entry.declineCount + 1,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_declined", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true };
+      }),
+
+    remove: operatorProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (db) {
+          const waitlistEntry = await db.select().from(landWaitingList).where(eq(landWaitingList.id, input.id)).limit(1);
+          if (waitlistEntry.length > 0 && waitlistEntry[0].reservationId) {
+            await db.update(reservations).set({
+              status: "cancelled",
+              adminNote: "Uklonjeno s liste čekanja za suhi vez",
+              updatedAt: new Date(),
+            }).where(eq(reservations.id, waitlistEntry[0].reservationId));
+          }
+        }
+        await updateLandWaitingListStatus(input.id, "cancelled");
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_removed", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true };
+      }),
+
+    update: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        preferredZoneId: z.string().uuid().nullable().optional(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+        await db.update(landWaitingList)
+          .set({
+            preferredZoneId: input.preferredZoneId,
+            note: input.note,
+            updatedAt: new Date(),
+          })
+          .where(eq(landWaitingList.id, input.id));
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_updated", entityType: "land_waiting_list", entityId: input.id });
+        return { success: true };
+      }),
+
+     reorder: operatorProcedure
+      .input(z.array(z.string().uuid()))
+      .mutation(async ({ input, ctx }) => {
+        await reorderWaitingList(input);
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_reordered", entityType: "land_waiting_list", payload: { ids: input } });
+        return { success: true };
+      }),
+
+    directAssign: operatorProcedure
+      .input(z.object({
+        id: z.string().uuid(),
+        craneId: z.string().uuid(),
+        scheduledStart: z.date(),
+        durationMin: z.number().int().positive().default(30),
+        adminNote: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const waitlistEntry = await db
+          .select().from(landWaitingList)
+          .where(eq(landWaitingList.id, input.id))
+          .limit(1);
+        if (waitlistEntry.length === 0) throw new TRPCError({ code: "NOT_FOUND" });
+        const entry = waitlistEntry[0];
+
+        if (!entry.reservationId) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ovaj unos na listi nema povezanu rezervaciju dizalice." });
+        }
+
+        const reservation = await getReservationById(entry.reservationId);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND", message: "Povezana rezervacija nije pronađena." });
+
+        // Validate crane
+        const crane = await getCraneById(input.craneId);
+        if (!crane || crane.craneStatus !== "active") {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Odabrana dizalica nije aktivna." });
+        }
+
+        const scheduledEnd = new Date(input.scheduledStart.getTime() + input.durationMin * 60000);
+        const hasOverlap = await checkOverlap(input.craneId, input.scheduledStart, scheduledEnd, entry.reservationId);
+        if (hasOverlap) throw new TRPCError({ code: "CONFLICT", message: "Drugi termin se preklapa s ovim." });
+
+        // Update reservation to approved
+        await db.update(reservations).set({
+          craneId: input.craneId,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd,
+          durationMin: input.durationMin,
+          status: "approved",
+          adminNote: input.adminNote || reservation.adminNote,
+          approvedBy: ctx.user.id,
+          approvedAt: new Date(),
+          updatedAt: new Date(),
+        }).where(eq(reservations.id, entry.reservationId));
+
+        // Update waitlist entry to assigned
+        await updateLandWaitingListStatus(input.id, "assigned");
+
+        await createAuditEntry({ actorId: ctx.user.id, action: "land_waiting_assigned_direct", entityType: "land_waiting_list", entityId: input.id });
+
+        // Send confirmation email
+        const user = await getUserById(entry.userId);
+        if (user?.email) {
+          const { sendReservationConfirmation } = await import("./_core/email");
+          sendReservationConfirmation({
+            to: user.email,
+            userName: user.name || user.email,
+            craneName: crane.name,
+            startDate: input.scheduledStart,
+            endDate: scheduledEnd,
+            craneLocation: crane.location || "",
+            adminNotes: input.adminNote,
+          }).catch(console.error);
+        }
+
+        return { success: true };
+      }),
+
+    listByZone: operatorProcedure
+      .input(z.object({
+        zoneId: z.string().uuid(),
+      }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+        return db
+          .select({
+            id: landWaitingList.id,
+            userId: landWaitingList.userId,
+            vesselId: landWaitingList.vesselId,
+            preferredZoneId: landWaitingList.preferredZoneId,
+            position: landWaitingList.position,
+            status: landWaitingList.status,
+            note: landWaitingList.note,
+            adminNote: landWaitingList.adminNote,
+            reservationId: landWaitingList.reservationId,
+            createdAt: landWaitingList.createdAt,
+            user: {
+              id: users.id,
+              name: users.name,
+              email: users.email,
+              phone: users.phone,
+              oib: users.oib,
+            },
+            vessel: {
+              id: vessels.id,
+              name: vessels.name,
+              type: vessels.type,
+              registration: vessels.registration,
+            },
+          })
+          .from(landWaitingList)
+          .innerJoin(users, eq(landWaitingList.userId, users.id))
+          .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
+          .where(and(
+            eq(landWaitingList.preferredZoneId, input.zoneId),
+            or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+          ))
+          .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
+      }),
+  }),
+
+  // ─── Crane Operations (Rad dizalica) ───────────────────────────────────
+  craneOps: router({
+    log: operatorProcedure
+      .input(z.object({
+        craneId: z.string().uuid(),
+        reservationId: z.string().uuid().optional(),
+        operationType: z.string(),
+        startTime: z.date(),
+        endTime: z.date(),
+        durationMinutes: z.number().int().positive(),
+        note: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const id = await logCraneOperation({
+          ...input,
+          operatorId: ctx.user.id,
+        });
+        await createAuditEntry({ actorId: ctx.user.id, action: "crane_operation_logged", entityType: "crane_operation_log", entityId: id });
+        return { id };
+      }),
+
+    stats: adminProcedure
+      .query(async () => {
+        return getCraneStats();
+      }),
+
+    listByCrane: operatorProcedure
+      .input(z.object({
+        craneId: z.string().uuid().optional(),
+        page: z.number().int().min(1).default(1),
+        pageSize: z.number().int().min(1).max(100).default(50),
+      }).optional().default({ page: 1, pageSize: 50 }))
+      .query(async ({ input }) => {
+        const { page, pageSize, ...filters } = input;
+        const offset = (page - 1) * pageSize;
+        return listCraneOps({
+          ...filters,
+          limit: pageSize,
+          offset,
+        });
+      }),
+  }),
+
+  // ─── Reports ───────────────────────────────────────────────────────────
+  reports: reportsRouter,
 });
 
 export type AppRouter = typeof appRouter;

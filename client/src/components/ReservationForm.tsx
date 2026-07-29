@@ -128,7 +128,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!serviceTypeId || !requestedDate || !vesselType || !contactPhone) {
+        if (!serviceTypeId || !requestedDate || !vesselType) {
             toast.error(t.form.errors.required);
             return;
         }
@@ -195,6 +195,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 date={requestedDate}
                                 onChange={setRequestedDate}
                                 placeholder={lang === "hr" ? "Odaberite datum" : "Select date"}
+                                disablePastDates
                             />
                         </div>
                         <div className="space-y-2">
@@ -303,11 +304,10 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                             {lang === "hr" ? "Kontakt" : "Contact"}
                         </h3>
                         <div className="space-y-2">
-                            <Label>{t.form.contactPhone} *</Label>
+                            <Label>{t.form.contactPhone}</Label>
                             <Input
                                 value={contactPhone}
                                 onChange={(e) => setContactPhone(e.target.value)}
-                                required
                             />
                         </div>
                     </div>
@@ -322,7 +322,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType || !contactPhone}
+                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (
