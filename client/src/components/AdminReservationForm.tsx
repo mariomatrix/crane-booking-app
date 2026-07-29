@@ -86,7 +86,6 @@ export function AdminReservationForm({
     const [vesselType, setVesselType] = useState("jedrilica");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
-    const [vesselDraft, setVesselDraft] = useState("");
     const [vesselWeight, setVesselWeight] = useState("");
     const [vesselRegistration, setVesselRegistration] = useState("");
 
@@ -127,7 +126,6 @@ export function AdminReservationForm({
             setVesselType("jedrilica");
             setVesselLength("");
             setVesselWidth("");
-            setVesselDraft("");
             setVesselWeight("");
             setVesselRegistration("");
         }
@@ -139,7 +137,6 @@ export function AdminReservationForm({
         setVesselType(v.type || "jedrilica");
         setVesselLength(v.lengthM ? String(v.lengthM) : "");
         setVesselWidth(v.beamM ? String(v.beamM) : "");
-        setVesselDraft(v.draftM ? String(v.draftM) : "");
         setVesselWeight(v.weightTons ? String(v.weightTons) : "");
         setVesselRegistration(v.registration || "");
     }
@@ -150,7 +147,6 @@ export function AdminReservationForm({
             setVesselType("jedrilica");
             setVesselLength("");
             setVesselWidth("");
-            setVesselDraft("");
             setVesselWeight("");
             setVesselRegistration("");
         } else {
@@ -159,7 +155,6 @@ export function AdminReservationForm({
                 setVesselType(v.type || "");
                 setVesselLength(v.lengthM ? String(v.lengthM) : "");
                 setVesselWidth(v.beamM ? String(v.beamM) : "");
-                setVesselDraft(v.draftM ? String(v.draftM) : "");
                 setVesselWeight(v.weightTons ? String(v.weightTons) : "");
                 setVesselRegistration(v.registration || "");
             }
@@ -213,7 +208,6 @@ export function AdminReservationForm({
             vesselRegistration: vesselRegistration || undefined,
             vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
             vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
-            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
             vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
             contactPhone,
             landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
@@ -233,7 +227,6 @@ export function AdminReservationForm({
                 type: vesselType as any,
                 lengthM: vesselLength ? Number(vesselLength) : undefined,
                 beamM: vesselWidth ? Number(vesselWidth) : undefined,
-                draftM: vesselDraft ? Number(vesselDraft) : undefined,
                 weightTons: vesselWeight ? Number(vesselWeight) : undefined,
                 registration: vesselRegistration || undefined,
                 ownerId: userId,
@@ -613,16 +606,6 @@ export function AdminReservationForm({
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-2">
-                                <Label>{t.form.vesselWeight}</Label>
-                                <Input
-                                    type="number"
-                                    value={vesselWeight}
-                                    onChange={(e) => setVesselWeight(e.target.value)}
-                                    placeholder="t"
-                                    disabled={selectedVesselId !== "new"}
-                                />
-                            </div>
                         </div>
 
                         <div className="space-y-2">
@@ -645,8 +628,8 @@ export function AdminReservationForm({
                                 <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} disabled={selectedVesselId !== "new"} />
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} disabled={selectedVesselId !== "new"} />
+                                <Label className="text-xs">{t.form.vesselWeight} (t)</Label>
+                                <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} disabled={selectedVesselId !== "new"} />
                             </div>
                         </div>
                     </div>

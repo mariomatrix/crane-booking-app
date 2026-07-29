@@ -111,11 +111,17 @@ export default function AdminUsers() {
         name: string;
         registration: string;
         type: "jedrilica" | "motorni" | "katamaran" | "ostalo";
+        lengthM?: number;
+        beamM?: number;
+        weightTons?: number;
     };
     const [newVessels, setNewVessels] = useState<FormVesselItem[]>([]);
     const [tempVesselName, setTempVesselName] = useState("");
     const [tempVesselReg, setTempVesselReg] = useState("");
     const [tempVesselType, setTempVesselType] = useState<"jedrilica" | "motorni" | "katamaran" | "ostalo">("jedrilica");
+    const [tempVesselLength, setTempVesselLength] = useState("");
+    const [tempVesselBeam, setTempVesselBeam] = useState("");
+    const [tempVesselWeight, setTempVesselWeight] = useState("");
 
     const handleAddVesselToUser = () => {
         if (!tempVesselName.trim()) {
@@ -129,11 +135,17 @@ export default function AdminUsers() {
                 name: tempVesselName.trim(),
                 registration: tempVesselReg.trim(),
                 type: tempVesselType,
+                lengthM: tempVesselLength ? Number(tempVesselLength) : undefined,
+                beamM: tempVesselBeam ? Number(tempVesselBeam) : undefined,
+                weightTons: tempVesselWeight ? Number(tempVesselWeight) : undefined,
             }
         ]);
         setTempVesselName("");
         setTempVesselReg("");
         setTempVesselType("jedrilica");
+        setTempVesselLength("");
+        setTempVesselBeam("");
+        setTempVesselWeight("");
     };
 
     const handleRemoveVesselFromUser = (id: string) => {
@@ -158,6 +170,9 @@ export default function AdminUsers() {
         setTempVesselName("");
         setTempVesselReg("");
         setTempVesselType("jedrilica");
+        setTempVesselLength("");
+        setTempVesselBeam("");
+        setTempVesselWeight("");
     };
 
     const setRole = trpc.user.setRole.useMutation({
@@ -320,6 +335,9 @@ export default function AdminUsers() {
                 name: v.name,
                 registration: v.registration || undefined,
                 type: v.type,
+                lengthM: v.lengthM,
+                beamM: v.beamM,
+                weightTons: v.weightTons,
             })),
         });
     };
@@ -928,17 +946,26 @@ export default function AdminUsers() {
 
                             {/* Added Vessels List */}
                             {newVessels.length > 0 && (
-                                <div className="space-y-1.5 bg-muted/30 p-2 rounded-xl border">
-                                    {newVessels.map((v) => (
-                                        <div key={v.id} className="flex items-center justify-between bg-white dark:bg-card p-2 rounded-lg border text-xs shadow-sm">
-                                            <div className="flex items-center gap-2">
-                                                <span className="font-bold text-primary">{v.name}</span>
+                                <div className="space-y-1.5 mb-2 max-h-32 overflow-y-auto">
+                                    {newVessels.map(v => (
+                                        <div key={v.id} className="flex items-center justify-between p-2 rounded-lg bg-muted text-xs border">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <span className="font-semibold">{v.name}</span>
                                                 {v.registration && (
-                                                    <span className="font-mono text-[10px] bg-secondary px-1.5 py-0.5 rounded">
+                                                    <span className="font-mono text-[10px] bg-background px-1.5 py-0.5 rounded border">
                                                         {v.registration}
                                                     </span>
                                                 )}
                                                 <span className="text-[10px] text-muted-foreground capitalize">({v.type})</span>
+                                                {(v.lengthM || v.beamM || v.weightTons) && (
+                                                    <span className="text-[10px] text-primary font-mono bg-primary/10 px-1.5 py-0.5 rounded">
+                                                        {[
+                                                            v.lengthM ? `L:${v.lengthM}m` : null,
+                                                            v.beamM ? `B:${v.beamM}m` : null,
+                                                            v.weightTons ? `W:${v.weightTons}t` : null,
+                                                        ].filter(Boolean).join(" | ")}
+                                                    </span>
+                                                )}
                                             </div>
                                             <Button
                                                 type="button"
@@ -988,6 +1015,34 @@ export default function AdminUsers() {
                                         </Select>
                                     </div>
                                 </div>
+
+                                <div className="grid grid-cols-3 gap-2">
+                                    <Input
+                                        type="number"
+                                        step="0.1"
+                                        className="h-8 text-xs bg-white"
+                                        placeholder="Dužina (m)"
+                                        value={tempVesselLength}
+                                        onChange={(e) => setTempVesselLength(e.target.value)}
+                                    />
+                                    <Input
+                                        type="number"
+                                        step="0.1"
+                                        className="h-8 text-xs bg-white"
+                                        placeholder="Širina (m)"
+                                        value={tempVesselBeam}
+                                        onChange={(e) => setTempVesselBeam(e.target.value)}
+                                    />
+                                    <Input
+                                        type="number"
+                                        step="0.1"
+                                        className="h-8 text-xs bg-white"
+                                        placeholder="Težina (t)"
+                                        value={tempVesselWeight}
+                                        onChange={(e) => setTempVesselWeight(e.target.value)}
+                                    />
+                                </div>
+
                                 <Button
                                     type="button"
                                     variant="outline"

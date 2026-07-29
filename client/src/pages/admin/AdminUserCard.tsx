@@ -405,7 +405,7 @@ export default function AdminUserCard() {
                                 placeholder="npr. ST-1234"
                             />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-3 gap-2">
                             <div className="space-y-2">
                                 <Label htmlFor="vessel-length">Dužina (m)</Label>
                                 <Input
@@ -426,19 +426,6 @@ export default function AdminUserCard() {
                                     value={vesselForm.beamM}
                                     onChange={(e) => setVesselForm({ ...vesselForm, beamM: e.target.value })}
                                     placeholder="npr. 2.8"
-                                />
-                            </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="vessel-draft">Gaz (m)</Label>
-                                <Input
-                                    id="vessel-draft"
-                                    type="number"
-                                    step="0.01"
-                                    value={vesselForm.draftM}
-                                    onChange={(e) => setVesselForm({ ...vesselForm, draftM: e.target.value })}
-                                    placeholder="npr. 1.2"
                                 />
                             </div>
                             <div className="space-y-2">

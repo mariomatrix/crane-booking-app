@@ -47,7 +47,6 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
     const [vesselType, setVesselType] = useState("");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
-    const [vesselDraft, setVesselDraft] = useState("");
     const [vesselWeight, setVesselWeight] = useState("");
     const [vesselRegistration, setVesselRegistration] = useState("");
 
@@ -90,7 +89,6 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
             setVesselType(first.type);
             setVesselLength(first.lengthM ? String(first.lengthM) : "");
             setVesselWidth(first.beamM ? String(first.beamM) : "");
-            setVesselDraft(first.draftM ? String(first.draftM) : "");
             setVesselWeight(first.weightTons ? String(first.weightTons) : "");
             setVesselRegistration(first.registration || "");
             setHasAttemptedVesselAutoFill(true);
@@ -111,7 +109,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         if (id === "new") {
             setVesselId("new");
             setVesselType(""); setVesselLength("");
-            setVesselWidth(""); setVesselDraft(""); setVesselWeight(""); setVesselRegistration("");
+            setVesselWidth(""); setVesselWeight(""); setVesselRegistration("");
             return;
         }
         setVesselId(id);
@@ -120,7 +118,6 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
             setVesselType(vessel.type);
             setVesselLength(vessel.lengthM ? String(vessel.lengthM) : "");
             setVesselWidth(vessel.beamM ? String(vessel.beamM) : "");
-            setVesselDraft(vessel.draftM ? String(vessel.draftM) : "");
             setVesselWeight(vessel.weightTons ? String(vessel.weightTons) : "");
             setVesselRegistration(vessel.registration || "");
         }
@@ -142,7 +139,6 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
             vesselRegistration: vesselRegistration || undefined,
             vesselLengthM: vesselLength ? Number(vesselLength) : undefined,
             vesselBeamM: vesselWidth ? Number(vesselWidth) : undefined,
-            vesselDraftM: vesselDraft ? Number(vesselDraft) : undefined,
             vesselWeightTons: vesselWeight ? Number(vesselWeight) : undefined,
             contactPhone,
         });
@@ -261,16 +257,6 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div className="space-y-2">
-                                <Label>{t.form.vesselWeight}</Label>
-                                <Input
-                                    type="number"
-                                    value={vesselWeight}
-                                    onChange={(e) => setVesselWeight(e.target.value)}
-                                    disabled={!!vesselId && vesselId !== "new"}
-                                    placeholder="t"
-                                />
-                            </div>
                         </div>
 
                         <div className="space-y-2">
@@ -293,8 +279,8 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-xs">{t.form.vesselDraft} (m)</Label>
-                                <Input type="number" step="0.1" value={vesselDraft} onChange={(e) => setVesselDraft(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
+                                <Label className="text-xs">{t.form.vesselWeight} (t)</Label>
+                                <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
                             </div>
                         </div>
                     </div>

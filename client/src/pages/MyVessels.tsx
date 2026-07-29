@@ -143,26 +143,20 @@ export default function MyVessels() {
                                                 </SelectContent>
                                             </Select>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="grid gap-2">
-                                                <Label>{t.form.vesselLength}</Label>
-                                                <Input type="number" step="0.01" value={length} onChange={(e) => setLength(e.target.value)} />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label>{t.form.vesselWidth}</Label>
-                                                <Input type="number" step="0.01" value={width} onChange={(e) => setWidth(e.target.value)} />
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="grid gap-2">
-                                                <Label>{t.form.vesselDraft}</Label>
-                                                <Input type="number" step="0.01" value={draft} onChange={(e) => setDraft(e.target.value)} />
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label>{t.form.vesselWeight}</Label>
-                                                <Input type="number" step="0.01" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="t" />
-                                            </div>
-                                        </div>
+                                         <div className="grid grid-cols-3 gap-4">
+                                             <div className="grid gap-2">
+                                                 <Label>{t.form.vesselLength}</Label>
+                                                 <Input type="number" step="0.01" value={length} onChange={(e) => setLength(e.target.value)} />
+                                             </div>
+                                             <div className="grid gap-2">
+                                                 <Label>{t.form.vesselWidth}</Label>
+                                                 <Input type="number" step="0.01" value={width} onChange={(e) => setWidth(e.target.value)} />
+                                             </div>
+                                             <div className="grid gap-2">
+                                                 <Label>{t.form.vesselWeight}</Label>
+                                                 <Input type="number" step="0.01" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="t" />
+                                             </div>
+                                         </div>
                                     </div>
                                     <DialogFooter>
                                         <Button type="submit" disabled={createMutation.isPending}>
@@ -232,8 +226,6 @@ export default function MyVessels() {
                                         <div>{vessel.lengthM} m</div>
                                         <div className="text-muted-foreground">{t.form.vesselWidth}</div>
                                         <div>{vessel.beamM} m</div>
-                                        <div className="text-muted-foreground">{t.form.vesselDraft}</div>
-                                        <div>{vessel.draftM} m</div>
                                         <div className="text-muted-foreground">{t.form.vesselWeight}</div>
                                         <div className="font-semibold">{vessel.weightTons ? `${vessel.weightTons} t` : "—"}</div>
                                     </div>
