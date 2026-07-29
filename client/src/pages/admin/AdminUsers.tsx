@@ -49,7 +49,7 @@ export default function AdminUsers() {
 
     const [search, setSearch] = useState("");
     const [searchInput, setSearchInput] = useState("");
-    const [roleFilter, setRoleFilter] = useState("all");
+    const [roleFilter, setRoleFilter] = useState("user");
     const [statusFilter, setStatusFilter] = useState("all");
     const [vesselFilter, setVesselFilter] = useState("all");
 
@@ -325,7 +325,7 @@ export default function AdminUsers() {
             })),
         });
     };
-    
+
     // Reset to page 1 when count changes significantly or on invalidations if needed
     // But usually standard trpc invalidation is fine.
 
@@ -351,7 +351,7 @@ export default function AdminUsers() {
                             onChange={handleCsvUpload}
                             disabled={importCsvMutation.isPending}
                         />
-                        <Button 
+                        <Button
                             variant="outline"
                             onClick={() => document.getElementById("csv-file-input")?.click()}
                             disabled={importCsvMutation.isPending}
@@ -395,8 +395,8 @@ export default function AdminUsers() {
                         </div>
                         <div className="w-full md:w-[160px]">
                             <Label className="text-xs font-semibold mb-1 block">Uloga</Label>
-                            <Select 
-                                value={roleFilter} 
+                            <Select
+                                value={roleFilter}
                                 onValueChange={(val) => {
                                     setRoleFilter(val);
                                     setPage(1);
@@ -415,8 +415,8 @@ export default function AdminUsers() {
                         </div>
                         <div className="w-full md:w-[160px]">
                             <Label className="text-xs font-semibold mb-1 block">Verifikacija</Label>
-                            <Select 
-                                value={statusFilter} 
+                            <Select
+                                value={statusFilter}
                                 onValueChange={(val) => {
                                     setStatusFilter(val);
                                     setPage(1);
@@ -434,8 +434,8 @@ export default function AdminUsers() {
                         </div>
                         <div className="w-full md:w-[160px]">
                             <Label className="text-xs font-semibold mb-1 block">Plovilo</Label>
-                            <Select 
-                                value={vesselFilter} 
+                            <Select
+                                value={vesselFilter}
                                 onValueChange={(val) => {
                                     setVesselFilter(val);
                                     setPage(1);
@@ -596,13 +596,13 @@ export default function AdminUsers() {
                             )}
                         </TableBody>
                     </Table>
-                    
+
                     {totalPages > 1 && (
                         <div className="flex justify-center py-6 border-t">
                             <Pagination>
                                 <PaginationContent>
                                     <PaginationItem>
-                                        <PaginationPrevious 
+                                        <PaginationPrevious
                                             onClick={() => setPage(p => Math.max(1, p - 1))}
                                             className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
                                         />
@@ -611,7 +611,7 @@ export default function AdminUsers() {
                                         {page} / {totalPages} ({totalUsers} {t.admin.users.toLowerCase()})
                                     </div>
                                     <PaginationItem>
-                                        <PaginationNext 
+                                        <PaginationNext
                                             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                                             className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
                                         />
@@ -795,9 +795,9 @@ export default function AdminUsers() {
             <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>{t.admin.addNewUser}</DialogTitle>
+                        <DialogTitle>Dodaj novog člana marine</DialogTitle>
                         <DialogDescription>
-                            Unesite podatke o novom korisniku. Jedino obavezno polje je Ime i prezime (ili Naziv tvrtke).
+                            Unesite podatke o novom članu marine. Jedino obavezno polje je Ime (ili Naziv tvrtke).
                         </DialogDescription>
                     </DialogHeader>
 
@@ -808,18 +808,16 @@ export default function AdminUsers() {
                             <div className="flex bg-muted/60 p-1 rounded-xl gap-1">
                                 <button
                                     type="button"
-                                    className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                                        !newIsLegalEntity ? "bg-white shadow text-primary border border-gray-200" : "text-muted-foreground hover:text-foreground"
-                                    }`}
+                                    className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${!newIsLegalEntity ? "bg-white shadow text-primary border border-gray-200" : "text-muted-foreground hover:text-foreground"
+                                        }`}
                                     onClick={() => setNewIsLegalEntity(false)}
                                 >
                                     <span>👤 Fizička osoba</span>
                                 </button>
                                 <button
                                     type="button"
-                                    className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${
-                                        newIsLegalEntity ? "bg-white shadow text-primary border border-gray-200" : "text-muted-foreground hover:text-foreground"
-                                    }`}
+                                    className={`flex-1 py-2 px-3 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5 ${newIsLegalEntity ? "bg-white shadow text-primary border border-gray-200" : "text-muted-foreground hover:text-foreground"
+                                        }`}
                                     onClick={() => setNewIsLegalEntity(true)}
                                 >
                                     <span>🏢 Pravna osoba / Tvrtka</span>
@@ -928,7 +926,7 @@ export default function AdminUsers() {
                                         id="newAddress"
                                         value={newAddress}
                                         onChange={(e) => setNewAddress(e.target.value)}
-                                        placeholder="npr. Obala 1"
+                                        placeholder=""
                                     />
                                 </div>
                                 <div className="space-y-1">
@@ -949,26 +947,6 @@ export default function AdminUsers() {
                                         placeholder="21000"
                                     />
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Role & Access */}
-                        <div className="grid grid-cols-2 gap-3 border-t pt-3">
-                            <div className="space-y-1">
-                                <Label htmlFor="newRole" className="text-xs font-semibold">{t.admin.userRole}</Label>
-                                <Select
-                                    value={newRole}
-                                    onValueChange={(val) => setNewRole(val as "user" | "admin" | "operator")}
-                                >
-                                    <SelectTrigger className="h-9 text-xs">
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="user">{t.admin.roleUser}</SelectItem>
-                                        <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
-                                        <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
-                                    </SelectContent>
-                                </Select>
                             </div>
                         </div>
 

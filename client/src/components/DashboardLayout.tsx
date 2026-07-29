@@ -38,6 +38,7 @@ import {
   LogOut,
   PanelLeft,
   Settings,
+  Shield,
   User,
   Users,
   BarChart3,
@@ -158,6 +159,7 @@ function DashboardLayoutContent({
 
   const programSubItems = [
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
+    { icon: Shield, label: lang === "hr" ? "Operateri i administratori" : "Staff Accounts", path: "/admin/staff", adminOnly: true },
     { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
     { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types" },
     { icon: Sun, label: t.nav.seasons, path: "/admin/seasons" },
@@ -171,7 +173,7 @@ function DashboardLayoutContent({
     { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
     { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
-    { icon: Users, label: t.admin.users, path: "/admin/users", adminOnly: true },
+    { icon: Users, label: lang === "hr" ? "Članovi i plovila" : "Clients & Vessels", path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
     ...(isOperator
       ? [{ icon: FileText, label: lang === "hr" ? "Plan rada dizalica" : "Crane Schedule", path: "/admin/reports/schedule" }]

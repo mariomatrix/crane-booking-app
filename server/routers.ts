@@ -662,6 +662,64 @@ export const appRouter = router({
         return { success: true, tempPassword, userId: String(userId) };
       }),
 
+    createStaff: adminProcedure
+      .input(z.object({
+        firstName: z.string().min(1, "Ime je obavezno."),
+        lastName: z.string().optional(),
+        email: z.string().email("Neispravan email format."),
+        phone: z.string().min(1, "Mobitel/telefon je obavezan."),
+        role: z.enum(["operator", "admin"]),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const existing = await getUserByEmail(input.email.trim());
+        if (existing) {
+          throw new TRPCError({ code: "CONFLICT", message: "Email je već registriran." });
+        }
+
+        const tempPassword = crypto.randomBytes(5).toString("hex");
+        const passwordHash = await bcrypt.hash(tempPassword, 12);
+
+        const fullName = `${input.firstName.trim()} ${input.lastName ? input.lastName.trim() : ""}`.trim();
+
+        const userId = await createLocalUser({
+          email: input.email.trim(),
+          passwordHash,
+          firstName: input.firstName.trim(),
+          lastName: input.lastName ? input.lastName.trim() : undefined,
+          name: fullName,
+          phone: input.phone.trim(),
+          isLegalEntity: false,
+          city: "Split",
+          postalCode: "21000",
+          mustChangePassword: true,
+        });
+
+        if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        await updateUserRole(String(userId), input.role);
+
+        // Send invitation email
+        const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
+        const loginUrl = `${baseUrl}/auth`;
+
+        await sendUserInvitation({
+          to: input.email,
+          userName: input.firstName,
+          tempPassword,
+          loginUrl,
+        }).catch(err => console.warn(`[Email] Failed to send staff invitation to ${input.email}:`, err));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "staff_created_admin",
+          entityType: "user",
+          entityId: String(userId),
+          payload: { email: input.email, role: input.role },
+        });
+
+        return { success: true, tempPassword, userId: String(userId) };
+      }),
+
     importCsv: adminProcedure
       .input(z.object({ csvContent: z.string() }))
       .mutation(async ({ input, ctx }) => {

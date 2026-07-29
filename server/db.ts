@@ -137,7 +137,11 @@ export async function listAllUsers(
   }
 
   if (role && role !== "all") {
-    conditions.push(eq(users.role, role as any));
+    if (role === "staff") {
+      conditions.push(or(eq(users.role, "admin"), eq(users.role, "operator")) as any);
+    } else {
+      conditions.push(eq(users.role, role as any));
+    }
   }
 
   if (status && status !== "all") {

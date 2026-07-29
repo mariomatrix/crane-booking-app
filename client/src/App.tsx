@@ -18,6 +18,7 @@ import AdminCranes from "./pages/admin/AdminCranes";
 import AdminCalendar from "./pages/admin/AdminCalendar";
 import AdminSettings from "./pages/admin/AdminSettings";
 import AdminUsers from "./pages/admin/AdminUsers";
+import AdminStaff from "./pages/admin/AdminStaff";
 import AdminAnalytics from "./pages/admin/AdminAnalytics";
 import AdminServiceTypes from "./pages/admin/AdminServiceTypes";
 import AdminSeasons from "./pages/admin/AdminSeasons";
@@ -71,6 +72,9 @@ function Router() {
       </Route>
       <Route path="/admin/users">
         <AdminLayout><AdminUsers /></AdminLayout>
+      </Route>
+      <Route path="/admin/staff">
+        <AdminLayout><AdminStaff /></AdminLayout>
       </Route>
       <Route path="/admin/users/:id">
         <AdminLayout><AdminUserCard /></AdminLayout>
