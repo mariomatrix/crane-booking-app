@@ -86,6 +86,24 @@ async function startServer() {
   // REST API v1
   app.use("/api/v1", restApiRouter);
 
+  // SSE Real-time Calendar Sync Stream
+  app.get("/api/events/calendar-stream", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const { calendarSync } = await import("../services/calendarSync");
+
+    calendarSync.addClient({
+      id: clientId,
+      res,
+      userId: clientId,
+    });
+  });
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

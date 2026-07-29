@@ -111,6 +111,39 @@ export default function AdminCalendar() {
     const { data: landZones = [] } = trpc.landZone.list.useQuery();
     const utils = trpc.useUtils();
 
+    // ─── Real-Time Calendar Event Synchronizer (SSE) ───────────────────────
+    useEffect(() => {
+        const eventSource = new EventSource("/api/events/calendar-stream");
+
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === "CALENDAR_UPDATED") {
+                    // Invalidira tRPC upite za kalendar i listu čekanja
+                    utils.reservation.listAll.invalidate();
+                    utils.waitingList.listAll.invalidate();
+                    utils.landWaiting.listAll.invalidate();
+
+                    // Prikazuje obavijest operateru s imenom aktera i radnjom
+                    toast.info(`${data.actorName} ${data.actionText}`, {
+                        description: "Kalendar je automatski osvježen.",
+                        duration: 4000,
+                    });
+                }
+            } catch (err) {
+                console.error("[SSE] Error parsing calendar event:", err);
+            }
+        };
+
+        eventSource.onerror = (err) => {
+            console.warn("[SSE] EventSource connection issue:", err);
+        };
+
+        return () => {
+            eventSource.close();
+        };
+    }, [utils]);
+
     const workStart = sysSettings?.workdayStart ?? "08:00";
     const workEnd = sysSettings?.workdayEnd ?? "16:00";
 

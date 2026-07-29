@@ -1960,6 +1960,16 @@ export const appRouter = router({
           }).catch(console.warn);
         }
 
+        const { calendarSync } = await import("./services/calendarSync");
+        calendarSync.broadcast({
+          type: "CALENDAR_UPDATED",
+          actorId: ctx.user.id,
+          actorName: ctx.user.name || ctx.user.firstName || ctx.user.email,
+          reservationId: input.id,
+          actionText: "je odobrio/la rezervaciju i dodijelio/la termin",
+          timestamp: new Date().toISOString(),
+        });
+
         return { success: true };
       }),
 
@@ -2037,6 +2047,16 @@ export const appRouter = router({
 
         const { notifyStatusChange } = await import("./services/notifications");
         notifyStatusChange(input.id).catch(console.error);
+
+        const { calendarSync } = await import("./services/calendarSync");
+        calendarSync.broadcast({
+          type: "CALENDAR_UPDATED",
+          actorId: ctx.user.id,
+          actorName: ctx.user.name || ctx.user.firstName || ctx.user.email,
+          reservationId: input.id,
+          actionText: "je premjestio/la termin rezervacije (drag & drop)",
+          timestamp: new Date().toISOString(),
+        });
 
         await createAuditEntry({
           actorId: ctx.user.id,
