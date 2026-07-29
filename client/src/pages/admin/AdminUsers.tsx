@@ -90,7 +90,6 @@ export default function AdminUsers() {
     const [editOibError, setEditOibError] = useState<string | null>(null);
     const [editRole, setEditRole] = useState<"user" | "admin" | "operator">("user");
     const [showCreateDialog, setShowCreateDialog] = useState(false);
-    const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
 
     // Create form state
     const [newIsLegalEntity, setNewIsLegalEntity] = useState(false);
@@ -239,9 +238,8 @@ export default function AdminUsers() {
     });
 
     const adminCreateUser = trpc.user.create.useMutation({
-        onSuccess: (data) => {
-            toast.success("Korisnik uspješno kreiran!");
-            setCreatedTempPassword(data.tempPassword || null);
+        onSuccess: () => {
+            toast.success("Korisnik uspješno spremljen!");
             setShowCreateDialog(false);
             resetCreateForm();
             utils.user.list.invalidate();
@@ -1011,47 +1009,6 @@ export default function AdminUsers() {
                         >
                             {adminCreateUser.isPending ? t.admin.creating : t.admin.addUser}
                         </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Success/Password Dialog */}
-            <Dialog open={!!createdTempPassword} onOpenChange={(open) => !open && setCreatedTempPassword(null)}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{t.admin.userCreatedTitle}</DialogTitle>
-                        <DialogDescription>
-                            {t.admin.userCreatedDesc}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="py-6 text-center space-y-4">
-                        <p className="text-sm text-muted-foreground">{t.admin.tempPasswordLabel}</p>
-                        <div className="relative">
-                            <div className="bg-muted p-4 rounded-lg font-mono text-xl tracking-wider select-all pr-12">
-                                {createdTempPassword}
-                            </div>
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
-                                type="button"
-                                onClick={() => {
-                                    if (createdTempPassword) {
-                                        navigator.clipboard.writeText(createdTempPassword);
-                                        toast.success("Lozinka kopirana u međuspremnik.");
-                                    }
-                                }}
-                                title="Kopiraj lozinku"
-                            >
-                                <Copy className="h-4 w-4" />
-                            </Button>
-                        </div>
-                        <p className="text-xs text-amber-600 font-medium">
-                            {t.admin.recordPasswordWarning}
-                        </p>
-                    </div>
-                    <DialogFooter>
-                        <Button onClick={() => setCreatedTempPassword(null)}>{t.admin.cancel === "Odustani" ? "Zatvori" : "Close"}</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
