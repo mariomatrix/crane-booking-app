@@ -493,7 +493,7 @@ export default function AdminCalendar() {
         }
 
         const newOffsetDate = info.event.start!;
-        const diffDays = Math.round((newOffsetDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+        const diffDays = Math.floor((newOffsetDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
 
         if (diffDays < 0 || diffDays >= activeCranes.length) {
             info.revert();
@@ -533,7 +533,7 @@ export default function AdminCalendar() {
         let craneId = info.event.extendedProps.craneId;
 
         if (viewMode === 'master') {
-            const diffDays = Math.round((newStart.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+            const diffDays = Math.floor((newStart.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
             if (diffDays < 0 || diffDays >= activeCranes.length) {
                 info.revert();
                 return;
