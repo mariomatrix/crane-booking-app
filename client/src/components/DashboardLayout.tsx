@@ -173,7 +173,7 @@ function DashboardLayoutContent({
     { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
     { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
-    { icon: Users, label: lang === "hr" ? "Članovi i plovila" : "Clients & Vessels", path: "/admin/users", adminOnly: true },
+    { icon: Users, label: lang === "hr" ? "Korisnici i plovila" : "Clients & Vessels", path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
     ...(isOperator
       ? [{ icon: FileText, label: lang === "hr" ? "Plan rada dizalica" : "Crane Schedule", path: "/admin/reports/schedule" }]

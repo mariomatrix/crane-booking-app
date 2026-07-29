@@ -206,9 +206,9 @@ export default function AdminStaff() {
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="staff">Svo osoblje (svi)</SelectItem>
-                                <SelectItem value="operator">Samo Operateri</SelectItem>
-                                <SelectItem value="admin">Samo Administratori</SelectItem>
+                                <SelectItem value="staff">Svi</SelectItem>
+                                <SelectItem value="operator">Operateri</SelectItem>
+                                <SelectItem value="admin">Administratori</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -379,11 +379,10 @@ export default function AdminStaff() {
                             <div className="grid grid-cols-2 gap-2 pt-1">
                                 <button
                                     type="button"
-                                    className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
-                                        role === "operator"
+                                    className={`p-2.5 rounded-xl border text-left text-xs transition-all ${role === "operator"
                                             ? "border-primary bg-primary/5 text-primary font-bold shadow-sm"
                                             : "border-gray-200 hover:bg-muted/50"
-                                    }`}
+                                        }`}
                                     onClick={() => setRole("operator")}
                                 >
                                     <div className="font-bold flex items-center gap-1.5">⚙️ Operater</div>
@@ -393,11 +392,10 @@ export default function AdminStaff() {
                                 </button>
                                 <button
                                     type="button"
-                                    className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
-                                        role === "admin"
+                                    className={`p-2.5 rounded-xl border text-left text-xs transition-all ${role === "admin"
                                             ? "border-purple-600 bg-purple-50 text-purple-900 font-bold shadow-sm"
                                             : "border-gray-200 hover:bg-muted/50"
-                                    }`}
+                                        }`}
                                     onClick={() => setRole("admin")}
                                 >
                                     <div className="font-bold flex items-center gap-1.5">🛡️ Administrator</div>

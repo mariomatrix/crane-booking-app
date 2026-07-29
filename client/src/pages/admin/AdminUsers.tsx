@@ -341,7 +341,7 @@ export default function AdminUsers() {
         <div className="space-y-6">
             <Card>
                 <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle>{t.admin.users}</CardTitle>
+                    <CardTitle>Korisnici i plovila</CardTitle>
                     <div className="flex items-center gap-2">
                         <input
                             type="file"
@@ -394,26 +394,6 @@ export default function AdminUsers() {
                             </div>
                         </div>
                         <div className="w-full md:w-[160px]">
-                            <Label className="text-xs font-semibold mb-1 block">Uloga</Label>
-                            <Select
-                                value={roleFilter}
-                                onValueChange={(val) => {
-                                    setRoleFilter(val);
-                                    setPage(1);
-                                }}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">Sve uloge</SelectItem>
-                                    <SelectItem value="user">Korisnik (Član)</SelectItem>
-                                    <SelectItem value="operator">Operater</SelectItem>
-                                    <SelectItem value="admin">Administrator</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="w-full md:w-[160px]">
                             <Label className="text-xs font-semibold mb-1 block">Verifikacija</Label>
                             <Select
                                 value={statusFilter}
@@ -460,7 +440,7 @@ export default function AdminUsers() {
                                 <TableHead>{t.admin.userName}</TableHead>
                                 <TableHead>{t.admin.userEmail}</TableHead>
                                 <TableHead>{t.admin.userPhone}</TableHead>
-                                <TableHead>{t.admin.userRole}</TableHead>
+                                <TableHead>Registracija plovila</TableHead>
                                 <TableHead>Posljednja Prijava</TableHead>
                                 <TableHead className="text-right">Akcije</TableHead>
                             </TableRow>
@@ -498,31 +478,18 @@ export default function AdminUsers() {
                                     </TableCell>
                                     <TableCell>{user.phone || "-"}</TableCell>
                                     <TableCell>
-                                        <Select
-                                            defaultValue={user.role}
-                                            onValueChange={(val: string) =>
-                                                setRole.mutate({ id: user.id, role: val as "user" | "admin" | "operator" })
-                                            }
-                                            disabled={setRole.isPending}
-                                        >
-                                            <SelectTrigger className="w-[130px]">
-                                                <div className="flex items-center gap-2">
-                                                    {user.role === "admin" ? (
-                                                        <ShieldAlert className="h-4 w-4 text-red-500" />
-                                                    ) : user.role === "operator" ? (
-                                                        <Shield className="h-4 w-4 text-blue-500" />
-                                                    ) : (
-                                                        <Shield className="h-4 w-4 text-gray-500" />
-                                                    )}
-                                                    <SelectValue />
-                                                </div>
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="user">{t.admin.roleUser}</SelectItem>
-                                                <SelectItem value="operator">{t.admin.roleOperator}</SelectItem>
-                                                <SelectItem value="admin">{t.admin.roleAdmin}</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                        {(user as any).vessels && (user as any).vessels.length > 0 ? (
+                                            <div className="flex flex-col gap-1">
+                                                {(user as any).vessels.map((v: any) => (
+                                                    <div key={v.id} className="flex items-center gap-1.5 text-xs font-mono">
+                                                        <span className="font-bold text-primary">{v.registration || v.name}</span>
+                                                        {v.registration && <span className="text-[10px] text-muted-foreground font-sans">({v.name})</span>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <span className="text-xs text-muted-foreground italic">Nema plovila</span>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         {new Date(user.lastSignedIn).toLocaleString("hr-HR")}

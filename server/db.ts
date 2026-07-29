@@ -1,4 +1,4 @@
-import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql, ilike, isNotNull } from "drizzle-orm";
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql, ilike, isNotNull, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
@@ -172,7 +172,29 @@ export async function listAllUsers(
     .limit(limit)
     .offset(offset);
 
-  return { data, total: Number(countRes?.count || 0) };
+  const userIds = data.map(u => u.id);
+  let vesselsMap: Record<string, Array<{ id: string; name: string; registration: string | null; type: string }>> = {};
+  if (userIds.length > 0) {
+    const allVessels = await db.select({
+      id: vessels.id,
+      ownerId: vessels.ownerId,
+      name: vessels.name,
+      registration: vessels.registration,
+      type: vessels.type
+    }).from(vessels).where(inArray(vessels.ownerId, userIds));
+
+    for (const v of allVessels) {
+      if (!vesselsMap[v.ownerId]) vesselsMap[v.ownerId] = [];
+      vesselsMap[v.ownerId].push(v);
+    }
+  }
+
+  const dataWithVessels = data.map(u => ({
+    ...u,
+    vessels: vesselsMap[u.id] || []
+  }));
+
+  return { data: dataWithVessels, total: Number(countRes?.count || 0) };
 }
 
 export async function updateUserRole(id: string, role: "user" | "operator" | "admin") {
