@@ -31,6 +31,7 @@ import AdminCraneOps from "./pages/admin/AdminCraneOps";
 import Profile from "./pages/Profile";
 import MyCard from "./pages/MyCard";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
+import MobileOperatorApp from "./pages/mobile/MobileOperatorApp";
 
 // Reports
 import ReportHub from "@/pages/admin/reports/ReportHub";
@@ -53,6 +54,7 @@ function Router() {
       <Route path="/profile" component={Profile} />
       <Route path="/my-card" component={MyCard} />
       <Route path="/privacy" component={PrivacyPolicy} />
+      <Route path="/mobile" component={MobileOperatorApp} />
 
       {/* Admin routes */}
       <Route path="/admin">
