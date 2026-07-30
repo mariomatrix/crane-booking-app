@@ -273,6 +273,37 @@ export function AdminReservationForm({
                     </div>
                 </div>
 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                    <div className="space-y-2">
+                        <Label>{t.form.contactPhone}</Label>
+                        <Input
+                            value={contactPhone}
+                            onChange={(e) => setContactPhone(e.target.value)}
+                            placeholder="npr. 0912345678"
+                        />
+                    </div>
+                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800/40 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 h-[42px]">
+                        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none text-gray-700 dark:text-gray-300">
+                            <input
+                                type="checkbox"
+                                checked={isWaitlisted}
+                                onChange={(e) => {
+                                    setIsWaitlisted(e.target.checked);
+                                    if (e.target.checked) {
+                                        setOverrideCapacityCheck(false);
+                                    }
+                                }}
+                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                            />
+                            <span>
+                                {lang === "hr"
+                                    ? "Stavi klijenta na listu čekanja za suhi vez"
+                                    : "Place client on dry berth waiting list"}
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
                 <CreateUserDialog
                     open={isCreateUserOpen}
                     onOpenChange={setIsCreateUserOpen}
@@ -447,27 +478,7 @@ export function AdminReservationForm({
                             </div>
                         )}
 
-                        <div className="flex items-center gap-4 bg-gray-50 dark:bg-gray-800/40 p-3 rounded-lg border border-gray-200 dark:border-gray-800">
-                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none text-gray-700 dark:text-gray-300">
-                                <input
-                                    type="checkbox"
-                                    checked={isWaitlisted}
-                                    onChange={(e) => {
-                                        setIsWaitlisted(e.target.checked);
-                                        if (e.target.checked) {
-                                            setOverrideCapacityCheck(false);
-                                        }
-                                    }}
-                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                                />
-                                <span>
-                                    {lang === "hr"
-                                        ? "Stavi klijenta na listu čekanja za suhi vez (termin dizalice će se odrediti naknadno)"
-                                        : "Place client on dry berth waiting list (crane schedule to be determined)"
-                                    }
-                                </span>
-                            </label>
-                        </div>
+
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1.5">
@@ -634,16 +645,6 @@ export function AdminReservationForm({
                                 <Label className="text-xs">{t.form.vesselWeight} (t)</Label>
                                 <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} disabled={selectedVesselId !== "new"} />
                             </div>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <Label>{t.form.contactPhone}</Label>
-                            <Input
-                                value={contactPhone}
-                                onChange={(e) => setContactPhone(e.target.value)}
-                            />
                         </div>
                     </div>
                 </div>
