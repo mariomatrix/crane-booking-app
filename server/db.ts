@@ -4,6 +4,7 @@ import postgres from "postgres";
 import {
   users,
   cranes,
+  operatorCranes,
   reservations,
   vessels,
   waitingList,
@@ -1415,4 +1416,39 @@ export async function getCraneStats() {
       opsCount: crStat?.opsCount ?? 0,
     };
   });
+}
+
+// ─── Operator Crane & PIN Management ─────────────────────────────────────
+
+export async function getOperatorCranes(userId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ craneId: operatorCranes.craneId })
+    .from(operatorCranes)
+    .where(eq(operatorCranes.userId, userId));
+  return rows.map(r => r.craneId);
+}
+
+export async function assignOperatorCranes(userId: string, craneIds: string[]) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(operatorCranes).where(eq(operatorCranes.userId, userId));
+  if (craneIds.length > 0) {
+    await db.insert(operatorCranes).values(
+      craneIds.map(craneId => ({ userId, craneId }))
+    );
+  }
+}
+
+export async function setOperatorPin(userId: string, pinCode: string | null) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ pinCode, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+export async function getUserByPin(pinCode: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [user] = await db.select().from(users).where(and(eq(users.pinCode, pinCode), eq(users.userStatus, "active")));
+  return user ?? null;
 }

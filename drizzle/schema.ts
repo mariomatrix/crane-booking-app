@@ -60,6 +60,7 @@ export const users = pgTable("users", {
     anonymizedAt: timestamp("anonymized_at"),
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
     loginMethod: varchar("login_method", { length: 64 }),
+    pinCode: varchar("pin_code", { length: 10 }),                     // 4-digit PIN for mobile app login
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),
@@ -91,6 +92,14 @@ export const cranes = pgTable("cranes", {
     notes: text("notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Operator Cranes (dodjela dizalica operaterima) ────────────────────
+export const operatorCranes = pgTable("operator_cranes", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    craneId: uuid("crane_id").notNull().references(() => cranes.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // ─── Vessels ──────────────────────────────────────────────────────────

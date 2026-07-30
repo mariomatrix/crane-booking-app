@@ -6,6 +6,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { appRouter } from "../routers";
 import restApiRouter from "../restApi";
+import mobileApiRouter from "../routes/mobileApi";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 
@@ -85,6 +86,9 @@ async function startServer() {
 
   // REST API v1
   app.use("/api/v1", restApiRouter);
+
+  // Mobile REST API v1
+  app.use("/api/mobile/v1", mobileApiRouter);
 
   // SSE Real-time Calendar Sync Stream
   app.get("/api/events/calendar-stream", async (req, res) => {

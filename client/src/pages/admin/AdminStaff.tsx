@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
     Loader2,
     Search,
@@ -40,6 +41,8 @@ import {
     Copy,
     CheckCircle2,
     UserX,
+    Smartphone,
+    Anchor,
 } from "lucide-react";
 import { format } from "date-fns";
 import { hr } from "date-fns/locale";
@@ -56,6 +59,20 @@ export default function AdminStaff() {
     // Dialog states
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [createdTempPassword, setCreatedTempPassword] = useState<string | null>(null);
+
+    // Operator Cranes & PIN Dialog
+    const [editCranesUser, setEditCranesUser] = useState<any>(null);
+    const [pinCode, setPinCode] = useState<string>("");
+    const [selectedCraneIds, setSelectedCraneIds] = useState<string[]>([]);
+
+    const { data: cranesList = [] } = trpc.crane.list.useQuery();
+    const assignedCranesQuery = trpc.operator.getCranes.useQuery(
+        { userId: editCranesUser?.id || "" },
+        { enabled: !!editCranesUser?.id }
+    );
+
+    const assignCranesMutation = trpc.operator.assignCranes.useMutation();
+    const setPinMutation = trpc.operator.setPin.useMutation();
 
     // Form state for creating staff
     const [firstName, setFirstName] = useState("");
@@ -294,6 +311,22 @@ export default function AdminStaff() {
                                             <Button
                                                 variant="outline"
                                                 size="sm"
+                                                className="h-7 px-2 text-xs text-primary hover:bg-primary/10"
+                                                onClick={() => {
+                                                    setEditCranesUser(u);
+                                                    setPinCode(u.pinCode || "");
+                                                    if (assignedCranesQuery.data) {
+                                                        setSelectedCraneIds(assignedCranesQuery.data);
+                                                    }
+                                                }}
+                                                title="Mobilne postavke (PIN i Dodjela dizalica)"
+                                            >
+                                                <Smartphone className="h-3.5 w-3.5 mr-1" />
+                                                <span className="text-[10px]">PIN / Dizalice</span>
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
                                                 className="h-7 px-2 text-xs"
                                                 onClick={() => setResetUser(u)}
                                                 title="Promijeni lozinku"
@@ -500,7 +533,89 @@ export default function AdminStaff() {
                         </div>
                     </div>
                     <DialogFooter>
-                        <Button onClick={() => setCreatedTempPassword(null)}>Zatvori</Button>
+                        <Button onClick={() => setCreatedTempPassword(null)}>U redu</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Edit Operator PIN & Cranes Dialog */}
+            <Dialog open={!!editCranesUser} onOpenChange={(open) => !open && setEditCranesUser(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Smartphone className="h-5 w-5 text-primary" />
+                            Mobilne postavke: {editCranesUser?.name}
+                        </DialogTitle>
+                        <DialogDescription>
+                            Postavite 4-znamenkasti PIN za mobilnu prijavu i dodijelite dizalice kojima operater upravlja.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-3">
+                        <div className="space-y-2">
+                            <Label className="text-xs font-semibold">4-Znamenkasti Mobilni PIN</Label>
+                            <Input
+                                type="text"
+                                maxLength={6}
+                                value={pinCode}
+                                onChange={(e) => setPinCode(e.target.value)}
+                                placeholder="npr. 1234"
+                                className="font-mono text-base tracking-widest"
+                            />
+                            <p className="text-[11px] text-muted-foreground">PIN služi za brzu prijavu u mobilnu Android aplikaciju.</p>
+                        </div>
+
+                        <div className="space-y-2 pt-2 border-t">
+                            <Label className="text-xs font-semibold flex items-center gap-1.5">
+                                <Anchor className="h-4 w-4 text-primary" />
+                                Dodijeljene dizalice
+                            </Label>
+                            <p className="text-[11px] text-muted-foreground mb-2">
+                                Operater na mobitelu vidi samo raspored za odabrane dizalice. Ako nijedna nije odabrana, vidi sve dizalice.
+                            </p>
+                            <div className="space-y-2 max-h-48 overflow-y-auto p-2 border rounded-lg bg-muted/20">
+                                {(cranesList as any[]).map((c: any) => {
+                                    const isChecked = selectedCraneIds.includes(c.id);
+                                    return (
+                                        <label key={c.id} className="flex items-center gap-3 p-1.5 rounded hover:bg-muted cursor-pointer select-none">
+                                            <Checkbox
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                    if (checked) {
+                                                        setSelectedCraneIds(prev => [...prev, c.id]);
+                                                    } else {
+                                                        setSelectedCraneIds(prev => prev.filter(id => id !== c.id));
+                                                    }
+                                                }}
+                                            />
+                                            <span className="text-xs font-medium">{c.name} ({c.type})</span>
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setEditCranesUser(null)}>Odustani</Button>
+                        <Button
+                            disabled={setPinMutation.isPending || assignCranesMutation.isPending}
+                            onClick={async () => {
+                                if (!editCranesUser) return;
+                                try {
+                                    await setPinMutation.mutateAsync({ userId: editCranesUser.id, pinCode: pinCode.trim() || null });
+                                    await assignCranesMutation.mutateAsync({ userId: editCranesUser.id, craneIds: selectedCraneIds });
+                                    toast.success("Postavke operatera spremljene.");
+                                    setEditCranesUser(null);
+                                    utils.user.list.invalidate();
+                                } catch (err: any) {
+                                    toast.error(err.message || "Greška pri spremanju.");
+                                }
+                            }}
+                        >
+                            {(setPinMutation.isPending || assignCranesMutation.isPending) && (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Spremi postavke
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

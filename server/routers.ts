@@ -60,6 +60,9 @@ import {
   updateSeason,
   deleteSeason,
   getActiveSeason,
+  getOperatorCranes,
+  assignOperatorCranes,
+  setOperatorPin,
   createHoliday,
   listHolidays,
   deleteHoliday,
@@ -2697,6 +2700,27 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         await deleteSeason(input.id);
         await createAuditEntry({ actorId: ctx.user.id, action: "season_deleted", entityType: "season", entityId: input.id });
+        return { success: true };
+      }),
+  }),
+
+  // ─── Operator Crane & PIN Management ───────────────────────────────────
+  operator: router({
+    getCranes: adminProcedure
+      .input(z.object({ userId: z.string().uuid() }))
+      .query(async ({ input }) => getOperatorCranes(input.userId)),
+    assignCranes: adminProcedure
+      .input(z.object({ userId: z.string().uuid(), craneIds: z.array(z.string().uuid()) }))
+      .mutation(async ({ input, ctx }) => {
+        await assignOperatorCranes(input.userId, input.craneIds);
+        await createAuditEntry({ actorId: ctx.user.id, action: "operator_cranes_updated", entityType: "user", entityId: input.userId });
+        return { success: true };
+      }),
+    setPin: adminProcedure
+      .input(z.object({ userId: z.string().uuid(), pinCode: z.string().max(10).nullable() }))
+      .mutation(async ({ input, ctx }) => {
+        await setOperatorPin(input.userId, input.pinCode);
+        await createAuditEntry({ actorId: ctx.user.id, action: "operator_pin_updated", entityType: "user", entityId: input.userId });
         return { success: true };
       }),
   }),

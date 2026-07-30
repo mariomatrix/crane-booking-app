@@ -26,11 +26,26 @@ async function runMigration() {
             ADD COLUMN IF NOT EXISTS "contact_person" varchar(255),
             ADD COLUMN IF NOT EXISTS "address" text,
             ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
-            ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL
+            ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL,
+            ADD COLUMN IF NOT EXISTS "pin_code" varchar(10)
         `;
         console.log("User table columns verified.");
     } catch (e: any) {
         console.warn("User column verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "operator_cranes" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id") ON DELETE CASCADE,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("operator_cranes table verified.");
+    } catch (e: any) {
+        console.warn("operator_cranes table verification warning:", e?.message || e);
     }
 
     try {
