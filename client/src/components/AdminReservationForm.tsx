@@ -177,8 +177,8 @@ export function AdminReservationForm({
         e.preventDefault();
         
         if (isWaitlisted) {
-            if (!userId || !serviceTypeId || !requestedDate || !craneId || !durationMin || !vesselType) {
-                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu, trajanje i tip plovila).");
+            if (!userId || !serviceTypeId || !requestedDate || !vesselType) {
+                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum i tip plovila).");
                 return;
             }
         } else {
@@ -682,9 +682,9 @@ export function AdminReservationForm({
                             !serviceTypeId || 
                             !requestedDate || 
                             !vesselType || 
-                            !craneId ||
-                            !durationMin ||
                             (!isWaitlisted && (
+                                !craneId ||
+                                !durationMin ||
                                 !scheduledTime || 
                                 (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
                             ))
