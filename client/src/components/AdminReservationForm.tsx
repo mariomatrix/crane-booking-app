@@ -13,7 +13,7 @@ import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { formatToSqlDate } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { Loader2, Send, UserPlus, XCircle } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
@@ -113,6 +113,35 @@ export function AdminReservationForm({
     const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
     const usersList = usersQuery.data?.data || [];
     const { data: cranes = [] } = trpc.crane.list.useQuery();
+    const { data: seasonsList = [] } = trpc.season.list.useQuery();
+
+    const activeSeasonForSelectedDate = useMemo(() => {
+        if (!requestedDate) return null;
+        const dateStr = formatToSqlDate(requestedDate);
+        const activeSeason = (seasonsList as any[]).find((s: any) =>
+            s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
+        );
+        if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
+            const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+            const dayKey = dayKeys[requestedDate.getDay()];
+            const dayHours = (activeSeason.workingHours as any)[dayKey];
+            if (dayHours?.from && dayHours?.to) {
+                return { from: dayHours.from, to: dayHours.to, seasonName: activeSeason.name };
+            }
+        }
+        return null;
+    }, [seasonsList, requestedDate]);
+
+    // Update default scheduled time to match active season start time
+    useEffect(() => {
+        if (requestedDate && activeSeasonForSelectedDate?.from) {
+            if (!scheduledTime || scheduledTime === "08:00") {
+                setScheduledTime(activeSeasonForSelectedDate.from);
+            }
+        } else if (!scheduledTime) {
+            setScheduledTime("07:00");
+        }
+    }, [requestedDate, activeSeasonForSelectedDate]);
 
     const { data: userVessels = [], isLoading: userVesselsLoading } =
         trpc.vessel.listByUser.useQuery({ userId }, { enabled: !!userId });
@@ -509,6 +538,13 @@ export function AdminReservationForm({
                                 </div>
                             )}
                         </div>
+                        {activeSeasonForSelectedDate && (
+                            <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
+                                🕒 {lang === "hr"
+                                    ? `Radno vrijeme sezone (${activeSeasonForSelectedDate.seasonName}): ${activeSeasonForSelectedDate.from} — ${activeSeasonForSelectedDate.to}h`
+                                    : `Season working hours (${activeSeasonForSelectedDate.seasonName}): ${activeSeasonForSelectedDate.from} — ${activeSeasonForSelectedDate.to}`}
+                            </p>
+                        )}
 
                         {!isWaitlisted && (
                             <div className="grid grid-cols-12 gap-3">

@@ -144,8 +144,27 @@ export default function AdminCalendar() {
         };
     }, [utils]);
 
-    const workStart = sysSettings?.workdayStart ?? "08:00";
-    const workEnd = sysSettings?.workdayEnd ?? "16:00";
+    const { data: seasonsList = [] } = trpc.season.list.useQuery();
+
+    const currentSeasonWorkingHours = useMemo(() => {
+        if (!viewDate) return null;
+        const dateStr = formatToSqlDate(viewDate);
+        const activeSeason = (seasonsList as any[]).find((s: any) =>
+            s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
+        );
+        if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
+            const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+            const dayKey = dayKeys[viewDate.getDay()];
+            const dayHours = (activeSeason.workingHours as any)[dayKey];
+            if (dayHours?.from && dayHours?.to) {
+                return { from: dayHours.from, to: dayHours.to, seasonName: activeSeason.name };
+            }
+        }
+        return null;
+    }, [seasonsList, viewDate]);
+
+    const workStart = currentSeasonWorkingHours?.from ?? sysSettings?.workdayStart ?? "07:00";
+    const workEnd = currentSeasonWorkingHours?.to ?? sysSettings?.workdayEnd ?? "15:00";
 
     // Create Reservation Dialog State
     const [isCreateResOpen, setIsCreateResOpen] = useState(false);
