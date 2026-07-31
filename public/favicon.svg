@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Gantry Crane Portal Frame -->
+  <!-- Top Main Beam -->
+  <rect x="64" y="64" width="384" height="64" rx="8" fill="#17F501" />
+  
+  <!-- Top Inner Trolley Handle -->
+  <rect x="180" y="84" width="152" height="24" rx="12" fill="#17F501" />
+
+  <!-- Left Support Leg -->
+  <rect x="64" y="128" width="96" height="320" rx="4" fill="#17F501" />
+  
+  <!-- Right Support Leg -->
+  <rect x="352" y="128" width="96" height="320" rx="4" fill="#17F501" />
+  
+  <!-- Inner Horizontal Crossbar -->
+  <rect x="160" y="144" width="192" height="32" fill="#17F501" />
+  
+  <!-- Center Pulley Wheel -->
+  <circle cx="256" cy="208" r="48" fill="none" stroke="#17F501" stroke-width="24" />
+  <circle cx="256" cy="208" r="16" fill="#17F501" />
+
+  <!-- Crane Hook Shank & Curved Hook -->
+  <path 
+    d="M 256 256 
+       V 320 
+       C 256 364 216 384 192 352 
+       C 172 328 192 296 220 296" 
+    fill="none" 
+    stroke="#17F501" 
+    stroke-width="26" 
+    stroke-linecap="round" 
+    stroke-linejoin="round" 
+  />
+</svg>
