@@ -1,25 +1,85 @@
 import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { useLang } from "@/contexts/LangContext";
-import { Ship, Clock, Phone, Mail, MapPin, Calendar, HelpCircle, Shield } from "lucide-react";
+import { Ship, Clock, Phone, Mail, MapPin, Calendar, HelpCircle, Shield, CheckCircle2 } from "lucide-react";
+import { trpc } from "@/lib/trpc";
+import { Badge } from "@/components/ui/badge";
+import { formatAppDate } from "@/lib/date-utils";
+
+function isSeasonActiveNow(startDateStr?: string, endDateStr?: string): boolean {
+  if (!startDateStr || !endDateStr) return false;
+  const now = new Date();
+  const currentMonthDay = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  const startMMDD = startDateStr.length >= 10 ? startDateStr.slice(5, 10) : startDateStr;
+  const endMMDD = endDateStr.length >= 10 ? endDateStr.slice(5, 10) : endDateStr;
+
+  if (startMMDD <= endMMDD) {
+    return currentMonthDay >= startMMDD && currentMonthDay <= endMMDD;
+  } else {
+    return currentMonthDay >= startMMDD || currentMonthDay <= endMMDD;
+  }
+}
+
+function formatSeasonHours(workingHours: any, isHr: boolean): string[] {
+  if (!workingHours || typeof workingHours !== "object") return [];
+
+  const dayNames: Record<string, { hr: string; en: string }> = {
+    mon: { hr: "Pon", en: "Mon" },
+    tue: { hr: "Uto", en: "Tue" },
+    wed: { hr: "Sri", en: "Wed" },
+    thu: { hr: "Čet", en: "Thu" },
+    fri: { hr: "Pet", en: "Fri" },
+    sat: { hr: "Sub", en: "Sat" },
+    sun: { hr: "Ned", en: "Sun" },
+  };
+
+  const daysOrder = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  const groups: Array<{ days: string[]; timeStr: string }> = [];
+
+  for (const dayKey of daysOrder) {
+    const hours = workingHours[dayKey];
+    let timeStr = "";
+    if (hours && hours.from && hours.to) {
+      timeStr = `${hours.from} - ${hours.to}`;
+    } else {
+      timeStr = isHr ? "Zatvoreno" : "Closed";
+    }
+
+    const lastGroup = groups[groups.length - 1];
+    if (lastGroup && lastGroup.timeStr === timeStr) {
+      lastGroup.days.push(dayKey);
+    } else {
+      groups.push({ days: [dayKey], timeStr });
+    }
+  }
+
+  return groups.map((g) => {
+    const startDay = dayNames[g.days[0]][isHr ? "hr" : "en"];
+    const endDay = dayNames[g.days[g.days.length - 1]][isHr ? "hr" : "en"];
+    const daysLabel = g.days.length === 1 ? startDay : `${startDay} - ${endDay}`;
+    return `${daysLabel}: ${g.timeStr}`;
+  });
+}
 
 export default function LandingPage() {
   const { lang } = useLang();
-
   const isHr = lang === "hr";
+
+  const { data: seasons = [], isLoading: isLoadingSeasons } = trpc.season.list.useQuery();
 
   return (
     <div className="space-y-16 py-4">
       {/* Hero Section */}
       <section className="relative rounded-3xl overflow-hidden min-h-[480px] flex items-center justify-center text-white p-6 sm:p-12 shadow-2xl">
         {/* Background Image */}
-        <div 
-          className="absolute inset-0 bg-cover bg-center transition-transform duration-700 hover:scale-105" 
+        <div
+          className="absolute inset-0 bg-cover bg-center transition-transform duration-700 hover:scale-105"
           style={{ backgroundImage: "url('/psd-spinut-panorama-3.png')" }}
         />
         {/* Dark Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/70 to-transparent" />
-        
+
         {/* Hero Content */}
         <div className="relative z-10 max-w-3xl text-center space-y-6">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/20 backdrop-blur border border-primary/30 text-primary-foreground text-xs font-semibold uppercase tracking-wider mb-2">
@@ -30,20 +90,20 @@ export default function LandingPage() {
             {isHr ? "PŠD Špinut — Split" : "PSD Spinut — Split"}
           </h1>
           <p className="text-lg sm:text-xl text-slate-200 drop-shadow max-w-2xl mx-auto leading-relaxed">
-            {isHr 
+            {isHr
               ? "Jednostavno, brzo i transparentno upravljanje rezervacijama dizalica za članove društva. Prijavite se kako biste podnijeli zahtjev."
               : "Simple, fast, and transparent crane booking management for club members. Sign in to submit your reservation request."}
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <Button 
-              size="lg" 
+            <Button
+              size="lg"
               className="w-full sm:w-auto font-semibold px-8 bg-primary hover:bg-primary/90 text-white rounded-xl shadow-lg shadow-primary/25 transition-all hover:-translate-y-0.5"
               onClick={() => { window.location.href = getLoginUrl(); }}
             >
               {isHr ? "Prijavi se" : "Sign In"}
             </Button>
-            <Button 
-              size="lg" 
+            <Button
+              size="lg"
               variant="outline"
               className="w-full sm:w-auto font-semibold px-8 border-white/20 bg-white/10 backdrop-blur hover:bg-white/20 text-white rounded-xl transition-all hover:-translate-y-0.5"
               onClick={() => { window.location.href = "/auth?mode=register"; }}
@@ -53,59 +113,6 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-
-      {/* Features Grid
-      <section className="space-y-6">
-        <div className="text-center max-w-xl mx-auto space-y-2">
-          <h2 className="text-3xl font-bold tracking-tight text-foreground">
-            {isHr ? "Kako funkcionira sustav?" : "How does it work?"}
-          </h2>
-          <p className="text-muted-foreground">
-            {isHr
-              ? "Sve što vam je potrebno za dizanje i spuštanje vašeg plovila na jednom mjestu."
-              : "Everything you need for hauling out and launching your vessel in one place."}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-4">
-          <div className="p-6 rounded-2xl border bg-card hover:shadow-lg transition-all space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <Ship className="h-6 w-6" />
-            </div>
-            <h3 className="text-lg font-semibold">{isHr ? "1. Registrirajte plovila" : "1. Add Vessels"}</h3>
-            <p className="text-sm text-muted-foreground">
-              {isHr 
-                ? "Unesite dimenzije i težinu plovila u svoj karton kako biste ubrzali proces odobravanja rezervacije." 
-                : "Add vessel details (dimensions and weight) to your profile to speed up reservation approval."}
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl border bg-card hover:shadow-lg transition-all space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <Calendar className="h-6 w-6" />
-            </div>
-            <h3 className="text-lg font-semibold">{isHr ? "2. Pošaljite zahtjev" : "2. Submit Request"}</h3>
-            <p className="text-sm text-muted-foreground">
-              {isHr
-                ? "Odaberite željeni datum i tip operacije. Administrator će pregledati podatke i potvrditi slobodan termin."
-                : "Choose your preferred date and operation type. The administrator will review and schedule your slot."}
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl border bg-card hover:shadow-lg transition-all space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <Shield className="h-6 w-6" />
-            </div>
-            <h3 className="text-lg font-semibold">{isHr ? "3. Lista čekanja za suhi vez" : "3. Dry Berth Waiting List"}</h3>
-            <p className="text-sm text-muted-foreground">
-              {isHr
-                ? "Ako nema mjesta na kopnu ili slobodnih termina, sustav vas automatski vodi na listu čekanja po FIFO redoslijedu."
-                : "If dry berths are full or slots are taken, the system automatically waitlists you using the FIFO sequence."}
-            </p>
-          </div>
-        </div>
-      </section>
-      */}
 
       {/* Info: Radno Vrijeme & Kontakt */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -119,31 +126,62 @@ export default function LandingPage() {
               <h3 className="text-xl font-bold tracking-tight">{isHr ? "Radno vrijeme dizalice" : "Crane Working Hours"}</h3>
             </div>
             <p className="text-sm text-muted-foreground">
-              {isHr 
-                ? "Radno vrijeme podložno je sezonskim promjenama i vremenskim uvjetima. Praznicima dizalica ne radi."
-                : "Working hours are subject to seasonal changes and weather conditions. Closed on public holidays."}
+              {isHr
+                ? "Radno vrijeme definirano je aktivnom sezonom u lučici. Praznicima dizalica ne radi."
+                : "Working hours are defined by the active season in the marina. Closed on public holidays."}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4">
-            <div className="space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-              <h4 className="font-semibold text-sm text-primary">{isHr ? "Ljetno razdoblje" : "Summer Season"}</h4>
-              <p className="text-xs text-muted-foreground">{isHr ? "1. travnja — 31. listopada" : "April 1 — October 31"}</p>
-              <div className="text-sm font-medium space-y-1 mt-2">
-                <div>{isHr ? "Pon - Sub: 07:00 - 21:00" : "Mon - Sat: 07:00 - 21:00"}</div>
-                <div>{isHr ? "Ned: 08:00 - 14:00" : "Sun: 08:00 - 14:00"}</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            {isLoadingSeasons ? (
+              <div className="col-span-2 text-center py-6 text-sm text-muted-foreground">
+                {isHr ? "Učitavanje radnog vremena..." : "Loading working hours..."}
               </div>
-            </div>
+            ) : seasons.length === 0 ? (
+              <div className="col-span-2 space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border text-center text-sm text-muted-foreground">
+                {isHr ? "Redovno radno vrijeme: 08:00 - 16:00 (Pon - Pet)" : "Regular working hours: 08:00 - 16:00 (Mon - Fri)"}
+              </div>
+            ) : (
+              seasons.filter((s: any) => s.isActive !== false).map((season: any) => {
+                const isActiveNow = isSeasonActiveNow(season.startDate, season.endDate);
+                const formattedLines = formatSeasonHours(season.workingHours, isHr);
 
-            <div className="space-y-2 p-4 rounded-xl bg-slate-50 dark:bg-slate-900 border">
-              <h4 className="font-semibold text-sm text-primary">{isHr ? "Zimsko razdoblje" : "Winter Season"}</h4>
-              <p className="text-xs text-muted-foreground">{isHr ? "1. studenog — 31. ožujka" : "November 1 — March 31"}</p>
-              <div className="text-sm font-medium space-y-1 mt-2">
-                <div>{isHr ? "Pon - Pet: 08:00 - 16:00" : "Mon - Fri: 08:00 - 16:00"}</div>
-                <div>{isHr ? "Sub: 08:00 - 13:00" : "Sat: 08:00 - 13:00"}</div>
-                <div>{isHr ? "Ned: Zatvoreno" : "Sun: Closed"}</div>
-              </div>
-            </div>
+                return (
+                  <div
+                    key={season.id}
+                    className={`space-y-3 p-4.5 rounded-2xl border transition-all ${
+                      isActiveNow
+                        ? "bg-primary/5 border-primary/40 ring-2 ring-primary/20 shadow-xs"
+                        : "bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          {season.name}
+                        </h4>
+                        <p className="text-xs text-muted-foreground font-medium mt-0.5">
+                          📅 {formatAppDate(season.startDate)} — {formatAppDate(season.endDate)}
+                        </p>
+                      </div>
+                      {isActiveNow && (
+                        <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase tracking-wider shrink-0 shadow-2xs">
+                          {isHr ? "Aktivna sezona" : "Active Season"}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="text-xs font-semibold space-y-1.5 pt-1 text-slate-700 dark:text-slate-300">
+                      {formattedLines.map((line, idx) => (
+                        <div key={idx} className="flex items-center justify-between bg-white dark:bg-slate-800/80 px-2.5 py-1 rounded-lg border border-slate-100 dark:border-slate-700">
+                          <span>{line}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -158,7 +196,7 @@ export default function LandingPage() {
             </div>
             <p className="text-sm text-muted-foreground">
               {isHr
-                ? "Za hitne upite i dogovore oko termina izvan radnog vremena obratite se kapetanu lučice."
+                ? "Za sve upite i dogovore oko termina obratite se kapetanu lučice."
                 : "For urgent inquiries and scheduling slots outside normal working hours, contact the harbor master."}
             </p>
           </div>
