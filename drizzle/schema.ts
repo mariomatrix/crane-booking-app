@@ -64,6 +64,14 @@ export const users = pgTable("users", {
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     lastSignedIn: timestamp("last_signed_in").defaultNow().notNull(),
+}, (table) => {
+    return {
+        roleIdx: index("users_role_idx").on(table.role),
+        statusIdx: index("users_status_idx").on(table.userStatus),
+        createdAtIdx: index("users_created_at_idx").on(table.createdAt),
+        emailVerifiedAtIdx: index("users_email_verified_at_idx").on(table.emailVerifiedAt),
+        anonymizedAtIdx: index("users_anonymized_at_idx").on(table.anonymizedAt),
+    };
 });
 
 // ─── Service Types (tip operacije) ───────────────────────────────────
@@ -100,6 +108,11 @@ export const operatorCranes = pgTable("operator_cranes", {
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     craneId: uuid("crane_id").notNull().references(() => cranes.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("operator_cranes_user_id_idx").on(table.userId),
+        craneIdIdx: index("operator_cranes_crane_id_idx").on(table.craneId),
+    };
 });
 
 // ─── Vessels ──────────────────────────────────────────────────────────
@@ -115,6 +128,12 @@ export const vessels = pgTable("vessels", {
     registration: varchar("registration", { length: 100 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        ownerIdIdx: index("vessels_owner_id_idx").on(table.ownerId),
+        registrationIdx: index("vessels_registration_idx").on(table.registration),
+        createdAtIdx: index("vessels_created_at_idx").on(table.createdAt),
+    };
 });
 
 // ─── Reservations (zahtjevi za operacije) ─────────────────────────────
@@ -200,6 +219,12 @@ export const waitingList = pgTable("waiting_list", {
     expiresAt: timestamp("expires_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("waiting_list_user_id_idx").on(table.userId),
+        craneIdIdx: index("waiting_list_crane_id_idx").on(table.craneId),
+        statusIdx: index("waiting_list_status_idx").on(table.status),
+    };
 });
 
 // ─── Messages (dvosmjerna komunikacija) ───────────────────────────────
@@ -210,6 +235,12 @@ export const messages = pgTable("messages", {
     body: text("body").notNull(),
     isRead: boolean("is_read").default(false).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        reservationIdIdx: index("messages_reservation_id_idx").on(table.reservationId),
+        senderIdIdx: index("messages_sender_id_idx").on(table.senderId),
+        resIsReadIdx: index("messages_res_is_read_idx").on(table.reservationId, table.isRead),
+    };
 });
 
 // ─── Seasons (sezonski rasporedi) ─────────────────────────────────────
@@ -272,6 +303,11 @@ export const auditLog = pgTable("audit_log", {
     payload: jsonb("payload"),
     ipAddress: varchar("ip_address", { length: 45 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        actorIdIdx: index("audit_log_actor_id_idx").on(table.actorId),
+        createdAtIdx: index("audit_log_created_at_idx").on(table.createdAt),
+    };
 });
 
 // ─── Password Resets ──────────────────────────────────────────────────
@@ -361,6 +397,14 @@ export const landOccupancies = pgTable("land_occupancies", {
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        vesselIdIdx: index("land_occ_vessel_id_idx").on(table.vesselId),
+        userIdIdx: index("land_occ_user_id_idx").on(table.userId),
+        zoneIdIdx: index("land_occ_zone_id_idx").on(table.zoneId),
+        returnedAtIdx: index("land_occ_returned_at_idx").on(table.returnedAt),
+        liftedAtIdx: index("land_occ_lifted_at_idx").on(table.liftedAt),
+    };
 });
 
 export const landWaitingStatusEnum = pgEnum("land_waiting_status", [
@@ -387,6 +431,14 @@ export const landWaitingList = pgTable("land_waiting_list", {
     declineCount: integer("decline_count").default(0).notNull(),  // koliko puta je odbio
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("land_wl_user_id_idx").on(table.userId),
+        vesselIdIdx: index("land_wl_vessel_id_idx").on(table.vesselId),
+        preferredZoneIdIdx: index("land_wl_preferred_zone_idx").on(table.preferredZoneId),
+        statusIdx: index("land_wl_status_idx").on(table.status),
+        positionIdx: index("land_wl_position_idx").on(table.position),
+    };
 });
 
 export const craneOperationLog = pgTable("crane_operation_log", {
@@ -400,6 +452,12 @@ export const craneOperationLog = pgTable("crane_operation_log", {
     operatorId: uuid("operator_id").references(() => users.id),    // tko je upravljao
     note: text("note"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        craneIdIdx: index("crane_op_log_crane_id_idx").on(table.craneId),
+        operatorIdIdx: index("crane_op_log_operator_id_idx").on(table.operatorId),
+        startTimeIdx: index("crane_op_log_start_time_idx").on(table.startTime),
+    };
 });
 
 export type InsertLandZone = typeof landZones.$inferInsert;
