@@ -85,7 +85,7 @@ function Router() {
         <AdminLayout><AdminAnalytics /></AdminLayout>
       </Route>
       <Route path="/admin/service-types">
-        <AdminServiceTypes />
+        <AdminLayout><AdminServiceTypes /></AdminLayout>
       </Route>
       <Route path="/admin/seasons">
         <AdminLayout><AdminSeasons /></AdminLayout>

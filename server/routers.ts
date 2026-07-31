@@ -120,7 +120,7 @@ import {
   landZones,
   vessels,
 } from "../drizzle/schema";
-import { and, eq, gte, isNull, or, lte, desc, asc, sql, ne } from "drizzle-orm";
+import { and, eq, gte, isNull, or, lte, desc, asc, sql, ne, inArray } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendReservationConfirmationSms,
@@ -1216,7 +1216,16 @@ export const appRouter = router({
   crane: router({
     list: publicProcedure
       .input(z.object({ activeOnly: z.boolean().optional().default(true) }).optional())
-      .query(async ({ input }) => listCranes(input?.activeOnly ?? true)),
+      .query(async ({ input, ctx }) => {
+        const allCranes = await listCranes(input?.activeOnly ?? true);
+        if (ctx.user && ctx.user.role === "operator") {
+          const assignedIds = await getOperatorCranes(ctx.user.id);
+          if (assignedIds.length > 0) {
+            return allCranes.filter(c => assignedIds.includes(c.id));
+          }
+        }
+        return allCranes;
+      }),
 
     getById: publicProcedure
       .input(z.object({ id: z.string().uuid() }))
@@ -1226,7 +1235,7 @@ export const appRouter = router({
         return crane;
       }),
 
-    create: operatorProcedure
+    create: adminProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
         type: z.enum(["travelift", "portalna", "mobilna", "ostalo"]).optional(),
@@ -1241,7 +1250,7 @@ export const appRouter = router({
         return { id };
       }),
 
-    update: operatorProcedure
+    update: adminProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
@@ -1259,7 +1268,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: operatorProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteCrane(input.id);
@@ -1730,6 +1739,12 @@ export const appRouter = router({
         if (!db) return { data: [], total: 0 };
 
         const conditions = [];
+        if (ctx.user?.role === "operator") {
+          const assignedIds = await getOperatorCranes(ctx.user.id);
+          if (assignedIds.length > 0) {
+            conditions.push(or(inArray(reservations.craneId, assignedIds), isNull(reservations.craneId)));
+          }
+        }
         if (filters.status && filters.status.length > 0) {
           const statusOrs = filters.status.map(s => eq(reservations.status, s as any));
           conditions.push(or(...statusOrs));
@@ -2366,7 +2381,7 @@ export const appRouter = router({
     listAll: adminProcedure
       .query(async () => listServiceTypes(false)),
 
-    create: operatorProcedure
+    create: adminProcedure
       .input(z.object({
         name: z.string().min(1).max(255),
         description: z.string().optional(),
@@ -2381,7 +2396,7 @@ export const appRouter = router({
         return item;
       }),
 
-    update: operatorProcedure
+    update: adminProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(255).optional(),
@@ -2398,7 +2413,7 @@ export const appRouter = router({
         return item;
       }),
 
-    delete: operatorProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteServiceType(input.id);
@@ -2406,7 +2421,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    seed: operatorProcedure
+    seed: adminProcedure
       .mutation(async () => {
         await seedServiceTypes();
         return { success: true };
@@ -2426,6 +2441,12 @@ export const appRouter = router({
         if (!db) return [];
 
         const conditions = [];
+        if (ctx.user?.role === "operator") {
+          const assignedIds = await getOperatorCranes(ctx.user.id);
+          if (assignedIds.length > 0) {
+            conditions.push(or(inArray(reservations.craneId, assignedIds), isNull(reservations.craneId)));
+          }
+        }
         conditions.push(or(eq(reservations.status, "approved"), eq(reservations.status, "pending")));
 
         if (input?.scheduledStart && input?.scheduledEnd) {
@@ -2666,7 +2687,7 @@ export const appRouter = router({
   season: router({
     list: publicProcedure.query(async () => listSeasons()),
 
-    create: operatorProcedure
+    create: adminProcedure
       .input(z.object({
         name: z.string().min(1).max(100),
         startDate: z.string(), // YYYY-MM-DD
@@ -2679,7 +2700,7 @@ export const appRouter = router({
         return season;
       }),
 
-    update: operatorProcedure
+    update: adminProcedure
       .input(z.object({
         id: z.string().uuid(),
         name: z.string().min(1).max(100).optional(),
@@ -2695,7 +2716,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    delete: operatorProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteSeason(input.id);
@@ -2729,7 +2750,7 @@ export const appRouter = router({
   holiday: router({
     list: publicProcedure.query(async () => listHolidays()),
 
-    create: operatorProcedure
+    create: adminProcedure
       .input(z.object({
         date: z.string(), // YYYY-MM-DD
         name: z.string().min(1).max(255),
@@ -2741,7 +2762,7 @@ export const appRouter = router({
         return holiday;
       }),
 
-    delete: operatorProcedure
+    delete: adminProcedure
       .input(z.object({ id: z.string().uuid() }))
       .mutation(async ({ input, ctx }) => {
         await deleteHoliday(input.id);
@@ -2749,7 +2770,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    seed: operatorProcedure
+    seed: adminProcedure
       .mutation(async ({ ctx }) => {
         await seedCroatianHolidays();
         await createAuditEntry({ actorId: ctx.user.id, action: "holidays_seeded", entityType: "holiday" });

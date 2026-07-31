@@ -160,10 +160,10 @@ function DashboardLayoutContent({
   const programSubItems = [
     { icon: Settings, label: t.admin.settings, path: "/admin/settings", adminOnly: true },
     { icon: Shield, label: lang === "hr" ? "Operateri i administratori" : "Staff Accounts", path: "/admin/staff", adminOnly: true },
-    { icon: Construction, label: t.admin.cranes, path: "/admin/cranes" },
-    { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types" },
-    { icon: Sun, label: t.nav.seasons, path: "/admin/seasons" },
-    { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays" },
+    { icon: Construction, label: t.admin.cranes, path: "/admin/cranes", adminOnly: true },
+    { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types", adminOnly: true },
+    { icon: Sun, label: t.nav.seasons, path: "/admin/seasons", adminOnly: true },
+    { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays", adminOnly: true },
   ].filter(item => !(isOperator && (item as any).adminOnly));
 
   const mainMenuItems = [
