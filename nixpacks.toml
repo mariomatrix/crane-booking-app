@@ -1,5 +1,4 @@
-[providers]
-node = "pnpm"
+providers = ["node"]
 
 [phases.install]
 cmds = ["pnpm install"]
