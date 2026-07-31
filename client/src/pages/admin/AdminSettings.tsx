@@ -20,8 +20,6 @@ export default function AdminSettings() {
 
     const [slotMin, setSlotMin] = useState("60");
     const [bufferMin, setBufferMin] = useState("15");
-    const [workStart, setWorkStart] = useState("08:00");
-    const [workEnd, setWorkEnd] = useState("16:00");
     const [marinaName, setMarinaName] = useState("PŠD Špinut");
     const [marinaLogo, setMarinaLogo] = useState("");
 
@@ -29,8 +27,6 @@ export default function AdminSettings() {
         if (settings) {
             setSlotMin(settings.slotDurationMinutes ?? "60");
             setBufferMin(settings.bufferMinutes ?? "15");
-            setWorkStart(settings.workdayStart ?? "08:00");
-            setWorkEnd(settings.workdayEnd ?? "16:00");
             setMarinaName(settings.marinaName ?? "PŠD Špinut");
             setMarinaLogo(settings.marinaLogo ?? "");
         }
@@ -116,50 +112,6 @@ export default function AdminSettings() {
                                 <p className="text-xs text-muted-foreground">
                                     Automatski tampon između rezervacija (priprema, moguća kašnjenja plovila).
                                 </p>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-base">Radno vrijeme</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="space-y-2">
-                                <Label>{t.admin.settingsWorkStart}</Label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        type="time"
-                                        value={workStart}
-                                        onChange={(e) => setWorkStart(e.target.value)}
-                                    />
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={isSaving}
-                                        onClick={() => handleSave("workdayStart", workStart)}
-                                    >
-                                        <Save className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>{t.admin.settingsWorkEnd}</Label>
-                                <div className="flex gap-2">
-                                    <Input
-                                        type="time"
-                                        value={workEnd}
-                                        onChange={(e) => setWorkEnd(e.target.value)}
-                                    />
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={isSaving}
-                                        onClick={() => handleSave("workdayEnd", workEnd)}
-                                    >
-                                        <Save className="h-4 w-4" />
-                                    </Button>
-                                </div>
                             </div>
                         </CardContent>
                     </Card>
