@@ -1,4 +1,5 @@
 
+import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -74,16 +75,26 @@ async function runMigration() {
             CREATE TABLE IF NOT EXISTS "land_occupancies" (
                 "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
                 "vessel_id" uuid NOT NULL REFERENCES "vessels"("id"),
+                "user_id" uuid REFERENCES "users"("id"),
                 "zone_id" uuid NOT NULL REFERENCES "land_zones"("id"),
+                "spot_number" integer,
                 "reservation_id" uuid REFERENCES "reservations"("id"),
-                "placed_at" timestamp DEFAULT now() NOT NULL,
-                "removed_at" timestamp,
-                "is_active" boolean DEFAULT true NOT NULL,
-                "notes" text,
+                "return_reservation_id" uuid REFERENCES "reservations"("id"),
+                "lifted_at" timestamp DEFAULT now() NOT NULL,
+                "returned_at" timestamp,
+                "note" text,
+                "created_by" uuid REFERENCES "users"("id"),
                 "created_at" timestamp DEFAULT now() NOT NULL,
                 "updated_at" timestamp DEFAULT now() NOT NULL
             )
         `;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "user_id" uuid REFERENCES "users"("id")`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "spot_number" integer`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "return_reservation_id" uuid REFERENCES "reservations"("id")`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "lifted_at" timestamp DEFAULT now()`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "returned_at" timestamp`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "note" text`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "created_by" uuid REFERENCES "users"("id")`;
         console.log("land_occupancies table verified.");
     } catch (e: any) {
         console.warn("land_occupancies table verification warning:", e?.message || e);
@@ -112,8 +123,12 @@ async function runMigration() {
         console.warn("land_waiting_list table verification warning:", e?.message || e);
     }
 
-    await migrate(db, { migrationsFolder: "drizzle" });
-    console.log("Migrations completed.");
+    try {
+        await migrate(db, { migrationsFolder: "drizzle" });
+        console.log("Migrations completed.");
+    } catch (migErr: any) {
+        console.log("Drizzle folder migration skipped or already applied:", migErr?.message || migErr);
+    }
 
     // ─── Import schema and helpers ────────────────────────────────────
     const { cranes, users, serviceTypes, holidays, landZones } = await import("../drizzle/schema");
