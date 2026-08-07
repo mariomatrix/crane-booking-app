@@ -140,6 +140,7 @@ const styles = StyleSheet.create({
 // Common PDF Shell Layout
 interface PdfShellProps {
     title: string;
+    subtitle?: string;
     dateFrom?: string;
     dateTo?: string;
     marinaName: string;
@@ -149,7 +150,7 @@ interface PdfShellProps {
     orientation?: "portrait" | "landscape";
 }
 
-export function PdfShell({ title, dateFrom, dateTo, marinaName, marinaLogo, summaryItems = [], children, orientation = "portrait" }: PdfShellProps) {
+export function PdfShell({ title, subtitle, dateFrom, dateTo, marinaName, marinaLogo, summaryItems = [], children, orientation = "portrait" }: PdfShellProps) {
     return (
         <Document>
             <Page size="A4" orientation={orientation} style={orientation === "landscape" ? styles.pageLandscape : styles.page}>
@@ -162,6 +163,9 @@ export function PdfShell({ title, dateFrom, dateTo, marinaName, marinaLogo, summ
                             <Text style={[styles.title, { fontSize: 13, color: "#0284c7" }]}>⚓ {marinaName}</Text>
                         )}
                         <Text style={styles.title}>{title}</Text>
+                        {subtitle && (
+                            <Text style={[styles.subtitle, { fontFamily: "Roboto-Bold", color: "#334155", marginBottom: 2 }]}>{subtitle}</Text>
+                        )}
                         {(dateFrom || dateTo) && (
                             <Text style={styles.subtitle}>
                                 Razdoblje: {dateFrom ? format(new Date(dateFrom), "dd.MM.yyyy") : ""} 
@@ -818,6 +822,81 @@ export function MonthlySchedulePdf({
                         </Text>
                         <Text style={[styles.tableCell, { width: "12%" }]}>{item.craneName || "—"}</Text>
                         <Text style={[styles.tableCell, { width: "8%", textTransform: "capitalize" }]}>{item.status}</Text>
+                    </View>
+                ))}
+            </View>
+        </PdfShell>
+    );
+}
+
+export function CraneLogPdf({
+    craneInfo,
+    dateFrom,
+    dateTo,
+    entries = [],
+    summary,
+    marinaName,
+    marinaLogo,
+}: {
+    craneInfo: { name: string; maxCapacityKN?: number | null; capacityTons?: number | null; type?: string | null };
+    dateFrom: string;
+    dateTo: string;
+    entries: any[];
+    summary: { totalOperations: number; totalHours: number; liftsCount: number; lowersCount: number; movesCount: number; maintenanceCount: number };
+    marinaName?: string;
+    marinaLogo?: string;
+}) {
+    const startDate = safeParseDate(dateFrom);
+    const endDate = safeParseDate(dateTo);
+    const capacityText = craneInfo.capacityTons ? `${craneInfo.capacityTons} t` : craneInfo.maxCapacityKN ? `${Math.round(craneInfo.maxCapacityKN / 10)} t` : "N/A";
+
+    return (
+        <PdfShell
+            title={`DNEVNIK RADA DIZALICE: ${craneInfo.name.toUpperCase()}`}
+            subtitle={`Razdoblje: ${format(startDate, "dd.MM.yyyy.")} – ${format(endDate, "dd.MM.yyyy.")} | Nosivost: ${capacityText}`}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            marinaName={marinaName || "PŠD Špinut"}
+            marinaLogo={marinaLogo}
+            orientation="landscape"
+            summaryItems={[
+                { label: "Dizalica", value: craneInfo.name },
+                { label: "Ukupno operacija", value: summary.totalOperations },
+                { label: "Ukupno sati rada", value: `${summary.totalHours} h` },
+                { label: "Vađenja / Spuštanja", value: `${summary.liftsCount} / ${summary.lowersCount}` }
+            ]}
+        >
+            <View style={styles.table}>
+                <View style={styles.tableHeaderRow}>
+                    <Text style={[styles.tableCellHeader, { width: "10%" }]}>Datum</Text>
+                    <Text style={[styles.tableCellHeader, { width: "10%" }]}>Vrijeme (od-do)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "20%" }]}>Plovilo (Reg)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "20%" }]}>Klijent (OIB)</Text>
+                    <Text style={[styles.tableCellHeader, { width: "16%" }]}>Vrsta operacije</Text>
+                    <Text style={[styles.tableCellHeader, { width: "12%" }]}>Operater</Text>
+                    <Text style={[styles.tableCellHeader, { width: "12%" }]}>Napomena</Text>
+                </View>
+                {entries.map((item, idx) => (
+                    <View key={idx} style={styles.tableRow}>
+                        <Text style={[styles.tableCell, { width: "10%" }]}>
+                            {item.startTime ? format(safeParseDate(item.startTime), "dd.MM.yyyy.") : "-"}
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "10%", fontFamily: "Roboto-Bold" }]}>
+                            {item.startTime ? format(safeParseDate(item.startTime), "HH:mm") : "-"} - {item.endTime ? format(safeParseDate(item.endTime), "HH:mm") : "-"}
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "20%" }]}>
+                            {item.vesselName || "—"}{"\n"}
+                            <Text style={{ fontSize: 7, color: "#64748b" }}>Reg: {item.vesselRegistration || "—"}</Text>
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "20%" }]}>
+                            {item.clientName || "—"}{"\n"}
+                            <Text style={{ fontSize: 7, color: "#64748b" }}>OIB: {item.clientOib || "—"}</Text>
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "16%", fontFamily: "Roboto-Bold", color: item.isMaintenance ? "#f97316" : "#0284c7" }]}>
+                            {item.operationType || "—"}
+                        </Text>
+                        <Text style={[styles.tableCell, { width: "12%" }]}>{item.operatorName || "—"}</Text>
+                        <Text style={[styles.tableCell, { width: "12%", fontSize: 7 }]}>{item.note || "—"}</Text>
                     </View>
                 ))}
             </View>

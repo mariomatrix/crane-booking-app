@@ -41,6 +41,7 @@ import ReportUsers from "@/pages/admin/reports/ReportUsers";
 import ReportOperations from "@/pages/admin/reports/ReportOperations";
 import ReportLandOccupancy from "@/pages/admin/reports/ReportLandOccupancy";
 import ReportWaitingList from "@/pages/admin/reports/ReportWaitingList";
+import ReportCraneLog from "@/pages/admin/reports/ReportCraneLog";
 
 function Router() {
   return (
@@ -127,6 +128,9 @@ function Router() {
       </Route>
       <Route path="/admin/reports/waiting-list">
         <AdminLayout><ReportWaitingList /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/crane-log">
+        <AdminLayout><ReportCraneLog /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />

@@ -10,7 +10,8 @@ import {
     landOccupancies,
     landZones,
     waitingList,
-    maintenanceBlocks
+    maintenanceBlocks,
+    craneOperationLog
 } from "../drizzle/schema";
 import { eq, and, gte, lte, or, isNull, ne, desc, asc, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
@@ -427,5 +428,174 @@ export const reportsRouter = router({
                 .orderBy(asc(waitingList.position), desc(waitingList.createdAt));
 
             return data;
+        }),
+
+    // 📑 REP-07: Mjesečni Dnevnik rada pojedinačne dizalice (Operator & Admin)
+    craneLog: operatorProcedure
+        .input(z.object({
+            craneId: z.string().uuid(),
+            from: z.string(), // ISO date string YYYY-MM-DD
+            to: z.string(),   // ISO date string YYYY-MM-DD
+        }))
+        .query(async ({ input }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza podataka nije dostupna." });
+
+            const startDate = new Date(input.from);
+            startDate.setHours(0, 0, 0, 0);
+            const endDate = new Date(input.to);
+            endDate.setHours(23, 59, 59, 999);
+
+            // Fetch crane info
+            const craneRes = await db.select().from(cranes).where(eq(cranes.id, input.craneId)).limit(1);
+            if (!craneRes[0]) {
+                throw new TRPCError({ code: "NOT_FOUND", message: "Dizalica nije pronađena." });
+            }
+            const craneInfo = craneRes[0];
+
+            // Fetch crane operation log entries for this crane in timeframe
+            const opLogs = await db
+                .select({
+                    id: craneOperationLog.id,
+                    operationType: craneOperationLog.operationType,
+                    startTime: craneOperationLog.startTime,
+                    endTime: craneOperationLog.endTime,
+                    durationMinutes: craneOperationLog.durationMinutes,
+                    note: craneOperationLog.note,
+                    reservationId: craneOperationLog.reservationId,
+                    operatorId: craneOperationLog.operatorId,
+                    operatorName: users.name,
+                    vesselName: reservations.vesselName,
+                    vesselRegistration: reservations.vesselRegistration,
+                    clientName: sql<string>`coalesce(${users.firstName} || ' ' || ${users.lastName}, ${users.name})`,
+                    clientOib: sql<string | null>`coalesce(${reservations.userOib}, ${users.oib})`,
+                    serviceTypeName: serviceTypes.name,
+                })
+                .from(craneOperationLog)
+                .leftJoin(users, eq(craneOperationLog.operatorId, users.id))
+                .leftJoin(reservations, eq(craneOperationLog.reservationId, reservations.id))
+                .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+                .where(and(
+                    eq(craneOperationLog.craneId, input.craneId),
+                    gte(craneOperationLog.startTime, startDate),
+                    lte(craneOperationLog.startTime, endDate)
+                ))
+                .orderBy(asc(craneOperationLog.startTime));
+
+            // Also fetch completed/approved reservations for this crane in timeframe that might not have a manual op log
+            const resData = await db
+                .select({
+                    id: reservations.id,
+                    scheduledStart: reservations.scheduledStart,
+                    scheduledEnd: reservations.scheduledEnd,
+                    durationMin: reservations.durationMin,
+                    vesselName: reservations.vesselName,
+                    vesselRegistration: reservations.vesselRegistration,
+                    userOib: sql<string | null>`coalesce(${reservations.userOib}, ${users.oib})`,
+                    clientName: sql<string>`coalesce(${users.firstName} || ' ' || ${users.lastName}, ${users.name})`,
+                    serviceTypeName: serviceTypes.name,
+                    serviceCategory: serviceTypes.operationCategory,
+                    userNote: reservations.userNote,
+                    adminNote: reservations.adminNote,
+                    isMaintenance: reservations.isMaintenance,
+                    contactPhone: reservations.contactPhone,
+                    status: reservations.status,
+                })
+                .from(reservations)
+                .leftJoin(users, eq(reservations.userId, users.id))
+                .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+                .where(and(
+                    eq(reservations.craneId, input.craneId),
+                    gte(reservations.scheduledStart, startDate),
+                    lte(reservations.scheduledStart, endDate),
+                    ne(reservations.status, "rejected"),
+                    ne(reservations.status, "cancelled")
+                ))
+                .orderBy(asc(reservations.scheduledStart));
+
+            // Combine and format entries seamlessly
+            const existingLogResIds = new Set(opLogs.map(l => l.reservationId).filter(Boolean));
+
+            const formattedEntries: Array<{
+                id: string;
+                startTime: Date;
+                endTime: Date;
+                durationMinutes: number;
+                operationType: string;
+                operationCategory?: string;
+                vesselName: string;
+                vesselRegistration: string;
+                clientName: string;
+                clientOib: string;
+                operatorName: string;
+                note: string;
+                isMaintenance?: boolean;
+            }> = [];
+
+            for (const log of opLogs) {
+                formattedEntries.push({
+                    id: log.id,
+                    startTime: log.startTime,
+                    endTime: log.endTime,
+                    durationMinutes: log.durationMinutes || Math.max(1, Math.round((log.endTime.getTime() - log.startTime.getTime()) / 60000)),
+                    operationType: log.serviceTypeName || (log.operationType === "lift" ? "Dizanje iz mora" : log.operationType === "lower" ? "Spuštanje u more" : log.operationType === "move" ? "Premještanje" : "Održavanje"),
+                    vesselName: log.vesselName || "—",
+                    vesselRegistration: log.vesselRegistration || "—",
+                    clientName: log.clientName || "Nepoznato",
+                    clientOib: log.clientOib || "—",
+                    operatorName: log.operatorName || "Operater",
+                    note: log.note || "",
+                });
+            }
+
+            for (const res of resData) {
+                if (res.id && !existingLogResIds.has(res.id)) {
+                    const start = res.scheduledStart ? new Date(res.scheduledStart) : startDate;
+                    const end = res.scheduledEnd ? new Date(res.scheduledEnd) : new Date(start.getTime() + (res.durationMin || 60) * 60000);
+                    formattedEntries.push({
+                        id: res.id,
+                        startTime: start,
+                        endTime: end,
+                        durationMinutes: res.durationMin || Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000)),
+                        operationType: res.isMaintenance ? "Održavanje dizalice" : (res.serviceTypeName || "Operacija dizalice"),
+                        operationCategory: res.serviceCategory || undefined,
+                        vesselName: res.vesselName || "—",
+                        vesselRegistration: res.vesselRegistration || "—",
+                        clientName: res.clientName || "—",
+                        clientOib: res.userOib || "—",
+                        operatorName: "Operater dizalice",
+                        note: res.adminNote || res.userNote || "",
+                        isMaintenance: res.isMaintenance || false,
+                    });
+                }
+            }
+
+            // Sort chronologically
+            formattedEntries.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+            // Summary metrics
+            const totalOperations = formattedEntries.length;
+            const totalDurationMinutes = formattedEntries.reduce((acc, curr) => acc + (curr.durationMinutes || 0), 0);
+            const totalHours = Number((totalDurationMinutes / 60).toFixed(1));
+
+            const liftsCount = formattedEntries.filter(e => e.operationType.toLowerCase().includes("dizanje") || e.operationType.toLowerCase().includes("vađenje") || e.operationCategory === "lift_from_sea").length;
+            const lowersCount = formattedEntries.filter(e => e.operationType.toLowerCase().includes("spuštanje") || e.operationCategory === "lower_to_sea").length;
+            const movesCount = formattedEntries.filter(e => e.operationType.toLowerCase().includes("premještanje") || e.operationCategory === "move").length;
+            const maintenanceCount = formattedEntries.filter(e => e.isMaintenance || e.operationType.toLowerCase().includes("održavanje") || e.operationCategory === "maintenance").length;
+
+            return {
+                craneInfo,
+                period: { from: input.from, to: input.to },
+                entries: formattedEntries,
+                summary: {
+                    totalOperations,
+                    totalDurationMinutes,
+                    totalHours,
+                    liftsCount,
+                    lowersCount,
+                    movesCount,
+                    maintenanceCount,
+                }
+            };
         }),
 });

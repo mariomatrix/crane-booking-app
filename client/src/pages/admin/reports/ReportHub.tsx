@@ -8,13 +8,21 @@ import {
     Layers,
     Anchor,
     ListOrdered,
-    ArrowRight
+    ArrowRight,
+    FileText
 } from "lucide-react";
 
 export default function ReportHub() {
     const [, setLocation] = useLocation();
 
     const reportsList = [
+        {
+            title: "Dnevnik rada dizalica",
+            description: "Mjesečni službeni dnevnik rada za pojedinačnu dizalicu. Sadrži satnice, radnje, plovila, klijente (OIB), operatere i napomene.",
+            path: "/admin/reports/crane-log",
+            icon: FileText,
+            color: "text-teal-600 border-teal-100 bg-teal-50/50 dark:bg-teal-950/10 dark:border-teal-950/20",
+        },
         {
             title: "Plan rada dizalica",
             description: "Dnevni, tjedni i mjesečni plan rezervacija i rada dizalica. Sadrži raspored s terminima, klijentima i dodijeljenim dizalicama.",

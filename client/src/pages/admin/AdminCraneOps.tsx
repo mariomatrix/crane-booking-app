@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { History, Loader2, Plus, Calendar, Clock, BarChart3, Activity, Wrench, ShieldAlert } from "lucide-react";
+import { History, Loader2, Plus, Calendar, Clock, BarChart3, Activity, Wrench, ShieldAlert, FileText } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
@@ -117,10 +117,24 @@ export default function AdminCraneOps() {
             {isHr ? "Pratite statistike rada dizalica i pregledavajte povijest operacija." : "Monitor crane utilization statistics and view operation logs."}
           </p>
         </div>
-        <Button onClick={() => setDialogOpen(true)} className="bg-primary hover:bg-primary/95 text-white rounded-xl shadow-md">
-          <Plus className="h-4 w-4 mr-2" />
-          {isHr ? "Zabilježi rad" : "Log Operation"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={() => {
+              window.location.href = selectedCraneId !== "all" 
+                ? `/admin/reports/crane-log?craneId=${selectedCraneId}` 
+                : "/admin/reports/crane-log";
+            }}
+            className="rounded-xl border-primary/30 text-primary hover:bg-primary/5"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            {isHr ? "Mjesečni Dnevnik" : "Monthly Log Report"}
+          </Button>
+          <Button onClick={() => setDialogOpen(true)} className="bg-primary hover:bg-primary/95 text-white rounded-xl shadow-md">
+            <Plus className="h-4 w-4 mr-2" />
+            {isHr ? "Zabilježi rad" : "Log Operation"}
+          </Button>
+        </div>
       </div>
 
       {/* Crane Stats Section */}
