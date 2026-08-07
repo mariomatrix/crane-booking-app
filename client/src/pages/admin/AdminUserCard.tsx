@@ -1,6 +1,6 @@
 import { trpc } from "@/lib/trpc";
 import { useParams, useLocation } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -20,7 +20,7 @@ import { ReservationChat } from "@/components/ReservationChat";
 import {
     Loader2, ArrowLeft, CalendarDays, Mail, Phone, Shield, Clock,
     CheckCircle2, XCircle, Hourglass, Ban, Anchor, MessageSquare, Ship,
-    Plus, Trash2, Edit2,
+    Plus, Trash2, Edit2, AlertCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { useLang } from "@/contexts/LangContext";
@@ -43,6 +43,11 @@ export default function AdminUserCard() {
     const [statusFilter, setStatusFilter] = useState("all");
 
     const { data, isLoading } = trpc.user.getCard.useQuery(
+        { userId: id },
+        { enabled: !!id }
+    );
+
+    const { data: userCardData } = trpc.userCard.getCard.useQuery(
         { userId: id },
         { enabled: !!id }
     );
@@ -207,6 +212,126 @@ export default function AdminUserCard() {
                     <CalendarDays className="h-4 w-4 mr-2" />Kalendar
                 </Button>
             </div>
+
+            {/* Statutarni Semafor Prava (za članove) */}
+            {(userCardData?.user?.role || user.role) === "user" && !userCardData?.user?.isLegalEntity && userCardData?.rights && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
+                        <CardHeader className="p-4 pb-2">
+                            <CardDescription className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                Statutarno pravo: Vađenje iz mora
+                            </CardDescription>
+                            <CardTitle className="text-lg font-bold flex items-center justify-between">
+                                {userCardData.rights.liftAvailable ? (
+                                    <span className="text-emerald-600 flex items-center gap-1.5 text-base">
+                                        <CheckCircle2 className="h-5 w-5" /> Raspoloživo (1/1)
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm">Iskorišteno</span>
+                                )}
+                                <span className="text-xs font-normal text-muted-foreground">
+                                    Vrijedi do {new Date(userCardData.rights.liftExpiresAt).toLocaleDateString("hr-HR")}
+                                </span>
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+
+                    <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
+                        <CardHeader className="p-4 pb-2">
+                            <CardDescription className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                Statutarno pravo: Spuštanje u more
+                            </CardDescription>
+                            <CardTitle className="text-lg font-bold flex items-center justify-between">
+                                {userCardData.rights.lowerAvailable ? (
+                                    <span className="text-emerald-600 flex items-center gap-1.5 text-base">
+                                        <CheckCircle2 className="h-5 w-5" /> Raspoloživo (1/1)
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm">Iskorišteno</span>
+                                )}
+                                <span className="text-xs font-normal text-muted-foreground">
+                                    Vrijedi do {new Date(userCardData.rights.lowerExpiresAt).toLocaleDateString("hr-HR")}
+                                </span>
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+
+                    <Card className={`border-l-4 ${userCardData.rights.pendingFeeAdjustmentsCount > 0 ? 'border-l-amber-500 bg-amber-500/5' : 'border-l-muted'}`}>
+                        <CardHeader className="p-4 pb-2">
+                            <CardDescription className="text-xs font-semibold">
+                                Zaduženja članarine za Desktop ERP
+                            </CardDescription>
+                            <CardTitle className="text-lg font-bold flex items-center justify-between">
+                                {userCardData.rights.pendingFeeAdjustmentsCount > 0 ? (
+                                    <span className="text-amber-600 flex items-center gap-1.5 text-base">
+                                        <AlertCircle className="h-5 w-5" /> {userCardData.rights.pendingFeeAdjustmentsCount} stavka zaduženja
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm">Nema zaduženja (0)</span>
+                                )}
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+                </div>
+            )}
+
+            {/* Kronološki Karton Radnji i Zaduženja */}
+            {userCardData?.entries && userCardData.entries.length > 0 && (
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <Anchor className="h-4 w-4 text-primary" />
+                            Karton radnji i zaduženja korisnika ({userCardData.entries.length})
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="bg-muted/30">
+                                    <TableHead>Datum radnje</TableHead>
+                                    <TableHead>Vrsta evidencije</TableHead>
+                                    <TableHead>Naziv operacije / Stavka cjenika</TableHead>
+                                    <TableHead>Plovilo</TableHead>
+                                    <TableHead>Napomena / Status</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {userCardData.entries.map((entry: any) => (
+                                    <TableRow key={entry.id}>
+                                        <TableCell className="text-xs font-medium">
+                                            {new Date(entry.eventDate).toLocaleDateString("hr-HR")}
+                                        </TableCell>
+                                        <TableCell>
+                                            {entry.entryType === "statutory_quota_used" ? (
+                                                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 text-xs">
+                                                    Statutarna kvota (0 €)
+                                                </Badge>
+                                            ) : entry.entryType === "fee_adjustment_charge" ? (
+                                                <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/30 text-xs">
+                                                    Doplata članarine ({entry.serviceItemCode})
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/30 text-xs">
+                                                    Komercijalni račun
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="font-semibold text-xs">
+                                            {entry.serviceItemName}
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                            {entry.vesselName || "—"} ({entry.vesselRegistration || ""})
+                                        </TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">
+                                            {entry.note || "—"}
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            )}
 
             {/* Stats Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

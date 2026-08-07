@@ -37,11 +37,10 @@ import MobileOperatorApp from "./pages/mobile/MobileOperatorApp";
 import ReportHub from "@/pages/admin/reports/ReportHub";
 import ReportSchedule from "@/pages/admin/reports/ReportSchedule";
 import ReportUtilization from "@/pages/admin/reports/ReportUtilization";
-import ReportUsers from "@/pages/admin/reports/ReportUsers";
-import ReportOperations from "@/pages/admin/reports/ReportOperations";
-import ReportLandOccupancy from "@/pages/admin/reports/ReportLandOccupancy";
-import ReportWaitingList from "@/pages/admin/reports/ReportWaitingList";
 import ReportCraneLog from "@/pages/admin/reports/ReportCraneLog";
+import ReportMemberFeeAdjustments from "@/pages/admin/reports/ReportMemberFeeAdjustments";
+import AdminWorkOrders from "@/pages/admin/AdminWorkOrders";
+import AdminPriceList from "@/pages/admin/AdminPriceList";
 
 function Router() {
   return (
@@ -106,6 +105,12 @@ function Router() {
       <Route path="/admin/crane-ops">
         <AdminLayout><AdminCraneOps /></AdminLayout>
       </Route>
+      <Route path="/admin/work-orders">
+        <AdminLayout><AdminWorkOrders /></AdminLayout>
+      </Route>
+      <Route path="/admin/pricelists">
+        <AdminLayout><AdminPriceList /></AdminLayout>
+      </Route>
 
       {/* Reports Routes */}
       <Route path="/admin/reports">
@@ -117,20 +122,11 @@ function Router() {
       <Route path="/admin/reports/utilization">
         <AdminLayout><ReportUtilization /></AdminLayout>
       </Route>
-      <Route path="/admin/reports/users">
-        <AdminLayout><ReportUsers /></AdminLayout>
-      </Route>
-      <Route path="/admin/reports/operations">
-        <AdminLayout><ReportOperations /></AdminLayout>
-      </Route>
-      <Route path="/admin/reports/land-occupancy">
-        <AdminLayout><ReportLandOccupancy /></AdminLayout>
-      </Route>
-      <Route path="/admin/reports/waiting-list">
-        <AdminLayout><ReportWaitingList /></AdminLayout>
-      </Route>
       <Route path="/admin/reports/crane-log">
         <AdminLayout><ReportCraneLog /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/member-fee-adjustments">
+        <AdminLayout><ReportMemberFeeAdjustments /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />

@@ -460,6 +460,100 @@ export const craneOperationLog = pgTable("crane_operation_log", {
     };
 });
 
+export const workOrderStatusEnum = pgEnum("work_order_status", ["in_progress", "completed", "cancelled"]);
+export const workOrderClientTypeEnum = pgEnum("work_order_client_type", ["member", "external"]);
+export const cardEntryTypeEnum = pgEnum("card_entry_type", ["statutory_quota_used", "fee_adjustment_charge", "commercial_service"]);
+export const pricelistTargetTypeEnum = pgEnum("pricelist_target_type", ["member_adjustment", "external_commercial"]);
+
+// ─── Price List Items (Cjenik po metrima & šifrarnik zaduženja) ────────
+export const priceListItems = pgTable("price_list_items", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    code: varchar("code", { length: 50 }).notNull().unique(), // npr. 'USL-D9T', 'USL-TR50', 'USL-VANJSKI-M'
+    name: varchar("name", { length: 255 }).notNull(),
+    targetType: pricelistTargetTypeEnum("target_type").default("external_commercial").notNull(),
+    minLengthM: decimal("min_length_m", { precision: 5, scale: 2 }),
+    maxLengthM: decimal("max_length_m", { precision: 5, scale: 2 }),
+    pricePerMeterEur: decimal("price_per_meter_eur", { precision: 8, scale: 2 }),
+    fixedPriceEur: decimal("fixed_price_eur", { precision: 8, scale: 2 }),
+    vatRate: decimal("vat_rate", { precision: 5, scale: 2 }).default("25.00").notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Member Statutory Rights (1 vađenje + 1 spuštanje s rokom 2 god) ───
+export const memberStatutoryRights = pgTable("member_statutory_rights", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().unique().references(() => users.id),
+    liftAvailable: boolean("lift_available").default(true).notNull(),
+    liftAcquiredYear: integer("lift_acquired_year").notNull(),
+    liftExpiresAt: date("lift_expires_at").notNull(), // 31.12. N+1
+    lowerAvailable: boolean("lower_available").default(true).notNull(),
+    lowerAcquiredYear: integer("lower_acquired_year").notNull(),
+    lowerExpiresAt: date("lower_expires_at").notNull(), // 31.12. N+1
+    pendingFeeAdjustmentsCount: integer("pending_fee_adjustments_count").default(0).notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Work Orders (Radni nalozi: aktivacija i zaključenje) ──────────────
+export const workOrders = pgTable("work_orders", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    orderNumber: varchar("order_number", { length: 30 }).notNull().unique(), // RN-2026-00042
+    reservationId: uuid("reservation_id").references(() => reservations.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    vesselId: uuid("vessel_id").references(() => vessels.id),
+    craneId: uuid("crane_id").notNull().references(() => cranes.id),
+    operatorId: uuid("operator_id").references(() => users.id),
+    status: workOrderStatusEnum("status").default("in_progress").notNull(),
+    clientType: workOrderClientTypeEnum("client_type").default("member").notNull(),
+    isStatutoryCovered: boolean("is_statutory_covered").default(false).notNull(),
+    quotaOperationType: varchar("quota_operation_type", { length: 20 }), // 'lift' | 'lower' | 'none'
+    chargeItemCode: varchar("charge_item_code", { length: 50 }), // šifra stavke za doplatu članarine
+    chargeItemName: varchar("charge_item_name", { length: 255 }),
+    vesselLengthM: decimal("vessel_length_m", { precision: 7, scale: 2 }),
+    commercialPricePerMeter: decimal("commercial_price_per_meter", { precision: 8, scale: 2 }),
+    commercialTotal: decimal("commercial_total", { precision: 10, scale: 2 }),
+    vatRate: decimal("vat_rate", { precision: 5, scale: 2 }).default("25.00"),
+    startedAt: timestamp("started_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+    actualDurationMin: integer("actual_duration_min"),
+    operatorNotes: text("operator_notes"),
+    erpSyncStatus: varchar("erp_sync_status", { length: 30 }).default("pending").notNull(), // 'pending' | 'synced'
+    erpDocumentId: varchar("erp_document_id", { length: 100 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        orderNumberIdx: index("work_orders_order_number_idx").on(table.orderNumber),
+        userIdIdx: index("work_orders_user_id_idx").on(table.userId),
+        craneIdIdx: index("work_orders_crane_id_idx").on(table.craneId),
+        statusIdx: index("work_orders_status_idx").on(table.status),
+        startedAtIdx: index("work_orders_started_at_idx").on(table.startedAt),
+    };
+});
+
+// ─── User Card Entries (Univerzalni Karton: Članovi & Vanjski) ─────────
+export const userCardEntries = pgTable("user_card_entries", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    workOrderId: uuid("work_order_id").references(() => workOrders.id),
+    entryType: cardEntryTypeEnum("entry_type").notNull(),
+    serviceItemCode: varchar("service_item_code", { length: 50 }),
+    serviceItemName: varchar("service_item_name", { length: 255 }).notNull(),
+    vesselName: varchar("vessel_name", { length: 255 }),
+    vesselRegistration: varchar("vessel_registration", { length: 100 }),
+    eventDate: timestamp("event_date").defaultNow().notNull(),
+    note: text("note"),
+    erpStatus: varchar("erp_status", { length: 50 }).default("pending").notNull(), // 'pending' | 'processed_in_membership_renewal' | 'invoiced'
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userCardUserIdIdx: index("user_card_user_id_idx").on(table.userId),
+        userCardEventDateIdx: index("user_card_event_date_idx").on(table.eventDate),
+    };
+});
+
 export type InsertLandZone = typeof landZones.$inferInsert;
 export type SelectLandZone = typeof landZones.$inferSelect;
 export type LandZone = SelectLandZone;
@@ -475,4 +569,20 @@ export type LandWaitingList = SelectLandWaitingList;
 export type InsertCraneOperationLog = typeof craneOperationLog.$inferInsert;
 export type SelectCraneOperationLog = typeof craneOperationLog.$inferSelect;
 export type CraneOperationLog = SelectCraneOperationLog;
+
+export type InsertWorkOrder = typeof workOrders.$inferInsert;
+export type SelectWorkOrder = typeof workOrders.$inferSelect;
+export type WorkOrder = SelectWorkOrder;
+
+export type InsertPriceListItem = typeof priceListItems.$inferInsert;
+export type SelectPriceListItem = typeof priceListItems.$inferSelect;
+export type PriceListItem = SelectPriceListItem;
+
+export type InsertMemberStatutoryRights = typeof memberStatutoryRights.$inferInsert;
+export type SelectMemberStatutoryRights = typeof memberStatutoryRights.$inferSelect;
+export type MemberStatutoryRights = SelectMemberStatutoryRights;
+
+export type InsertUserCardEntry = typeof userCardEntries.$inferInsert;
+export type SelectUserCardEntry = typeof userCardEntries.$inferSelect;
+export type UserCardEntry = SelectUserCardEntry;
 

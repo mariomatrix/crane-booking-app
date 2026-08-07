@@ -598,4 +598,135 @@ export const reportsRouter = router({
                 }
             };
         }),
+
+    // ─── Dnevnik Radnih Naloga (Work Orders Ledger) ─────────────────────
+    workOrdersLedger: operatorProcedure
+        .input(
+            z.object({
+                from: z.string().optional(),
+                to: z.string().optional(),
+                clientType: z.enum(["member", "external"]).optional(),
+                status: z.enum(["in_progress", "completed", "cancelled"]).optional(),
+                craneId: z.string().uuid().optional(),
+            })
+        )
+        .query(async ({ input }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+            const { workOrders, users, vessels, cranes } = await import("../drizzle/schema");
+
+            let query = db
+                .select({
+                    id: workOrders.id,
+                    orderNumber: workOrders.orderNumber,
+                    startedAt: workOrders.startedAt,
+                    completedAt: workOrders.completedAt,
+                    status: workOrders.status,
+                    clientType: workOrders.clientType,
+                    isStatutoryCovered: workOrders.isStatutoryCovered,
+                    chargeItemCode: workOrders.chargeItemCode,
+                    chargeItemName: workOrders.chargeItemName,
+                    vesselLengthM: workOrders.vesselLengthM,
+                    commercialTotal: workOrders.commercialTotal,
+                    actualDurationMin: workOrders.actualDurationMin,
+                    operatorNotes: workOrders.operatorNotes,
+                    erpSyncStatus: workOrders.erpSyncStatus,
+                    userName: users.name,
+                    userOib: users.oib,
+                    userEmail: users.email,
+                    vesselName: vessels.name,
+                    vesselRegistration: vessels.registration,
+                    craneName: cranes.name,
+                })
+                .from(workOrders)
+                .leftJoin(users, eq(workOrders.userId, users.id))
+                .leftJoin(vessels, eq(workOrders.vesselId, vessels.id))
+                .leftJoin(cranes, eq(workOrders.craneId, cranes.id))
+                .orderBy(desc(workOrders.startedAt));
+
+            const conditions = [];
+            if (input.from) conditions.push(gte(workOrders.startedAt, new Date(input.from)));
+            if (input.to) conditions.push(lte(workOrders.startedAt, new Date(input.to)));
+            if (input.clientType) conditions.push(eq(workOrders.clientType, input.clientType));
+            if (input.status) conditions.push(eq(workOrders.status, input.status));
+            if (input.craneId) conditions.push(eq(workOrders.craneId, input.craneId));
+
+            const results = conditions.length > 0 ? await query.where(and(...conditions)) : await query;
+
+            const totalOrders = results.length;
+            const completedCount = results.filter(r => r.status === "completed").length;
+            const statutoryCount = results.filter(r => r.isStatutoryCovered).length;
+            const feeAdjustmentsCount = results.filter(r => r.chargeItemCode !== null).length;
+            const commercialCount = results.filter(r => r.clientType === "external").length;
+            const totalCommercialBilledEur = results
+                .filter(r => r.commercialTotal)
+                .reduce((acc, curr) => acc + Number(curr.commercialTotal || 0), 0);
+
+            return {
+                period: { from: input.from || null, to: input.to || null },
+                orders: results,
+                summary: {
+                    totalOrders,
+                    completedCount,
+                    statutoryCount,
+                    feeAdjustmentsCount,
+                    commercialCount,
+                    totalCommercialBilledEur: Number(totalCommercialBilledEur.toFixed(2)),
+                },
+            };
+        }),
+
+    // ─── Godišnji Izvještaj Zaduženja Članarina za Desktop ERP ─────────
+    memberFeeAdjustments: operatorProcedure
+        .input(
+            z.object({
+                year: z.number().int().default(new Date().getFullYear()),
+            })
+        )
+        .query(async ({ input }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+            const { userCardEntries, users, workOrders } = await import("../drizzle/schema");
+
+            const fromDate = new Date(input.year, 0, 1, 0, 0, 0);
+            const toDate = new Date(input.year, 11, 31, 23, 59, 59);
+
+            const entries = await db
+                .select({
+                    id: userCardEntries.id,
+                    userId: userCardEntries.userId,
+                    userName: users.name,
+                    userFirstName: users.firstName,
+                    userLastName: users.lastName,
+                    userOib: users.oib,
+                    userEmail: users.email,
+                    userPhone: users.phone,
+                    serviceItemCode: userCardEntries.serviceItemCode,
+                    serviceItemName: userCardEntries.serviceItemName,
+                    vesselName: userCardEntries.vesselName,
+                    vesselRegistration: userCardEntries.vesselRegistration,
+                    eventDate: userCardEntries.eventDate,
+                    note: userCardEntries.note,
+                    erpStatus: userCardEntries.erpStatus,
+                    workOrderId: userCardEntries.workOrderId,
+                })
+                .from(userCardEntries)
+                .innerJoin(users, eq(userCardEntries.userId, users.id))
+                .where(
+                    and(
+                        eq(userCardEntries.entryType, "fee_adjustment_charge"),
+                        gte(userCardEntries.eventDate, fromDate),
+                        lte(userCardEntries.eventDate, toDate)
+                    )
+                )
+                .orderBy(asc(users.name), desc(userCardEntries.eventDate));
+
+            return {
+                year: input.year,
+                totalAdjustments: entries.length,
+                entries,
+            };
+        }),
 });

@@ -124,6 +124,119 @@ async function runMigration() {
     }
 
     try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."work_order_status" AS ENUM('in_progress', 'completed', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."work_order_client_type" AS ENUM('member', 'external');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."card_entry_type" AS ENUM('statutory_quota_used', 'fee_adjustment_charge', 'commercial_service');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."pricelist_target_type" AS ENUM('member_adjustment', 'external_commercial');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "price_list_items" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "code" varchar(50) NOT NULL UNIQUE,
+                "name" varchar(255) NOT NULL,
+                "target_type" varchar(50) DEFAULT 'external_commercial' NOT NULL,
+                "min_length_m" numeric(5, 2),
+                "max_length_m" numeric(5, 2),
+                "price_per_meter_eur" numeric(8, 2),
+                "fixed_price_eur" numeric(8, 2),
+                "vat_rate" numeric(5, 2) DEFAULT 25.00 NOT NULL,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("price_list_items table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "member_statutory_rights" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL UNIQUE REFERENCES "users"("id"),
+                "lift_available" boolean DEFAULT true NOT NULL,
+                "lift_acquired_year" integer NOT NULL,
+                "lift_expires_at" date NOT NULL,
+                "lower_available" boolean DEFAULT true NOT NULL,
+                "lower_acquired_year" integer NOT NULL,
+                "lower_expires_at" date NOT NULL,
+                "pending_fee_adjustments_count" integer DEFAULT 0 NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("member_statutory_rights table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "work_orders" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "order_number" varchar(30) NOT NULL UNIQUE,
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "vessel_id" uuid REFERENCES "vessels"("id"),
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id"),
+                "operator_id" uuid REFERENCES "users"("id"),
+                "status" varchar(50) DEFAULT 'in_progress' NOT NULL,
+                "client_type" varchar(50) DEFAULT 'member' NOT NULL,
+                "is_statutory_covered" boolean DEFAULT false NOT NULL,
+                "quota_operation_type" varchar(20),
+                "charge_item_code" varchar(50),
+                "charge_item_name" varchar(255),
+                "vessel_length_m" numeric(7, 2),
+                "commercial_price_per_meter" numeric(8, 2),
+                "commercial_total" numeric(10, 2),
+                "vat_rate" numeric(5, 2) DEFAULT 25.00,
+                "started_at" timestamp DEFAULT now() NOT NULL,
+                "completed_at" timestamp,
+                "actual_duration_min" integer,
+                "operator_notes" text,
+                "erp_sync_status" varchar(30) DEFAULT 'pending' NOT NULL,
+                "erp_document_id" varchar(100),
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("work_orders table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "user_card_entries" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "work_order_id" uuid REFERENCES "work_orders"("id"),
+                "entry_type" varchar(50) NOT NULL,
+                "service_item_code" varchar(50),
+                "service_item_name" varchar(255) NOT NULL,
+                "vessel_name" varchar(255),
+                "vessel_registration" varchar(100),
+                "event_date" timestamp DEFAULT now() NOT NULL,
+                "note" text,
+                "erp_status" varchar(50) DEFAULT 'pending' NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("user_card_entries table verified.");
+    } catch (e: any) {
+        console.warn("Work orders tables verification warning:", e?.message || e);
+    }
+
+    try {
         await migrate(db, { migrationsFolder: "drizzle" });
         console.log("Migrations completed.");
     } catch (migErr: any) {
@@ -131,9 +244,76 @@ async function runMigration() {
     }
 
     // ─── Import schema and helpers ────────────────────────────────────
-    const { cranes, users, serviceTypes, holidays, landZones } = await import("../drizzle/schema");
+    const { cranes, users, serviceTypes, holidays, landZones, priceListItems, memberStatutoryRights } = await import("../drizzle/schema");
     const { eq } = await import("drizzle-orm");
     const bcrypt = await import("bcryptjs");
+
+    // ─── Seed: Price List Items ───────────────────────────────────────
+    const existingPriceItems = await db.select().from(priceListItems);
+    if (existingPriceItems.length === 0) {
+        console.log("Seeding price list items...");
+        await db.insert(priceListItems).values([
+            {
+                code: "USL-D9T",
+                name: "Korištenje dizalice 9T (Doplata članarine)",
+                targetType: "member_adjustment",
+                fixedPriceEur: "50.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 1,
+            },
+            {
+                code: "USL-TR50",
+                name: "Korištenje Travelifta 50T (Doplata članarine)",
+                targetType: "member_adjustment",
+                fixedPriceEur: "80.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 2,
+            },
+            {
+                code: "USL-VANJSKI-M",
+                name: "Dizanje/spuštanje za vanjske korisnike (po metru duljine)",
+                targetType: "external_commercial",
+                pricePerMeterEur: "12.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 3,
+            },
+            {
+                code: "USL-PRANJE",
+                name: "Pranje trupa visokotlačnim peračem",
+                targetType: "external_commercial",
+                fixedPriceEur: "30.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 4,
+            },
+        ]);
+        console.log("Price list items seeded.");
+    }
+
+    // ─── Seed: Member Statutory Rights for active users ───────────────
+    const allUsers = await db.select().from(users);
+    const currentYear = new Date().getFullYear();
+    const expiresAt = `${currentYear + 1}-12-31`;
+
+    for (const u of allUsers) {
+        const [existingRight] = await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, u.id));
+        if (!existingRight) {
+            await db.insert(memberStatutoryRights).values({
+                userId: u.id,
+                liftAvailable: true,
+                liftAcquiredYear: currentYear,
+                liftExpiresAt: expiresAt,
+                lowerAvailable: true,
+                lowerAcquiredYear: currentYear,
+                lowerExpiresAt: expiresAt,
+                pendingFeeAdjustmentsCount: 0,
+            });
+        }
+    }
+    console.log("Member statutory rights verified.");
 
     // ─── Seed: Service Types (tipovi operacija) ───────────────────────
     const existingServiceTypes = await db.select().from(serviceTypes);

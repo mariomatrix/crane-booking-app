@@ -50,6 +50,7 @@ import {
   ChevronDown,
   ChevronRight,
   SlidersHorizontal,
+  Tag,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -164,12 +165,14 @@ function DashboardLayoutContent({
     { icon: Layers, label: t.nav.operationTypes, path: "/admin/service-types", adminOnly: true },
     { icon: Sun, label: t.nav.seasons, path: "/admin/seasons", adminOnly: true },
     { icon: CalendarOff, label: t.nav.holidays, path: "/admin/holidays", adminOnly: true },
+    { icon: Tag, label: lang === "hr" ? "Cjenik usluga" : "Pricelist", path: "/admin/pricelists", adminOnly: true },
   ].filter(item => !(isOperator && (item as any).adminOnly));
 
   const mainMenuItems = [
     { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
+    { icon: FileText, label: lang === "hr" ? "Radni nalozi" : "Work Orders", path: "/admin/work-orders" },
     { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
     { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },

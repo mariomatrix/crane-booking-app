@@ -46,11 +46,13 @@ import {
   Construction,
   MapPin,
   Pencil,
+  FileText,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
+import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
@@ -95,6 +97,9 @@ export default function AdminReservations() {
 
   // Chat dialog state
   const [chatReservationId, setChatReservationId] = useState<string | null>(null);
+
+  // Work order execution dialog state
+  const [selectedWorkOrderRes, setSelectedWorkOrderRes] = useState<any | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -448,6 +453,15 @@ export default function AdminReservations() {
 
             {isApproved && (
               <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedWorkOrderRes(reservation)}
+                  className="h-7 text-xs text-primary border-primary/40 hover:bg-primary/5 font-semibold px-2"
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1" />
+                  Radni nalog
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
@@ -1093,20 +1107,24 @@ export default function AdminReservations() {
         </DialogContent>
       </Dialog>
 
-      {/* Chat Dialog */}
-      <Dialog open={!!chatReservationId} onOpenChange={(open) => !open && setChatReservationId(null)}>
-        <DialogContent className="max-w-lg p-0">
-          <DialogHeader className="p-4 pb-0">
-            <DialogTitle>Poruke</DialogTitle>
-            <DialogDescription>
-              Razgovarajte s korisnikom u vezi ove rezervacije.
-            </DialogDescription>
-          </DialogHeader>
-          {chatReservationId && (
-            <ReservationChat reservationId={chatReservationId} pollInterval={15000} />
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Work Order Execution Dialog */}
+      {selectedWorkOrderRes && (
+        <WorkOrderExecutionDialog
+          open={!!selectedWorkOrderRes}
+          onOpenChange={(open) => !open && setSelectedWorkOrderRes(null)}
+          reservationId={selectedWorkOrderRes.id}
+          craneId={selectedWorkOrderRes.craneId || ""}
+          craneName={selectedWorkOrderRes.craneName}
+          userName={selectedWorkOrderRes.userName}
+          userOib={selectedWorkOrderRes.userOib}
+          isMember={!selectedWorkOrderRes.isLegalEntity}
+          vesselName={selectedWorkOrderRes.vesselName}
+          vesselLengthM={selectedWorkOrderRes.vesselLengthM}
+          onSuccess={() => {
+            reservationsQuery.refetch();
+          }}
+        />
+      )}
     </div>
   );
 }

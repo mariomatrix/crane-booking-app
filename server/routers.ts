@@ -20,6 +20,9 @@ import {
 import { z } from "zod";
 import { isValidOib } from "../shared/oib";
 import { reportsRouter } from "./reports.router";
+import { workOrdersRouter } from "./workOrders.router";
+import { userCardRouter } from "./userCard.router";
+import { priceListRouter } from "./priceList.router";
 import {
   listCranes,
   getCraneById,
@@ -279,6 +282,10 @@ async function validateSlotAgainstSettings(
 // ─── Main Router ──────────────────────────────────────────────────────
 export const appRouter = router({
   system: systemRouter,
+  reports: reportsRouter,
+  workOrders: workOrdersRouter,
+  userCard: userCardRouter,
+  priceList: priceListRouter,
 
   // ─── Auth ────────────────────────────────────────────────────────────
   auth: router({
@@ -4660,9 +4667,6 @@ export const appRouter = router({
         });
       }),
   }),
-
-  // ─── Reports ───────────────────────────────────────────────────────────
-  reports: reportsRouter,
 });
 
 export type AppRouter = typeof appRouter;

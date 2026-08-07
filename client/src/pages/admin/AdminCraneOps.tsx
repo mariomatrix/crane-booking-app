@@ -117,7 +117,15 @@ export default function AdminCraneOps() {
             {isHr ? "Pratite statistike rada dizalica i pregledavajte povijest operacija." : "Monitor crane utilization statistics and view operation logs."}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { window.location.href = "/admin/work-orders"; }}
+            className="rounded-xl border-primary/40 text-primary hover:bg-primary/5 font-semibold"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            {isHr ? "Radni nalozi" : "Work Orders"}
+          </Button>
           <Button
             variant="outline"
             onClick={() => {
@@ -125,7 +133,7 @@ export default function AdminCraneOps() {
                 ? `/admin/reports/crane-log?craneId=${selectedCraneId}` 
                 : "/admin/reports/crane-log";
             }}
-            className="rounded-xl border-primary/30 text-primary hover:bg-primary/5"
+            className="rounded-xl border-muted text-muted-foreground hover:bg-muted/10"
           >
             <FileText className="h-4 w-4 mr-2" />
             {isHr ? "Mjesečni Dnevnik" : "Monthly Log Report"}
