@@ -243,8 +243,8 @@ export default function AdminWorkOrders() {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex items-center justify-end gap-1">
-                                                <Link href={`/admin/users/${o.userId}/card`}>
-                                                    <Button variant="ghost" size="sm" className="h-8 px-2 text-xs">
+                                                <Link href={`/admin/users/${o.userId}`}>
+                                                    <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-primary hover:bg-primary/10">
                                                         Karton
                                                     </Button>
                                                 </Link>

@@ -81,6 +81,9 @@ function Router() {
       <Route path="/admin/users/:id">
         <AdminLayout><AdminUserCard /></AdminLayout>
       </Route>
+      <Route path="/admin/users/:id/card">
+        <AdminLayout><AdminUserCard /></AdminLayout>
+      </Route>
       <Route path="/admin/analytics">
         <AdminLayout><AdminAnalytics /></AdminLayout>
       </Route>
