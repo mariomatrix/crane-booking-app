@@ -778,6 +778,15 @@ export default function AdminReservations() {
                             <Button
                               size="sm"
                               variant="outline"
+                              onClick={() => setSelectedWorkOrderRes(reservation)}
+                              className="text-primary border-primary/40 hover:bg-primary/5 font-semibold"
+                            >
+                              <FileText className="h-3.5 w-3.5 mr-1" />
+                              Radni nalog
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
                               onClick={() => completeMutation.mutate({ id: reservation.id })}
                               disabled={completeMutation.isPending}
                               className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
@@ -1113,11 +1122,11 @@ export default function AdminReservations() {
           open={!!selectedWorkOrderRes}
           onOpenChange={(open) => !open && setSelectedWorkOrderRes(null)}
           reservationId={selectedWorkOrderRes.id}
-          craneId={selectedWorkOrderRes.craneId || ""}
-          craneName={selectedWorkOrderRes.craneName}
-          userName={selectedWorkOrderRes.userName}
-          userOib={selectedWorkOrderRes.userOib}
-          isMember={!selectedWorkOrderRes.isLegalEntity}
+          craneId={selectedWorkOrderRes.craneId || selectedWorkOrderRes.crane?.id || ""}
+          craneName={selectedWorkOrderRes.crane?.name || selectedWorkOrderRes.craneName}
+          userName={selectedWorkOrderRes.user?.name || (selectedWorkOrderRes.user?.firstName ? `${selectedWorkOrderRes.user.firstName} ${selectedWorkOrderRes.user.lastName || ''}`.trim() : null) || selectedWorkOrderRes.userName}
+          userOib={selectedWorkOrderRes.user?.oib || selectedWorkOrderRes.userOib}
+          isMember={selectedWorkOrderRes.user ? (!selectedWorkOrderRes.user.isLegalEntity && selectedWorkOrderRes.user.role === "user") : !selectedWorkOrderRes.isLegalEntity}
           vesselName={selectedWorkOrderRes.vesselName}
           vesselLengthM={selectedWorkOrderRes.vesselLengthM}
           onSuccess={() => {

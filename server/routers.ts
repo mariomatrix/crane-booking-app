@@ -2210,8 +2210,13 @@ export const appRouter = router({
             ? {
                 id: user.id,
                 name: user.name,
+                firstName: user.firstName,
+                lastName: user.lastName,
                 email: user.email,
                 phone: user.phone,
+                oib: user.oib,
+                role: user.role,
+                isLegalEntity: user.isLegalEntity,
               }
             : null,
           landZone,
@@ -2363,8 +2368,12 @@ export const appRouter = router({
             user: {
               id: users.id,
               name: users.name,
+              firstName: users.firstName,
+              lastName: users.lastName,
               email: users.email,
               phone: users.phone,
+              oib: users.oib,
+              isLegalEntity: users.isLegalEntity,
             },
             crane: {
               id: cranes.id,

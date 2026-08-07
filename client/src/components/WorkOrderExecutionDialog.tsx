@@ -47,6 +47,48 @@ export function WorkOrderExecutionDialog({
         { enabled: open && !!reservationId }
     );
 
+    // Query reservation details for full names and data fallback
+    const { data: resDetails } = trpc.reservation.getById.useQuery(
+        { id: reservationId },
+        { enabled: open && !!reservationId }
+    );
+
+    const userObj = (resDetails as any)?.user;
+    const displayName =
+        userObj?.name ||
+        (userObj?.firstName ? `${userObj.firstName} ${userObj.lastName || ''}`.trim() : null) ||
+        (resDetails as any)?.userName ||
+        ((resDetails as any)?.userFirstName ? `${(resDetails as any).userFirstName} ${(resDetails as any).userLastName || ''}`.trim() : null) ||
+        userName ||
+        "Korisnik";
+
+    const displayOib =
+        userObj?.oib ||
+        (resDetails as any)?.userOib ||
+        userOib ||
+        "—";
+
+    const displayVesselName =
+        (resDetails as any)?.vesselName ||
+        (resDetails as any)?.vessel?.name ||
+        vesselName ||
+        "Plovilo";
+
+    const displayVesselLength =
+        (resDetails as any)?.vesselLengthM ||
+        (resDetails as any)?.vessel?.lengthM ||
+        vesselLengthM ||
+        "—";
+
+    const displayCraneName =
+        (resDetails as any)?.crane?.name ||
+        (resDetails as any)?.craneName ||
+        craneName ||
+        "Dizalica";
+
+    const displayIsMember =
+        userObj ? (!userObj.isLegalEntity && userObj.role === "user") : isMember;
+
     const startMutation = trpc.workOrders.startFromReservation.useMutation({
         onSuccess: (res: any) => {
             if (res.alreadyRunning) {
@@ -110,11 +152,11 @@ export function WorkOrderExecutionDialog({
                         <div className="bg-muted/40 p-4 rounded-lg border space-y-2 text-sm">
                             <div className="flex justify-between items-start">
                                 <div>
-                                    <div className="font-semibold text-base">{userName || "Korisnik"}</div>
-                                    <div className="text-xs text-muted-foreground">OIB: {userOib || "Nije uneseno"}</div>
+                                    <div className="font-semibold text-base">{displayName}</div>
+                                    <div className="text-xs text-muted-foreground">OIB: {displayOib}</div>
                                 </div>
                                 <div className="text-right">
-                                    {isMember ? (
+                                    {displayIsMember ? (
                                         <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
                                             ČLAN PŠD-a
                                         </Badge>
@@ -126,8 +168,8 @@ export function WorkOrderExecutionDialog({
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-2 pt-2 border-t text-xs">
-                                <div><span className="text-muted-foreground">Plovilo:</span> {vesselName || "—"} ({vesselLengthM ? `${vesselLengthM} m` : "—"})</div>
-                                <div><span className="text-muted-foreground">Dizalica:</span> {craneName || "—"}</div>
+                                <div><span className="text-muted-foreground">Plovilo:</span> {displayVesselName} ({displayVesselLength ? `${displayVesselLength} m` : "—"})</div>
+                                <div><span className="text-muted-foreground">Dizalica:</span> {displayCraneName}</div>
                             </div>
                         </div>
 
