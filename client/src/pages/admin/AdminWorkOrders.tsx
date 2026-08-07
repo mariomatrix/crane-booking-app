@@ -109,7 +109,7 @@ export default function AdminWorkOrders() {
 
                 <Card className="bg-card/50 shadow-sm border-l-4 border-l-amber-500">
                     <CardHeader className="p-3 pb-1">
-                        <CardDescription className="text-xs">Doplata članarine</CardDescription>
+                        <CardDescription className="text-xs">Zaduženje za sljedeću godinu</CardDescription>
                         <CardTitle className="text-2xl font-bold text-amber-600 dark:text-amber-400">{memberAdjustmentsCount}</CardTitle>
                     </CardHeader>
                 </Card>

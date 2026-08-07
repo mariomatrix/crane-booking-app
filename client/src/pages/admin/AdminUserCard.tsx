@@ -259,7 +259,7 @@ export default function AdminUserCard() {
                     <Card className={`border-l-4 ${userCardData.rights.pendingFeeAdjustmentsCount > 0 ? 'border-l-amber-500 bg-amber-500/5' : 'border-l-muted'}`}>
                         <CardHeader className="p-4 pb-2">
                             <CardDescription className="text-xs font-semibold">
-                                Zaduženja članarine za Desktop ERP
+                                Zaduženje za sljedeću godinu
                             </CardDescription>
                             <CardTitle className="text-lg font-bold flex items-center justify-between">
                                 {userCardData.rights.pendingFeeAdjustmentsCount > 0 ? (

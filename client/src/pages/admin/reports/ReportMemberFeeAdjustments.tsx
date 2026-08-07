@@ -46,10 +46,10 @@ export default function ReportMemberFeeAdjustments() {
                 <div>
                     <h1 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-2">
                         <ShieldAlert className="h-7 w-7 text-amber-600" />
-                        Godišnji Izvještaj Zaduženja Članarina (Desktop ERP)
+                        Izvještaj zaduženja članarina za sljedeću godinu
                     </h1>
                     <p className="text-sm text-muted-foreground mt-1">
-                        Službena lista članova s prekoračenjem statutarnih prava za povećanje članarine u Desktop ERP-u za {selectedYear + 1}. godinu.
+                        Službena lista članova s prekoračenjem statutarnih prava za povećanje članarine za {selectedYear + 1}. godinu.
                     </p>
                 </div>
 

@@ -24,8 +24,8 @@ export default function ReportHub() {
             color: "text-primary border-primary/20 bg-primary/5",
         },
         {
-            title: "Godišnja zaduženja članarina (Desktop ERP)",
-            description: "Izvještaj članova s prekoračenjem statutarnih prava za povećanje članarine u Desktop ERP-u za iduću godinu.",
+            title: "Zaduženja članarina za sljedeću godinu",
+            description: "Izvještaj članova s prekoračenjem statutarnih prava za povećanje članarine u sljedećoj godini.",
             path: "/admin/reports/member-fee-adjustments",
             icon: Users,
             color: "text-amber-600 border-amber-100 bg-amber-50/50 dark:bg-amber-950/10 dark:border-amber-950/20",
