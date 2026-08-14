@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "db:push": "drizzle-kit push",
+    "db:clean-members": "tsx server/scripts/cleanMembers.ts",
     "migrate": "node dist/migrate.js",
     "sync:push": "tsx server/memberSync/agent/cli.ts",
     "sync:daemon": "tsx server/memberSync/agent/daemon.ts"
