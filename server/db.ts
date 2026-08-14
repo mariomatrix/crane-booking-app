@@ -20,6 +20,10 @@ import {
   landOccupancies,
   landWaitingList,
   craneOperationLog,
+  memberLinks,
+  memberMemberships,
+  syncRuns,
+  syncConflicts,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -31,6 +35,10 @@ import {
   type InsertLandOccupancy,
   type InsertLandWaitingList,
   type InsertCraneOperationLog,
+  type InsertMemberLink,
+  type InsertMemberMembership,
+  type InsertSyncRun,
+  type InsertSyncConflict,
 } from "../drizzle/schema";
 
 // ─── DB Connection ────────────────────────────────────────────────────
@@ -85,10 +93,11 @@ export async function createLocalUser(data: {
 }
 
 export async function getUserByEmail(email: string) {
+  if (!email || !email.trim()) return undefined;
   const db = await getDb();
   if (!db) return undefined;
   const res = await db.select().from(users)
-    .where(eq(users.email, email))
+    .where(eq(users.email, email.trim().toLowerCase()))
     .limit(1);
   return res[0];
 }

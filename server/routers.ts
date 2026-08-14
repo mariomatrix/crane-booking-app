@@ -23,6 +23,7 @@ import { reportsRouter } from "./reports.router";
 import { workOrdersRouter } from "./workOrders.router";
 import { userCardRouter } from "./userCard.router";
 import { priceListRouter } from "./priceList.router";
+import { memberSyncRouter } from "./memberSync/memberSync.router";
 import {
   listCranes,
   getCraneById,
@@ -286,6 +287,7 @@ export const appRouter = router({
   workOrders: workOrdersRouter,
   userCard: userCardRouter,
   priceList: priceListRouter,
+  memberSync: memberSyncRouter,
 
   // ─── Auth ────────────────────────────────────────────────────────────
   auth: router({
@@ -523,6 +525,12 @@ export const appRouter = router({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message: "Email je već verificiran.",
+        });
+      }
+      if (!ctx.user.email) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Korisnik nema unesenu email adresu.",
         });
       }
       const verifyToken = await createEmailVerificationToken(ctx.user.id);
@@ -2051,39 +2059,41 @@ export const appRouter = router({
         const { sendReservationReceived, sendReservationConfirmation } =
           await import("./_core/email");
 
-        if (
-          finalStatus === "approved" &&
-          autoApproveCrane &&
-          finalScheduledStart &&
-          finalScheduledEnd
-        ) {
-          sendReservationConfirmation({
-            to: targetUser.email,
-            userName:
-              targetUser.name || targetUser.firstName || targetUser.email,
-            craneName: autoApproveCrane.name,
-            startDate: finalScheduledStart,
-            endDate: finalScheduledEnd,
-            craneLocation: autoApproveCrane.location || autoApproveCrane.name,
-            vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
-            vesselType: vesselSnapshot.vesselType || undefined,
-            vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
-            userNote: input.userNote || undefined,
-          }).catch(console.warn);
-        } else {
-          sendReservationReceived({
-            to: targetUser.email,
-            userName:
-              targetUser.name || targetUser.firstName || targetUser.email,
-            reservationNumber,
-            requestedDate: input.requestedDate,
-            vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
-            vesselType: vesselSnapshot.vesselType || undefined,
-            vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
-            contactPhone: input.contactPhone,
-            userNote: input.userNote || undefined,
-            lang: "hr",
-          }).catch(console.warn);
+        if (targetUser.email) {
+          if (
+            finalStatus === "approved" &&
+            autoApproveCrane &&
+            finalScheduledStart &&
+            finalScheduledEnd
+          ) {
+            sendReservationConfirmation({
+              to: targetUser.email,
+              userName:
+                targetUser.name || targetUser.firstName || targetUser.email || "Korisnik",
+              craneName: autoApproveCrane.name,
+              startDate: finalScheduledStart,
+              endDate: finalScheduledEnd,
+              craneLocation: autoApproveCrane.location || autoApproveCrane.name,
+              vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
+              vesselType: vesselSnapshot.vesselType || undefined,
+              vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
+              userNote: input.userNote || undefined,
+            }).catch(console.warn);
+          } else {
+            sendReservationReceived({
+              to: targetUser.email,
+              userName:
+                targetUser.name || targetUser.firstName || targetUser.email || "Korisnik",
+              reservationNumber,
+              requestedDate: input.requestedDate,
+              vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
+              vesselType: vesselSnapshot.vesselType || undefined,
+              vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
+              contactPhone: input.contactPhone,
+              userNote: input.userNote || undefined,
+              lang: "hr",
+            }).catch(console.warn);
+          }
         }
 
         if (input.landWaitingId) {
@@ -2632,7 +2642,7 @@ export const appRouter = router({
         calendarSync.broadcast({
           type: "CALENDAR_UPDATED",
           actorId: ctx.user.id,
-          actorName: ctx.user.name || ctx.user.firstName || ctx.user.email,
+          actorName: ctx.user.name || ctx.user.firstName || ctx.user.email || "Operater",
           reservationId: input.id,
           actionText: "je odobrio/la rezervaciju i dodijelio/la termin",
           timestamp: new Date().toISOString(),
@@ -2757,7 +2767,7 @@ export const appRouter = router({
         calendarSync.broadcast({
           type: "CALENDAR_UPDATED",
           actorId: ctx.user.id,
-          actorName: ctx.user.name || ctx.user.firstName || ctx.user.email,
+          actorName: ctx.user.name || ctx.user.firstName || ctx.user.email || "Operater",
           reservationId: input.id,
           actionText: "je premjestio/la termin rezervacije (drag & drop)",
           timestamp: new Date().toISOString(),

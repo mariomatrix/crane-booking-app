@@ -84,6 +84,10 @@ async function startServer() {
     })
   );
 
+  // Member Sync Push Ingestion API v1 (must be mounted before general /api/v1)
+  const memberSyncApiRouter = (await import("../routes/memberSyncApi")).default;
+  app.use("/api/v1/member-sync", memberSyncApiRouter);
+
   // REST API v1
   app.use("/api/v1", restApiRouter);
 

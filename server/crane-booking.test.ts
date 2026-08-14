@@ -3,18 +3,43 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
 import { getDb } from "./db";
-import { users, cranes, reservations, auditLog, landZones, landOccupancies, landWaitingList, craneOperationLog } from "../drizzle/schema";
+import {
+  users,
+  cranes,
+  reservations,
+  auditLog,
+  landZones,
+  landOccupancies,
+  landWaitingList,
+  craneOperationLog,
+  memberLinks,
+  memberMemberships,
+  userCardEntries,
+  workOrders,
+  memberStatutoryRights,
+  syncConflicts,
+  operatorCranes,
+  vessels,
+} from "../drizzle/schema";
 
 beforeAll(async () => {
   const db = await getDb();
   if (db) {
     // Clean up referencing tables first to avoid foreign key violations
     await db.delete(auditLog).catch(() => {});
+    await db.delete(syncConflicts).catch(() => {});
+    await db.delete(userCardEntries).catch(() => {});
+    await db.delete(workOrders).catch(() => {});
+    await db.delete(memberLinks).catch(() => {});
+    await db.delete(memberMemberships).catch(() => {});
+    await db.delete(memberStatutoryRights).catch(() => {});
     await db.delete(landWaitingList).catch(() => {});
     await db.delete(landOccupancies).catch(() => {});
     await db.delete(landZones).catch(() => {});
     await db.delete(craneOperationLog).catch(() => {});
     await db.delete(reservations).catch(() => {});
+    await db.delete(operatorCranes).catch(() => {});
+    await db.delete(vessels).catch(() => {});
     await db.delete(cranes).catch(() => {});
     await db.delete(users).catch(() => {});
 

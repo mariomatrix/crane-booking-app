@@ -236,6 +236,142 @@ async function runMigration() {
         console.warn("Work orders tables verification warning:", e?.message || e);
     }
 
+    // ─── Member Sync Tables & Alterations ─────────────────────────────
+    try {
+        await migrationClient`ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL`;
+        await migrationClient`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "jmbg_hash" varchar(64)`;
+        console.log("users table updated for member sync (nullable email, jmbg_hash).");
+    } catch (e: any) {
+        console.warn("users alter warning:", e?.message || e);
+    }
+
+    try {
+        // Ensure vessels registration is unique where not null
+        await migrationClient`
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'vessels_registration_unique'
+                ) THEN
+                    ALTER TABLE "vessels" ADD CONSTRAINT "vessels_registration_unique" UNIQUE ("registration");
+                END IF;
+            EXCEPTION WHEN others THEN null;
+            END $$;
+        `;
+        console.log("vessels registration uniqueness verified.");
+    } catch (e: any) {
+        console.warn("vessels uniqueness warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."sync_run_status" AS ENUM('running', 'completed', 'failed', 'partial');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."sync_conflict_status" AS ENUM('pending', 'resolved', 'ignored');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."sync_conflict_type" AS ENUM('duplicate_oib', 'duplicate_name', 'oib_mismatch', 'vessel_owner_conflict', 'ambiguous_match');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "member_links" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "legacy_mat_broj" varchar(10) NOT NULL UNIQUE,
+                "legacy_oib" varchar(11),
+                "legacy_jmbg" varchar(13),
+                "legacy_raw_data" jsonb,
+                "is_primary" boolean DEFAULT false NOT NULL,
+                "last_synced_at" timestamp DEFAULT now() NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "member_links_user_id_idx" ON "member_links" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "member_links_legacy_oib_idx" ON "member_links" ("legacy_oib")`;
+        console.log("member_links table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "member_memberships" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "legacy_mat_broj" varchar(10) NOT NULL,
+                "vrsta_c" varchar(1),
+                "clan" varchar(1),
+                "klub" varchar(3),
+                "klub2" varchar(3),
+                "klub3" varchar(3),
+                "active_member" boolean DEFAULT true NOT NULL,
+                "synced_at" timestamp DEFAULT now() NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_user_id_idx" ON "member_memberships" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_mat_broj_idx" ON "member_memberships" ("legacy_mat_broj")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_active_member_idx" ON "member_memberships" ("active_member")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_klub_idx" ON "member_memberships" ("klub")`;
+        console.log("member_memberships table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "sync_runs" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "started_at" timestamp NOT NULL,
+                "completed_at" timestamp,
+                "status" "sync_run_status" DEFAULT 'running' NOT NULL,
+                "source_rows_total" integer,
+                "members_created" integer DEFAULT 0 NOT NULL,
+                "members_updated" integer DEFAULT 0 NOT NULL,
+                "members_skipped" integer DEFAULT 0 NOT NULL,
+                "members_deactivated" integer DEFAULT 0 NOT NULL,
+                "vessels_created" integer DEFAULT 0 NOT NULL,
+                "vessels_updated" integer DEFAULT 0 NOT NULL,
+                "vessels_skipped" integer DEFAULT 0 NOT NULL,
+                "links_created" integer DEFAULT 0 NOT NULL,
+                "memberships_created" integer DEFAULT 0 NOT NULL,
+                "memberships_updated" integer DEFAULT 0 NOT NULL,
+                "conflicts_detected" integer DEFAULT 0 NOT NULL,
+                "error_message" text,
+                "error_details" jsonb,
+                "triggered_by" varchar(30) DEFAULT 'cron' NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("sync_runs table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "sync_conflicts" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "sync_run_id" uuid NOT NULL REFERENCES "sync_runs"("id"),
+                "conflict_type" "sync_conflict_type" NOT NULL,
+                "status" "sync_conflict_status" DEFAULT 'pending' NOT NULL,
+                "legacy_mat_broj" varchar(10),
+                "legacy_data" jsonb NOT NULL,
+                "matched_user_ids" jsonb,
+                "description" text NOT NULL,
+                "resolution" text,
+                "resolved_by" uuid REFERENCES "users"("id"),
+                "resolved_at" timestamp,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "sync_conflicts_sync_run_id_idx" ON "sync_conflicts" ("sync_run_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "sync_conflicts_status_idx" ON "sync_conflicts" ("status")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "sync_conflicts_type_idx" ON "sync_conflicts" ("conflict_type")`;
+        console.log("sync_conflicts table verified.");
+    } catch (e: any) {
+        console.warn("Member sync tables verification warning:", e?.message || e);
+    }
+
     try {
         await migrate(db, { migrationsFolder: "drizzle" });
         console.log("Migrations completed.");

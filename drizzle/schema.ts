@@ -40,7 +40,7 @@ export const operationCategoryEnum = pgEnum("operation_category", [
 // ─── Users ───────────────────────────────────────────────────────────
 export const users = pgTable("users", {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    email: varchar("email", { length: 320 }).unique().notNull(),
+    email: varchar("email", { length: 320 }).unique(),             // nullable: synced members may not have email
     passwordHash: varchar("password_hash", { length: 255 }),        // NULL for OAuth users
     googleId: varchar("google_id", { length: 255 }).unique(),       // Google OAuth ID
     firstName: varchar("first_name", { length: 100 }),
@@ -48,6 +48,7 @@ export const users = pgTable("users", {
     name: text("name"),                                              // display name (full name)
     phone: varchar("phone", { length: 50 }),
     oib: varchar("oib", { length: 11 }).unique(),                    // Osobni identifikacijski broj (HR)
+    jmbgHash: varchar("jmbg_hash", { length: 64 }),                   // SHA-256 hash JMBG-a (nikad se ne prikazuje)
     isLegalEntity: boolean("is_legal_entity").default(false).notNull(),
     companyName: varchar("company_name", { length: 255 }),
     contactPerson: varchar("contact_person", { length: 255 }),
@@ -125,7 +126,7 @@ export const vessels = pgTable("vessels", {
     beamM: decimal("beam_m", { precision: 6, scale: 2 }),
     draftM: decimal("draft_m", { precision: 5, scale: 2 }),
     weightTons: decimal("weight_tons", { precision: 8, scale: 2 }),
-    registration: varchar("registration", { length: 100 }),
+    registration: varchar("registration", { length: 100 }).unique(),  // globalno jedinstvena registracija plovila
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {
@@ -586,3 +587,123 @@ export type InsertUserCardEntry = typeof userCardEntries.$inferInsert;
 export type SelectUserCardEntry = typeof userCardEntries.$inferSelect;
 export type UserCardEntry = SelectUserCardEntry;
 
+// ─── Member Links (Legacy MAT_BROJ → UUID mapiranje) ───────────────────
+export const memberLinks = pgTable("member_links", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    legacyMatBroj: varchar("legacy_mat_broj", { length: 10 }).notNull().unique(),
+    legacyOib: varchar("legacy_oib", { length: 11 }),
+    legacyJmbg: varchar("legacy_jmbg", { length: 13 }),
+    legacyRawData: jsonb("legacy_raw_data"),              // kompletni CLAN03 red za reviziju
+    isPrimary: boolean("is_primary").default(false).notNull(),
+    lastSyncedAt: timestamp("last_synced_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("member_links_user_id_idx").on(table.userId),
+        legacyOibIdx: index("member_links_legacy_oib_idx").on(table.legacyOib),
+    };
+});
+
+// ─── Member Memberships (Članstvo u klubovima + aktivni status) ─────────
+export const memberMemberships = pgTable("member_memberships", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    legacyMatBroj: varchar("legacy_mat_broj", { length: 10 }).notNull(),
+    vrstaC: varchar("vrsta_c", { length: 1 }),              // VRSTA_C iz CLAN03 ('U', 'B', ...)
+    clan: varchar("clan", { length: 1 }),                    // CLAN flag
+    klub: varchar("klub", { length: 3 }),                    // primarni klub
+    klub2: varchar("klub2", { length: 3 }),                  // sekundarni klub
+    klub3: varchar("klub3", { length: 3 }),                  // tercijarni (za buduću upotrebu)
+    activeMember: boolean("active_member").default(true).notNull(),
+    syncedAt: timestamp("synced_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("memberships_user_id_idx").on(table.userId),
+        matBrojIdx: index("memberships_mat_broj_idx").on(table.legacyMatBroj),
+        activeMemberIdx: index("memberships_active_member_idx").on(table.activeMember),
+        klubIdx: index("memberships_klub_idx").on(table.klub),
+    };
+});
+
+// ─── Sync Runs (Audit trail sinkronizacija) ─────────────────────────────
+export const syncRunStatusEnum = pgEnum("sync_run_status", [
+    "running", "completed", "failed", "partial"
+]);
+
+export const syncRuns = pgTable("sync_runs", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    startedAt: timestamp("started_at").notNull(),
+    completedAt: timestamp("completed_at"),
+    status: syncRunStatusEnum("status").default("running").notNull(),
+    sourceRowsTotal: integer("source_rows_total"),
+    membersCreated: integer("members_created").default(0).notNull(),
+    membersUpdated: integer("members_updated").default(0).notNull(),
+    membersSkipped: integer("members_skipped").default(0).notNull(),
+    membersDeactivated: integer("members_deactivated").default(0).notNull(),
+    vesselsCreated: integer("vessels_created").default(0).notNull(),
+    vesselsUpdated: integer("vessels_updated").default(0).notNull(),
+    vesselsSkipped: integer("vessels_skipped").default(0).notNull(),
+    linksCreated: integer("links_created").default(0).notNull(),
+    membershipsCreated: integer("memberships_created").default(0).notNull(),
+    membershipsUpdated: integer("memberships_updated").default(0).notNull(),
+    conflictsDetected: integer("conflicts_detected").default(0).notNull(),
+    errorMessage: text("error_message"),
+    errorDetails: jsonb("error_details"),
+    triggeredBy: varchar("triggered_by", { length: 30 }).default("cron").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// ─── Sync Conflicts (Konfliktni zapisi za ručno rješavanje) ──────────────
+export const syncConflictStatusEnum = pgEnum("sync_conflict_status", [
+    "pending", "resolved", "ignored"
+]);
+
+export const syncConflictTypeEnum = pgEnum("sync_conflict_type", [
+    "duplicate_oib",
+    "duplicate_name",
+    "oib_mismatch",
+    "vessel_owner_conflict",
+    "ambiguous_match",
+]);
+
+export const syncConflicts = pgTable("sync_conflicts", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    syncRunId: uuid("sync_run_id").notNull().references(() => syncRuns.id),
+    conflictType: syncConflictTypeEnum("conflict_type").notNull(),
+    status: syncConflictStatusEnum("status").default("pending").notNull(),
+    legacyMatBroj: varchar("legacy_mat_broj", { length: 10 }),
+    legacyData: jsonb("legacy_data").notNull(),
+    matchedUserIds: jsonb("matched_user_ids"),           // UUID[] korisnika koji su matchali
+    description: text("description").notNull(),           // ljudski čitljiv opis
+    resolution: text("resolution"),
+    resolvedBy: uuid("resolved_by").references(() => users.id),
+    resolvedAt: timestamp("resolved_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        syncRunIdIdx: index("sync_conflicts_sync_run_id_idx").on(table.syncRunId),
+        statusIdx: index("sync_conflicts_status_idx").on(table.status),
+        conflictTypeIdx: index("sync_conflicts_type_idx").on(table.conflictType),
+    };
+});
+
+// ─── Member Sync Types ──────────────────────────────────────────────────
+export type InsertMemberLink = typeof memberLinks.$inferInsert;
+export type SelectMemberLink = typeof memberLinks.$inferSelect;
+export type MemberLink = SelectMemberLink;
+
+export type InsertMemberMembership = typeof memberMemberships.$inferInsert;
+export type SelectMemberMembership = typeof memberMemberships.$inferSelect;
+export type MemberMembership = SelectMemberMembership;
+
+export type InsertSyncRun = typeof syncRuns.$inferInsert;
+export type SelectSyncRun = typeof syncRuns.$inferSelect;
+export type SyncRun = SelectSyncRun;
+
+export type InsertSyncConflict = typeof syncConflicts.$inferInsert;
+export type SelectSyncConflict = typeof syncConflicts.$inferSelect;
+export type SyncConflict = SelectSyncConflict;

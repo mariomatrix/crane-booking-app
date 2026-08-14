@@ -1,0 +1,192 @@
+# Arhitektonski Plan: Radni Nalozi, Statutarni Model PŠD-a, Šifrarnik Zaduženja i Konvergencija s Desktop ERP-om
+
+> [!IMPORTANT]
+> **Točna statutarna pravila i domenska logika PŠD-a:**
+> 1. **Nekumulativno pravo (Maksimalno 1 vađenje + 1 spuštanje):** Član ima pravo na **1 vađenje i 1 spuštanje**. Pravo vrijedi **dvije godine** (tekuća + iduća godina), ali se **prava NE zbrajaju** (ne može imati 2 vađenja istovremeno). Ako se ne iskoristi u drugoj godini, staro pravo se gubi.
+> 2. **Zaduženje u kartonu člana kao stavka cjenika:** Članovima se ne izdaju računi. Ako član iskoristi dodatnu operaciju izvan prava, u njegov Karton člana se **evidentira zaduženje po stavci cjenika** (npr. *Šifra USL-01: "Korištenje dizalice 9T"*), a **ne u novčanom iznosu**. Desktop ERP pri obnovi članarine po toj stavci obračunava pripadajuće povećanje članarine.
+> 3. **Vanjski korisnici:** Komercijalni cjenik definira se **po metrima duljine plovila** $\rightarrow$ radni nalog se prosljeđuje u Desktop ERP za izdavanje komercijalnog računa i fiskalizaciju.
+> 4. **Univerzalni Karton Korisnika:** Vodi se i za **članove** i za **vanjske korisnike** sa cjelokupnom poviješću plovila, radnih naloga i zaduženja.
+
+---
+
+## 1. Životni Ciklus Prava Člana (Statutarni Motor Prava)
+
+```mermaid
+stateDiagram-v2
+    [*] --> PravoAktivno: Članarina plaćena (Godina N)
+    
+    state PravoAktivno {
+        Vađenje: 1 raspoloživo (Vrijedi do 31.12. N+1)
+        Spuštanje: 1 raspoloživo (Vrijedi do 31.12. N+1)
+    }
+
+    PravoAktivno --> IskorištenoUKvoti: Operater izvrši 1. vađenje/spuštanje
+    IskorištenoUKvoti --> UpisUKarton: Upis u Karton člana (0,00 € - Pokriveno članarinom)
+
+    PravoAktivno --> IstekPrava: Nije iskorišteno do kraja N+1 godine
+    IstekPrava --> [*]: Pravo se gubi (Nekumulativno)
+
+    IskorištenoUKvoti --> DodatnaOperacija: Član traži još jedno vađenje/spuštanje
+    DodatnaOperacija --> ZaduženjeStavke: Zaduženje Kartona člana po stavci cjenika
+    ZaduženjeStavke --> DesktopERP: Povećanje članarine u Desktop ERP-u za iduću godinu
+```
+
+---
+
+## 2. Razrada Scenarija u Praksi
+
+### Scenarij A: Redovni član koristi važeće pravo (1 vađenje ili 1 spuštanje)
+- Operater na terenu aktivira radni nalog `RN-2026-00042`.
+- Sustav provjerava Karton člana: *Pravo na vađenje je aktivno (stečeno u 2025. ili 2026.)*.
+- Pri završetku radnog naloga:
+  - Nalog dobiva oznaku: **"Statutarno pravo člana (Pokriveno članarinom)"**.
+  - U **Karton člana** se upisuje datum, satnica, dizalica i iskorištenje prava na vađenje.
+  - Iznos: **0,00 €** (bez izdavanja računa).
+
+### Scenarij B: Neiskorišteno pravo iz prošle godine (Prijenos do 2 godine)
+- Član u 2025. nije vadio brod. U 2026. godini ima **1 vađenje na raspolaganju** (preneseno iz 2025., s rokom važenja do 31.12.2026.).
+- Prava se **ne zbrajaju** na 2 vađenja, već član uvijek ima maksimalno 1 raspoloživo vađenje.
+- Ako član iskoristi vađenje u 2026., iskoristio je svoje pravo. Ako ga ne iskoristi do 31.12.2026., pravo iz 2025. nepovratno ističe.
+
+### Scenarij C: Dodatno korištenje izvan prava (Zaduženje po stavci cjenika za povećanje članarine)
+- Član je već iskoristio svoje vađenje za tekuće razdoblje, ali u kolovozu ima havariju i mora ponovno podići plovilo.
+- **Pravilo zabrane izdavanja računa:** Članu se **ne izdaje račun**.
+- **Postupak:**
+  - Radni nalog se zaključuje s oznakom: **"Prekoračenje statutarne kvote"**.
+  - U **Karton člana** se evidentira zaduženje s referencom na stavku cjenika: npr. **`Korištenje dizalice 9T (Šifra: USL-D9T)`**.
+  - **Desktop ERP Konvergencija:** Desktop ERP pri generiranju članarina za iduću godinu preuzima zaduženu stavku iz kartona člana i automatski obračunava propisano uvećanje članarine.
+
+### Scenarij D: Vanjski (komercijalni) korisnik (Obračun po metrima duljine)
+- Za plovilo vanjskog korisnika (gost / partner bez članstva):
+  - Operater unosi stvarnu duljinu plovila (ili je sustav povlači iz profila plovila, npr. $9.20\text{ m}$).
+  - Cijena se automatski računa po formuli: $\text{Duljina (m)} \times \text{Cijena po metru}$ (ili po tarifnim razredima duljine: npr. *do 6m*, *6-8m*, *8-10m*, *10-12m*).
+  - U **Karton vanjskog korisnika** se upisuje kronološki zapis.
+  - Radni nalog dobiva status **"Spremno za ERP fakturiranje"** za izdavanje komercijalnog računa.
+
+---
+
+## 3. Podatkovni Model (Database Schema)
+
+```mermaid
+erDiagram
+    USERS ||--o{ WORK_ORDERS : "naručitelj/član"
+    USERS ||--o| MEMBER_STATUTORY_RIGHTS : "prava na dizalicu"
+    USERS ||--o{ USER_CARD_ENTRIES : "karton korisnika"
+    WORK_ORDERS ||--o{ WORK_ORDER_ITEMS : "stavke naloga"
+    PRICE_LIST_ITEMS ||--o{ WORK_ORDER_ITEMS : "šifrarnik"
+    RESERVATIONS ||--o| WORK_ORDERS : "generira nalog"
+
+    MEMBER_STATUTORY_RIGHTS {
+        uuid id PK
+        uuid user_id FK
+        boolean lift_available "true ako ima 1 pravo vađenja"
+        integer lift_acquired_year "godina stjecanja (npr. 2025)"
+        date lift_expires_at "ističe 31.12. N+1"
+        boolean lower_available "true ako ima 1 pravo spuštanja"
+        integer lower_acquired_year "godina stjecanja"
+        date lower_expires_at "ističe 31.12. N+1"
+        integer pending_fee_adjustments_count "broj zaduženja za iduću god"
+    }
+
+    USER_CARD_ENTRIES {
+        uuid id PK
+        uuid user_id FK
+        uuid work_order_id FK
+        varchar entry_type "statutory_quota_used | fee_adjustment_charge | commercial_service"
+        varchar service_item_code "npr. USL-D9T ili USL-TR50"
+        varchar service_item_name "Korištenje dizalice 9T"
+        date event_date
+        text note
+        varchar erp_status "pending | processed_in_membership_renewal"
+    }
+
+    WORK_ORDERS {
+        uuid id PK
+        varchar order_number "RN-2026-00042"
+        uuid reservation_id FK
+        uuid user_id FK
+        uuid vessel_id FK
+        uuid crane_id FK
+        uuid operator_id FK
+        varchar status "in_progress | completed | cancelled"
+        varchar client_type "member | external"
+        boolean is_statutory_covered "true za redovno pravo člana"
+        varchar charge_item_code "stavka za zaduženje u kartonu ako je prekoračenje"
+        numeric vessel_length_m "duljina za komercijalni izračun"
+        numeric commercial_price_per_meter "cijena po metru za vanjske"
+        numeric commercial_total "iznos za komercijalni račun"
+        timestamp started_at
+        timestamp completed_at
+        integer actual_duration_min
+        text operator_notes
+        varchar erp_sync_status "pending | synced"
+    }
+
+    PRICE_LIST_ITEMS {
+        uuid id PK
+        varchar code "USL-D9T, USL-TR50, USL-PRANJE"
+        varchar name "Korištenje dizalice 9T"
+        varchar target_type "member_adjustment | external_commercial"
+        numeric min_length_m
+        numeric max_length_m
+        numeric price_per_meter
+        numeric fixed_price
+        numeric vat_rate "25.00"
+    }
+```
+
+---
+
+## 4. Univerzalni Karton Korisnika (`/admin/users/:id/card`)
+
+Karton korisnika prikazuje se i za **članove društva** i za **vanjske korisnike**:
+
+### A. Prikaz za Člana PŠD-a:
+1. **Statutarni semafor prava:**
+   - 🟢 **Vađenje iz mora:** `Aktivno pravo (Vrijedi do 31.12.2026.)`
+   - 🟢 **Spuštanje u more:** `Aktivno pravo (Vrijedi do 31.12.2026.)`
+2. **Evidencija zaduženja za članarinu (Malus stavke za Desktop ERP):**
+   - Ako je član imao dodatne radnje: Popis stavki (npr. *Stavka: Korištenje dizalice 9T — RN-2026-00031 — Datum: 14.07.2026.* $\rightarrow$ *Status: Čeka knjiženje uz članarinu 2027.*).
+3. **Kronologija svih radnji člana:** Svi radni nalozi, plovila, datumi i operateri.
+
+### B. Prikaz za Vanjskog korisnika:
+1. **Komercijalni profil:**
+   - Povijest svih dolazaka i radnih naloga.
+   - Povezana plovila i njihove dimenzije (duljina u metrima).
+   - Pregled fakturiranih radnih naloga u Desktop ERP-u.
+
+---
+
+## 5. Cjenik po Metrima Duljine Plovila (`/admin/pricelists`)
+
+- Mogućnost unosa cijena po dužnom metru za vanjske korisnike (npr. $12,00\text{ €/m}$ za dizanje, $12,00\text{ €/m}$ za spuštanje).
+- Mogućnost tarifnih razreda duljine (npr. *do 7m*, *7-10m*, *10-12m*, *preko 12m*).
+- Šifrarnik stavki za članska zaduženja (npr. *Korištenje dizalice 9T*, *Korištenje Travelifta 50T*).
+
+---
+
+## 6. Novi Izvještaji i Desktop ERP Konvergencija
+
+1. **Dnevnik Radnih Naloga (`/admin/reports/work-orders`):**
+   - Pregled svih radnih naloga za odabrani period s razdvajanjem na *Statutarno pravo*, *Člansko zaduženje* i *Komercijalni nalog*.
+2. **Godišnji Izvještaj Zaduženja Članarina za Desktop ERP (`/admin/reports/member-fee-adjustments`):**
+   - Popis svih članova koji imaju zadužene stavke cjenika za povećanje članarine u idućoj godini (Ime, Prezime, OIB, Članski broj, Šifra stavke zaduženja, Broj RN-a).
+3. **Komercijalni Izvještaj Radnih Naloga za Fakturiranje:**
+   - Popis vanjskih radnih naloga sa specifikacijom metara, osnovice i PDV-a za robno-materijalno knjiženje u ERP-u.
+4. **Službeni A4 PDF Radni Nalog:**
+   - Tisak naloga s memorandumom PŠD Špinut, podacima o plovilu, satnicama i potpisima.
+
+---
+
+## 7. Faze Izvođenja
+
+- [ ] **Faza 1 (Baza i Model)**: Tablice `work_orders`, `member_statutory_rights`, `user_card_entries`, `price_list_items`.
+- [ ] **Faza 2 (Statutarni Motor Prava)**: Logika provjere 1 vađenja + 1 spuštanja (rok 2 godine, nekumulativno) i upis zaduženja po stavci cjenika.
+- [ ] **Faza 3 (UI Radnih Naloga za Operatera)**: Gumbi "Pokreni radni nalog", "Završi radni nalog" s automatskim prepoznavanjem prava ili metara za vanjske.
+- [ ] **Faza 4 (Univerzalni Karton Korisnika)**: Semafor prava i zaduženja za članove te komercijalna povijest za vanjske.
+- [ ] **Faza 5 (Admin Cjenik po metrima & šifrarnik)**: Sučelje za unos cijena po metrima i šifri stavki.
+- [ ] **Faza 6 (Izvještaji & Desktop ERP Export)**: Dnevnik radnih naloga, izvještaj za povećanje članarina u ERP-u i A4 PDF nalog.
+
+---
+
+## Plan je 100% usklađen sa statutom i zakonskim okvirom PŠD-a. Molim Vašu potvrdu za početak Faze 1.
