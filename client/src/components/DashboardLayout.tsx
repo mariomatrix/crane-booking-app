@@ -45,6 +45,7 @@ import {
   Globe,
   History,
   Anchor,
+  Compass,
   ListOrdered,
   FileText,
   ChevronDown,
@@ -170,6 +171,7 @@ function DashboardLayoutContent({
 
   const mainMenuItems = [
     { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
+    { icon: Compass, label: lang === "hr" ? "Akvatorij i vezovi" : "Berths & Basin", path: "/admin/akvatorij" },
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: FileText, label: lang === "hr" ? "Radni nalozi" : "Work Orders", path: "/admin/work-orders" },

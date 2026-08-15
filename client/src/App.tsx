@@ -41,6 +41,7 @@ import ReportCraneLog from "@/pages/admin/reports/ReportCraneLog";
 import ReportMemberFeeAdjustments from "@/pages/admin/reports/ReportMemberFeeAdjustments";
 import AdminWorkOrders from "@/pages/admin/AdminWorkOrders";
 import AdminPriceList from "@/pages/admin/AdminPriceList";
+import AdminAkvatorijMap from "@/pages/admin/AdminAkvatorijMap";
 
 function Router() {
   return (
@@ -110,6 +111,12 @@ function Router() {
       </Route>
       <Route path="/admin/work-orders">
         <AdminLayout><AdminWorkOrders /></AdminLayout>
+      </Route>
+      <Route path="/admin/akvatorij">
+        <AdminLayout><AdminAkvatorijMap /></AdminLayout>
+      </Route>
+      <Route path="/admin/berths">
+        <AdminLayout><AdminAkvatorijMap /></AdminLayout>
       </Route>
       <Route path="/admin/pricelists">
         <AdminLayout><AdminPriceList /></AdminLayout>
