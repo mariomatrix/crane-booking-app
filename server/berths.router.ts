@@ -402,6 +402,85 @@ export const berthsRouter = router({
         }),
 
     /**
+     * Zamjena mjesta (Swap) između dva veza
+     */
+    swapBerths: operatorProcedure
+        .input(
+            z.object({
+                berthIdA: z.string().uuid(),
+                berthIdB: z.string().uuid(),
+            })
+        )
+        .mutation(async ({ input, ctx }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
+
+            // Dohvati aktivne dodjele za oba veza
+            const [assignmentA] = await db
+                .select()
+                .from(berthAssignments)
+                .where(and(eq(berthAssignments.berthId, input.berthIdA), eq(berthAssignments.isActive, true)))
+                .limit(1);
+
+            const [assignmentB] = await db
+                .select()
+                .from(berthAssignments)
+                .where(and(eq(berthAssignments.berthId, input.berthIdB), eq(berthAssignments.isActive, true)))
+                .limit(1);
+
+            // Deaktiviraj obje postojeće dodjele
+            if (assignmentA) {
+                await db
+                    .update(berthAssignments)
+                    .set({ isActive: false, endDate: new Date(), notes: "Zamjena veza (Swap)", updatedAt: new Date() })
+                    .where(eq(berthAssignments.id, assignmentA.id));
+            }
+            if (assignmentB) {
+                await db
+                    .update(berthAssignments)
+                    .set({ isActive: false, endDate: new Date(), notes: "Zamjena veza (Swap)", updatedAt: new Date() })
+                    .where(eq(berthAssignments.id, assignmentB.id));
+            }
+
+            // Kreiraj nove obrnute dodjele
+            if (assignmentA) {
+                await db.insert(berthAssignments).values({
+                    berthId: input.berthIdB,
+                    vesselId: assignmentA.vesselId,
+                    userId: assignmentA.userId,
+                    assignmentType: assignmentA.assignmentType,
+                    contractNumber: assignmentA.contractNumber,
+                    startDate: new Date(),
+                    isActive: true,
+                    assignedBy: ctx.user.id,
+                    notes: "Zamijenjen vez",
+                });
+                await db.update(berths).set({ status: "occupied", updatedAt: new Date() }).where(eq(berths.id, input.berthIdB));
+            } else {
+                await db.update(berths).set({ status: "vacant", updatedAt: new Date() }).where(eq(berths.id, input.berthIdB));
+            }
+
+            if (assignmentB) {
+                await db.insert(berthAssignments).values({
+                    berthId: input.berthIdA,
+                    vesselId: assignmentB.vesselId,
+                    userId: assignmentB.userId,
+                    assignmentType: assignmentB.assignmentType,
+                    contractNumber: assignmentB.contractNumber,
+                    startDate: new Date(),
+                    isActive: true,
+                    assignedBy: ctx.user.id,
+                    notes: "Zamijenjen vez",
+                });
+                await db.update(berths).set({ status: "occupied", updatedAt: new Date() }).where(eq(berths.id, input.berthIdA));
+            } else {
+                await db.update(berths).set({ status: "vacant", updatedAt: new Date() }).where(eq(berths.id, input.berthIdA));
+            }
+
+            return { success: true };
+        }),
+
+    /**
      * Oslobađanje veza (završetak dodjele)
      */
     unassignVessel: operatorProcedure

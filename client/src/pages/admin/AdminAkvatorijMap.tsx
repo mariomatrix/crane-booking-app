@@ -3,14 +3,14 @@
  * 
  * Izgrađeno prema uzoru na Screenshot_30.png s naprednim poboljšanjima:
  * - Visokorazlučiva pontonska rešetka (Tight High-Density Pontoon Grid)
+ * - Puna podrška za DRAG & DROP premještanje i zamjenu vezova (Swap)
  * - Vertikalni pontoni (G1-G12, ZO, L) sa središnjom betonskom kralježnicom (walkway spine)
- * - Horizontalni suhi dokovi (Suhi dok A, B, C, Arla 1-3, Servisna zona)
  * - Fiksne kompaktne ćelije vezova (135x40px) s registracijom, imenom vlasnika i statusnim bojama
  * - 2D fluidno pomicanje (horizontalno i vertikalno)
  * - Pametna tražilica sa zlatnim spotlight fokusom i automatskim centriranjem
  * - Pretraživi Combobox za dodjelu plovila sa zaštitom od višestrukih vezova i potvrdom premještanja
  */
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,10 +61,7 @@ import {
     Table,
     ArrowRightLeft,
     ArrowUp,
-    ArrowDown,
-    ZoomIn,
-    ZoomOut,
-    Eye,
+    Move,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -166,6 +163,15 @@ export default function AdminAkvatorijMap() {
         },
     });
 
+    const swapBerthsMutation = trpc.berths.swapBerths.useMutation({
+        onSuccess: () => {
+            toast.success("Vezovi su uspješno zamijenjeni (Swap)");
+            setSwapModalData(null);
+            refetch();
+        },
+        onError: (err) => toast.error(`Greška pri zamjeni: ${err.message}`),
+    });
+
     const unassignVesselMutation = trpc.berths.unassignVessel.useMutation({
         onSuccess: () => {
             toast.success("Vez je uspješno oslobođen");
@@ -186,6 +192,14 @@ export default function AdminAkvatorijMap() {
     const [selectedBerth, setSelectedBerth] = useState<any | null>(null);
     const [pendingStatus, setPendingStatus] = useState<string>("");
 
+    // Drag & Drop stanja
+    const [draggedBerth, setDraggedBerth] = useState<any | null>(null);
+    const [dragOverBerthId, setDragOverBerthId] = useState<string | null>(null);
+    const [swapModalData, setSwapModalData] = useState<{
+        sourceBerth: any;
+        targetBerth: any;
+    } | null>(null);
+
     // Modal za dodjelu plovila & Combobox
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
     const [vesselSearchQuery, setVesselSearchQuery] = useState("");
@@ -200,6 +214,37 @@ export default function AdminAkvatorijMap() {
     // Refovi za skrolanje
     const berthRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const containerRef = useRef<HTMLDivElement | null>(null);
+
+    // Obrada Drag & Drop spuštanja
+    const handleBerthDrop = (targetBerth: any) => {
+        if (!draggedBerth || draggedBerth.id === targetBerth.id) {
+            setDraggedBerth(null);
+            setDragOverBerthId(null);
+            return;
+        }
+
+        if (targetBerth.status === "vacant") {
+            // Drop na slobodan vez -> instant premještanje
+            assignVesselMutation.mutate({
+                berthId: targetBerth.id,
+                vesselId: draggedBerth.vesselId,
+                userId: draggedBerth.userId,
+                forceRelocate: true,
+            });
+            toast.success(
+                `Plovilo ${draggedBerth.vesselRegistration || draggedBerth.vesselName} premješteno s veza ${draggedBerth.code} na vez ${targetBerth.code}`
+            );
+        } else {
+            // Drop na zauzet vez -> ponudi Swap ili zamjenu
+            setSwapModalData({
+                sourceBerth: draggedBerth,
+                targetBerth,
+            });
+        }
+
+        setDraggedBerth(null);
+        setDragOverBerthId(null);
+    };
 
     // Pametna tražilica s auto-fokusom
     const searchResults = useMemo(() => {
@@ -315,14 +360,14 @@ export default function AdminAkvatorijMap() {
                         <div>
                             <div className="flex items-center gap-2">
                                 <h1 className="text-base font-bold tracking-wide text-white uppercase">
-                                    PŠD ŠPINUT — PRIKAZ AKVATORIJA I VEZOVA
+                                    PŠD ŠPINUT — UPRAVLJANJE AKVATORIJEM & DRAG & DROP VEZOVA
                                 </h1>
                                 <span className="px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 font-mono text-xs border border-blue-700">
                                     811 vezova
                                 </span>
                             </div>
                             <p className="text-[11px] text-slate-400">
-                                Shema gatova 1–12, Lukobrana i Zapadne obale s 2D pomicanjem
+                                Povucite (Drag & Drop) bilo koji brod za premještanje ili zamjenu veza
                             </p>
                         </div>
                     </div>
@@ -475,7 +520,7 @@ export default function AdminAkvatorijMap() {
                 </div>
             </div>
 
-            {/* ─── 2. SREDIŠNJA 2D PONTONSKA REŠETKA (Screenshot_30 STIL) ────────── */}
+            {/* ─── 2. SREDIŠNJA 2D PONTONSKA REŠETKA S DRAG & DROP PODRŠKOM ───────── */}
             <div
                 ref={containerRef}
                 className="flex-1 overflow-x-auto overflow-y-auto p-4 flex gap-5 bg-[#0b1320]"
@@ -485,7 +530,6 @@ export default function AdminAkvatorijMap() {
                 }}
             >
                 {verticalPiers.map((pier) => {
-                    // Grupiranje u parove: Strana 1 (lijevo) i Strana 2 (desno)
                     const totalRows = Math.ceil(pier.totalBerths / 2);
                     const berthRows: { rowNumber: number; left?: any; right?: any }[] = [];
 
@@ -531,7 +575,6 @@ export default function AdminAkvatorijMap() {
                                     <span>Zauzeto: <strong className="text-white">{occupiedCount}</strong> | Slobodno: <strong className="text-emerald-400">{freeCount}</strong></span>
                                     <span className="font-bold text-blue-400">{occupancyPercent}%</span>
                                 </div>
-                                {/* Traka popunjenosti */}
                                 <div className="w-full h-1 bg-[#0b1320] rounded-full overflow-hidden">
                                     <div
                                         className="h-full bg-blue-500 transition-all duration-300"
@@ -563,6 +606,13 @@ export default function AdminAkvatorijMap() {
                                                 titleSizeClass={fontSizeTitle}
                                                 subSizeClass={fontSizeSub}
                                                 isHighlighted={highlightedBerthId === row.left.id}
+                                                isDragOver={dragOverBerthId === row.left.id}
+                                                isBeingDragged={draggedBerth?.id === row.left.id}
+                                                onDragStart={() => setDraggedBerth(row.left)}
+                                                onDragEnd={() => { setDraggedBerth(null); setDragOverBerthId(null); }}
+                                                onDragOver={() => { if (dragOverBerthId !== row.left.id) setDragOverBerthId(row.left.id); }}
+                                                onDragLeave={() => { if (dragOverBerthId === row.left.id) setDragOverBerthId(null); }}
+                                                onDrop={() => handleBerthDrop(row.left)}
                                                 onSelect={() => {
                                                     setSelectedBerth(row.left);
                                                     setHighlightedBerthId(row.left.id);
@@ -589,6 +639,13 @@ export default function AdminAkvatorijMap() {
                                                 titleSizeClass={fontSizeTitle}
                                                 subSizeClass={fontSizeSub}
                                                 isHighlighted={highlightedBerthId === row.right.id}
+                                                isDragOver={dragOverBerthId === row.right.id}
+                                                isBeingDragged={draggedBerth?.id === row.right.id}
+                                                onDragStart={() => setDraggedBerth(row.right)}
+                                                onDragEnd={() => { setDraggedBerth(null); setDragOverBerthId(null); }}
+                                                onDragOver={() => { if (dragOverBerthId !== row.right.id) setDragOverBerthId(row.right.id); }}
+                                                onDragLeave={() => { if (dragOverBerthId === row.right.id) setDragOverBerthId(null); }}
+                                                onDrop={() => handleBerthDrop(row.right)}
                                                 onSelect={() => {
                                                     setSelectedBerth(row.right);
                                                     setHighlightedBerthId(row.right.id);
@@ -729,7 +786,7 @@ export default function AdminAkvatorijMap() {
                                     </div>
                                     <div>
                                         <h4 className="font-semibold text-sm text-white">Vez je slobodan</h4>
-                                        <p className="text-xs text-slate-400">Pretražite plovilo i postavite ga na ovaj vez</p>
+                                        <p className="text-xs text-slate-400">Pretražite plovilo i postavite ga na ovaj vez (ili povucite brod mišem)</p>
                                     </div>
                                     <Button
                                         size="sm"
@@ -898,7 +955,7 @@ export default function AdminAkvatorijMap() {
                 </DialogContent>
             </Dialog>
 
-            {/* ─── 5. DIJALOG ZA POTVRDU PREMJEŠTANJA S DRUGOG VEZA ────────────── */}
+            {/* ─── 5. DIJALOG ZA POTVRDU PREMJEŠTANJA (RELOCATION) ─────────────── */}
             <AlertDialog open={!!relocationConflict} onOpenChange={(open) => !open && setRelocationConflict(null)}>
                 <AlertDialogContent className="bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
                     <AlertDialogHeader>
@@ -937,12 +994,64 @@ export default function AdminAkvatorijMap() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* ─── 6. DIJALOG ZA ZAMJENU VEZOVA DRAG & DROP (SWAP MODAL) ────────── */}
+            <AlertDialog open={!!swapModalData} onOpenChange={(open) => !open && setSwapModalData(null)}>
+                <AlertDialogContent className="bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
+                    <AlertDialogHeader>
+                        <div className="flex items-center gap-2 text-blue-400">
+                            <ArrowRightLeft className="w-5 h-5" />
+                            <AlertDialogTitle className="text-white">Drag & Drop: Zamjena ili premještanje veza</AlertDialogTitle>
+                        </div>
+                        <AlertDialogDescription className="text-xs text-slate-300 pt-2 flex flex-col gap-3">
+                            <div className="p-3 bg-[#0d1726] rounded-lg border border-[#203350] flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Izvorni vez:</span>
+                                    <strong className="text-blue-400 font-mono">{swapModalData?.sourceBerth?.code}</strong>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Plovilo A:</span>
+                                    <span className="text-white font-bold">{swapModalData?.sourceBerth?.vesselRegistration || swapModalData?.sourceBerth?.vesselName}</span>
+                                </div>
+                                <div className="border-t border-[#1e2f4a] pt-2 flex items-center justify-between">
+                                    <span className="text-slate-400">Ciljani vez:</span>
+                                    <strong className="text-emerald-400 font-mono">{swapModalData?.targetBerth?.code}</strong>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Plovilo B:</span>
+                                    <span className="text-white font-bold">{swapModalData?.targetBerth?.vesselRegistration || swapModalData?.targetBerth?.vesselName}</span>
+                                </div>
+                            </div>
+                            <p className="text-slate-300">
+                                Odaberite želite li <strong>zamijeniti mjesta (Swap)</strong> između ova dva plovila ili premjestiti plovilo A na ciljani vez.
+                            </p>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="gap-2 sm:gap-0">
+                        <AlertDialogCancel onClick={() => setSwapModalData(null)} className="border-[#284065] text-slate-300">
+                            Odustani
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                            onClick={() => {
+                                if (!swapModalData) return;
+                                swapBerthsMutation.mutate({
+                                    berthIdA: swapModalData.sourceBerth.id,
+                                    berthIdB: swapModalData.targetBerth.id,
+                                });
+                            }}
+                        >
+                            <ArrowRightLeft className="w-4 h-4 mr-1.5" /> Zamijeni mjesta (Swap)
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }
 
 /**
- * Pojedinačna kompaktna ćelija veza (Screenshot_30 stil)
+ * Pojedinačna kompaktna ćelija veza (s Drag & Drop podrškom)
  */
 function BerthCell({
     berth,
@@ -951,6 +1060,13 @@ function BerthCell({
     titleSizeClass,
     subSizeClass,
     isHighlighted,
+    isDragOver,
+    isBeingDragged,
+    onDragStart,
+    onDragEnd,
+    onDragOver,
+    onDragLeave,
+    onDrop,
     onSelect,
     cellRef,
 }: {
@@ -960,6 +1076,13 @@ function BerthCell({
     titleSizeClass: string;
     subSizeClass: string;
     isHighlighted: boolean;
+    isDragOver?: boolean;
+    isBeingDragged?: boolean;
+    onDragStart?: () => void;
+    onDragEnd?: () => void;
+    onDragOver?: () => void;
+    onDragLeave?: () => void;
+    onDrop?: () => void;
     onSelect: () => void;
     cellRef: (el: HTMLDivElement | null) => void;
 }) {
@@ -970,11 +1093,38 @@ function BerthCell({
         <div
             ref={cellRef}
             onClick={onSelect}
+            draggable={!isVacant}
+            onDragStart={(e) => {
+                if (isVacant) return;
+                e.dataTransfer.setData("application/json", JSON.stringify(berth));
+                e.dataTransfer.effectAllowed = "move";
+                onDragStart?.();
+            }}
+            onDragEnd={onDragEnd}
+            onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                onDragOver?.();
+            }}
+            onDragLeave={onDragLeave}
+            onDrop={(e) => {
+                e.preventDefault();
+                onDrop?.();
+            }}
             className={`${widthClass} ${heightClass} ${style.bg} ${style.border} border p-1 cursor-pointer flex flex-col justify-center transition-all duration-150 relative ${
-                isHighlighted
+                isBeingDragged ? "opacity-40 border-dashed" : ""
+            } ${
+                isDragOver
+                    ? "ring-4 ring-cyan-400 z-40 scale-105 shadow-2xl brightness-125"
+                    : isHighlighted
                     ? "ring-4 ring-amber-400 z-30 scale-105 shadow-2xl"
                     : "hover:brightness-110"
             }`}
+            title={
+                isVacant
+                    ? `Vez ${berth.code} — Slobodan (max ${berth.maxLoaM || 10}m)`
+                    : `Vez ${berth.code} — ${berth.vesselRegistration || berth.vesselName} (${berth.userName || "Član"}) — Povucite za premještanje`
+            }
         >
             {isVacant ? (
                 /* Slobodan vez - Zeleni blok sa strelicom */
@@ -983,13 +1133,13 @@ function BerthCell({
                     <span className="tracking-wide">SLOBODNO</span>
                 </div>
             ) : (
-                /* Zauzet vez - Registracija + Ime člana */
-                <div className="flex flex-col justify-between h-full overflow-hidden leading-none">
+                /* Zauzet vez - Registracija + Ime člana (povlačivo) */
+                <div className="flex flex-col justify-between h-full overflow-hidden leading-none cursor-grab active:cursor-grabbing">
                     <div className="flex items-center justify-between">
                         <span className={`font-mono font-bold ${titleSizeClass} ${style.text} truncate tracking-tight`}>
                             {berth.vesselRegistration || berth.vesselName || "ZAUZETO"}
                         </span>
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+                        <Move className="w-2.5 h-2.5 text-slate-400 opacity-60 shrink-0" />
                     </div>
                     <div className="flex items-center justify-between">
                         <span className={`truncate font-medium ${subSizeClass} ${style.subText}`}>
