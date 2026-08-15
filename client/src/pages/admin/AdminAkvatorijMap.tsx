@@ -1,12 +1,16 @@
 /**
- * PŠD Špinut — Interaktivni shematski akvatorij & Upravljanje vezovima
+ * PŠD Špinut — Autentična i napredna operativna shema privezišta & akvatorija
  * 
- * 1. Organski CSS/DOM shematski prikaz lučice (Sjeverni lukobran gore, Zapadna obala lijevo, Gatovi 1-12 u sredini, Suhi vez)
- * 2. Pametna tražilica s auto-fokusom i skrolanjem
- * 3. Pretraživi Combobox za dodjelu plovila s provjerom premještanja (sprječavanje višestrukih vezova)
- * 4. Puna podrška za operativni rad u realnom vremenu (14 gatova, 811 morskih vezova, suhi dokovi)
+ * Izgrađeno prema uzoru na Screenshot_30.png s naprednim poboljšanjima:
+ * - Visokorazlučiva pontonska rešetka (Tight High-Density Pontoon Grid)
+ * - Vertikalni pontoni (G1-G12, ZO, L) sa središnjom betonskom kralježnicom (walkway spine)
+ * - Horizontalni suhi dokovi (Suhi dok A, B, C, Arla 1-3, Servisna zona)
+ * - Fiksne kompaktne ćelije vezova (135x40px) s registracijom, imenom vlasnika i statusnim bojama
+ * - 2D fluidno pomicanje (horizontalno i vertikalno)
+ * - Pametna tražilica sa zlatnim spotlight fokusom i automatskim centriranjem
+ * - Pretraživi Combobox za dodjelu plovila sa zaštitom od višestrukih vezova i potvrdom premještanja
  */
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,17 +48,11 @@ import {
     SheetDescription,
 } from "@/components/ui/sheet";
 import {
-    Search,
     Anchor,
+    Search,
     Ship,
-    User,
-    Phone,
-    Mail,
-    Zap,
-    Droplets,
     AlertTriangle,
     CheckCircle2,
-    Wrench,
     X,
     ExternalLink,
     Plus,
@@ -62,70 +60,68 @@ import {
     SlidersHorizontal,
     Table,
     ArrowRightLeft,
-    Layers,
-    LayoutGrid,
+    ArrowUp,
+    ArrowDown,
+    ZoomIn,
+    ZoomOut,
+    Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 
-// Konfiguracija statusa vezova
-const STATUS_CONFIG: Record<
+// Statusi vezova prema Screenshot_30 uzorku
+const STATUS_STYLES: Record<
     string,
-    { label: string; bg: string; border: string; text: string; fill: string; dot: string; badgeBg: string }
+    { label: string; bg: string; text: string; subText: string; border: string; dot: string; isVacant?: boolean }
 > = {
     vacant: {
         label: "Slobodan vez",
-        bg: "bg-emerald-50/90 dark:bg-emerald-950/40 hover:bg-emerald-100",
-        border: "border-emerald-500/80 dark:border-emerald-600",
-        text: "text-emerald-800 dark:text-emerald-200",
-        fill: "#10b981",
-        dot: "bg-emerald-500",
-        badgeBg: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200",
+        bg: "bg-[#10b981] hover:bg-[#059669]",
+        text: "text-white font-bold",
+        subText: "text-emerald-100",
+        border: "border-emerald-600",
+        dot: "bg-white",
+        isVacant: true,
     },
     occupied: {
         label: "Zauzet (Član)",
-        bg: "bg-blue-50/95 dark:bg-blue-950/40 hover:bg-blue-100",
-        border: "border-blue-500/80 dark:border-blue-600",
-        text: "text-blue-900 dark:text-blue-100",
-        fill: "#3b82f6",
-        dot: "bg-blue-500",
-        badgeBg: "bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200",
+        bg: "bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-[#1e293b] dark:hover:bg-[#334155]",
+        text: "text-slate-900 dark:text-white font-bold",
+        subText: "text-slate-600 dark:text-slate-300",
+        border: "border-slate-300 dark:border-slate-700",
+        dot: "bg-blue-600",
     },
     transit: {
         label: "Tranzitni gost",
-        bg: "bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100",
-        border: "border-amber-500 dark:border-amber-600",
-        text: "text-amber-900 dark:text-amber-100",
-        fill: "#f59e0b",
-        dot: "bg-amber-500",
-        badgeBg: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200",
+        bg: "bg-[#fef08a] hover:bg-[#fde047] dark:bg-[#713f12] dark:hover:bg-[#854d0e]",
+        text: "text-amber-950 dark:text-amber-100 font-bold",
+        subText: "text-amber-800 dark:text-amber-200",
+        border: "border-amber-400 dark:border-amber-700",
+        dot: "bg-amber-600",
     },
     debt_block: {
         label: "Dugovanje / Blokada",
-        bg: "bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100",
-        border: "border-rose-500 dark:border-rose-600",
-        text: "text-rose-900 dark:text-rose-100",
-        fill: "#ef4444",
-        dot: "bg-rose-500",
-        badgeBg: "bg-rose-100 text-rose-800 dark:bg-rose-900/60 dark:text-rose-200",
+        bg: "bg-[#fee2e2] hover:bg-[#fecaca] dark:bg-[#7f1d1d] dark:hover:bg-[#991b1b]",
+        text: "text-rose-950 dark:text-rose-100 font-bold",
+        subText: "text-rose-800 dark:text-rose-200",
+        border: "border-rose-400 dark:border-rose-700",
+        dot: "bg-rose-600",
     },
     maintenance: {
-        label: "Servis / Kvar muringa",
-        bg: "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200",
-        border: "border-slate-400 dark:border-slate-600",
-        text: "text-slate-800 dark:text-slate-200",
-        fill: "#64748b",
-        dot: "bg-slate-500",
-        badgeBg: "bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200",
+        label: "Servis / Kvar",
+        bg: "bg-[#64748b] hover:bg-[#475569]",
+        text: "text-white font-bold",
+        subText: "text-slate-200",
+        border: "border-slate-600",
+        dot: "bg-slate-400",
     },
     reserved: {
         label: "Rezervirano",
-        bg: "bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100",
-        border: "border-purple-500 dark:border-purple-600",
-        text: "text-purple-900 dark:text-purple-100",
-        fill: "#a855f7",
-        dot: "bg-purple-500",
-        badgeBg: "bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200",
+        bg: "bg-[#e9d5ff] hover:bg-[#d8b4fe] dark:bg-[#581c87]",
+        text: "text-purple-950 dark:text-purple-100 font-bold",
+        subText: "text-purple-800 dark:text-purple-200",
+        border: "border-purple-400 dark:border-purple-700",
+        dot: "bg-purple-600",
     },
 };
 
@@ -158,7 +154,6 @@ export default function AdminAkvatorijMap() {
         },
         onError: (err) => {
             if (err.message.includes("se već nalazi na vezu")) {
-                // Konflikt - otvori dijalog za potvrdu premještanja
                 const targetVessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
                 setRelocationConflict({
                     vesselName: targetVessel?.vesselName || targetVessel?.vesselRegistration || "Odabrano plovilo",
@@ -181,16 +176,17 @@ export default function AdminAkvatorijMap() {
     });
 
     // Stanja UI-ja
-    const [viewMode, setViewMode] = useState<"schematic" | "table">("schematic");
-    const [selectedPierCode, setSelectedPierCode] = useState<string>("ALL");
+    const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+    const [selectedPierFilter, setSelectedPierFilter] = useState<string>("ALL");
     const [statusFilter, setStatusFilter] = useState<string>("ALL");
     const [searchQuery, setSearchQuery] = useState<string>("");
     const [highlightedBerthId, setHighlightedBerthId] = useState<string | null>(null);
+    const [zoomLevel, setZoomLevel] = useState<"compact" | "normal" | "large">("normal");
 
     const [selectedBerth, setSelectedBerth] = useState<any | null>(null);
     const [pendingStatus, setPendingStatus] = useState<string>("");
 
-    // Modal za dodjelu plovila & pretraživi Combobox
+    // Modal za dodjelu plovila & Combobox
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
     const [vesselSearchQuery, setVesselSearchQuery] = useState("");
     const [selectedVesselId, setSelectedVesselId] = useState<string>("");
@@ -201,10 +197,11 @@ export default function AdminAkvatorijMap() {
         message: string;
     } | null>(null);
 
-    // Refovi za auto-skrolanje
+    // Refovi za skrolanje
     const berthRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const containerRef = useRef<HTMLDivElement | null>(null);
 
-    // Pametna tražilica po akvatoriju
+    // Pametna tražilica s auto-fokusom
     const searchResults = useMemo(() => {
         if (!searchQuery.trim() || !mapData?.piers) return [];
         const q = searchQuery.toLowerCase().trim();
@@ -235,10 +232,10 @@ export default function AdminAkvatorijMap() {
             if (el) {
                 el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
             }
-        }, 100);
+        }, 80);
     };
 
-    // Filtriranje plovila u Comboboxu modala za dodjelu
+    // Pretraživač za Combobox u modalu
     const filteredAssignableVessels = useMemo(() => {
         if (!assignableVessels) return [];
         if (!vesselSearchQuery.trim()) return assignableVessels;
@@ -253,13 +250,13 @@ export default function AdminAkvatorijMap() {
         });
     }, [assignableVessels, vesselSearchQuery]);
 
-    // Podaci za prikaz gatova
+    // Filtrirani podaci po gatovima
     const displayedPiers = useMemo(() => {
         if (!mapData?.piers) return [];
         let piers = mapData.piers;
 
-        if (selectedPierCode !== "ALL") {
-            piers = piers.filter((p) => p.code === selectedPierCode);
+        if (selectedPierFilter !== "ALL") {
+            piers = piers.filter((p) => p.code === selectedPierFilter);
         }
 
         return piers.map((pier) => {
@@ -272,21 +269,19 @@ export default function AdminAkvatorijMap() {
                 filteredBerths: berths,
             };
         });
-    }, [mapData, selectedPierCode, statusFilter]);
+    }, [mapData, selectedPierFilter, statusFilter]);
 
-    // Izdvojeni Lukobran (L) i Zapadna obala (ZO)
-    const lukobranPier = useMemo(() => mapData?.piers.find((p) => p.code === "L"), [mapData]);
-    const zapadnaObalaPier = useMemo(() => mapData?.piers.find((p) => p.code === "ZO"), [mapData]);
+    // Odvajanje pontona: Gatovi 1-12, Lukobran L, Zapadna Obala ZO
     const verticalPiers = useMemo(
-        () => displayedPiers.filter((p) => p.code.startsWith("G")),
+        () => displayedPiers.filter((p) => p.code.startsWith("G") || p.code === "ZO" || p.code === "L"),
         [displayedPiers]
     );
 
     if (isLoading) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[600px] gap-4">
-                <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                <p className="text-muted-foreground font-medium">Učitavanje shematskog akvatorija PŠD Špinut...</p>
+            <div className="flex flex-col items-center justify-center min-h-[600px] gap-4 bg-[#0e1726]">
+                <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-slate-300 font-medium tracking-wide">Učitavanje akvatorija i pontona PŠD Špinut...</p>
             </div>
         );
     }
@@ -301,76 +296,84 @@ export default function AdminAkvatorijMap() {
         reserved: 0,
     };
 
+    // Dimenzije ćelije ovisno o zoomLevelu
+    const cardWidth = zoomLevel === "compact" ? "w-[120px]" : zoomLevel === "large" ? "w-[155px]" : "w-[136px]";
+    const cardHeight = zoomLevel === "compact" ? "h-[36px]" : zoomLevel === "large" ? "h-[46px]" : "h-[40px]";
+    const fontSizeTitle = zoomLevel === "compact" ? "text-[11px]" : zoomLevel === "large" ? "text-[13px]" : "text-[12px]";
+    const fontSizeSub = zoomLevel === "compact" ? "text-[9px]" : zoomLevel === "large" ? "text-[11px]" : "text-[10px]";
+
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)] p-3 gap-3 bg-slate-100/80 dark:bg-slate-950/80 overflow-hidden">
-            {/* ─── Kontrolna traka i pametna tražilica ───────────────────────── */}
-            <div className="bg-card border rounded-xl p-3.5 shadow-sm flex flex-col gap-3 shrink-0">
+        <div className="flex flex-col h-[calc(100vh-4rem)] bg-[#0b1320] text-slate-100 overflow-hidden font-sans select-none">
+            {/* ─── 1. GORNJA KONTROLNA TRAKA (Screenshot_30 stil) ────────────────── */}
+            <div className="bg-[#111c2e] border-b border-[#1e2f4a] p-3 flex flex-col gap-2.5 shrink-0 shadow-md">
                 <div className="flex flex-wrap items-center justify-between gap-3">
+                    {/* Naziv i statistika */}
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-sm">
-                            <Compass className="w-6 h-6" />
+                        <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow">
+                            <Anchor className="w-5 h-5" />
                         </div>
                         <div>
                             <div className="flex items-center gap-2">
-                                <h1 className="text-lg font-bold tracking-tight text-foreground">
-                                    PŠD Špinut — Upravljanje Akvatorijem & Vezovima
+                                <h1 className="text-base font-bold tracking-wide text-white uppercase">
+                                    PŠD ŠPINUT — PRIKAZ AKVATORIJA I VEZOVA
                                 </h1>
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-semibold text-xs">
-                                    811 Morskih vezova
-                                </Badge>
+                                <span className="px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 font-mono text-xs border border-blue-700">
+                                    811 vezova
+                                </span>
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                                Interaktivni shematski prikaz svih 14 cjelina (Lukobran, Zapadna obala, Gatovi 1–12)
+                            <p className="text-[11px] text-slate-400">
+                                Shema gatova 1–12, Lukobrana i Zapadne obale s 2D pomicanjem
                             </p>
                         </div>
                     </div>
 
-                    {/* Pretraga s auto-fokusom */}
+                    {/* Pretraga i filtri */}
                     <div className="flex items-center gap-2">
-                        <div className="relative w-80">
-                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        {/* Tražilica */}
+                        <div className="relative w-72">
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                             <Input
                                 placeholder="Traži reg. (ST-1234), brod, člana, OIB..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                className="pl-9 h-9 text-xs"
+                                className="pl-9 h-8 text-xs bg-[#0c1524] border-[#1e2f4a] text-white placeholder:text-slate-500 focus:border-blue-500"
                             />
                             {searchQuery && (
                                 <button
                                     onClick={() => setSearchQuery("")}
-                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                                 >
                                     <X className="w-3.5 h-3.5" />
                                 </button>
                             )}
 
-                            {/* Dropdown rezultati pretrage */}
+                            {/* Dropdown s rezultatima pretrage */}
                             {searchResults.length > 0 && searchQuery.trim().length >= 2 && (
-                                <div className="absolute top-10 left-0 right-0 z-50 bg-popover border rounded-lg shadow-xl max-h-72 overflow-y-auto p-1 text-xs">
-                                    <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase border-b">
+                                <div className="absolute top-9 left-0 right-0 z-50 bg-[#162338] border border-[#233857] rounded-lg shadow-2xl max-h-72 overflow-y-auto p-1 text-xs">
+                                    <div className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase border-b border-[#233857]">
                                         Pronađeno ({searchResults.length} vezova)
                                     </div>
                                     {searchResults.slice(0, 8).map((res) => (
                                         <div
                                             key={res.id}
                                             onClick={() => handleSelectSearchResult(res)}
-                                            className="p-2 hover:bg-accent rounded-md cursor-pointer flex items-center justify-between transition-colors"
+                                            className="p-2 hover:bg-[#1e3250] rounded cursor-pointer flex items-center justify-between transition-colors"
                                         >
                                             <div className="flex items-center gap-2">
-                                                <span className="font-mono font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                                                <span className="font-mono font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800">
                                                     {res.code}
                                                 </span>
                                                 <div>
-                                                    <p className="font-semibold text-foreground">
+                                                    <p className="font-bold text-white">
                                                         {res.vesselRegistration || res.vesselName || "Slobodan vez"}
                                                     </p>
-                                                    <p className="text-[11px] text-muted-foreground">
+                                                    <p className="text-[11px] text-slate-300">
                                                         {res.userName || res.pierName}
                                                     </p>
                                                 </div>
                                             </div>
-                                            <Badge variant="outline" className={`text-[10px] ${STATUS_CONFIG[res.status]?.badgeBg}`}>
-                                                {STATUS_CONFIG[res.status]?.label}
+                                            <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[res.status]?.bg} ${STATUS_STYLES[res.status]?.text}`}>
+                                                {STATUS_STYLES[res.status]?.label}
                                             </Badge>
                                         </div>
                                     ))}
@@ -379,15 +382,15 @@ export default function AdminAkvatorijMap() {
                         </div>
 
                         {/* Odabir gata */}
-                        <Select value={selectedPierCode} onValueChange={setSelectedPierCode}>
-                            <SelectTrigger className="w-40 h-9 text-xs">
+                        <Select value={selectedPierFilter} onValueChange={setSelectedPierFilter}>
+                            <SelectTrigger className="w-36 h-8 text-xs bg-[#0c1524] border-[#1e2f4a] text-white">
                                 <SelectValue placeholder="Gat" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="bg-[#162338] border-[#233857] text-white">
                                 <SelectItem value="ALL">Svi gatovi (1–12, L, ZO)</SelectItem>
                                 {mapData?.piers.map((p) => (
                                     <SelectItem key={p.id} value={p.code}>
-                                        {p.name} ({p.totalBerths} vezova)
+                                        {p.name} ({p.totalBerths})
                                     </SelectItem>
                                 ))}
                             </SelectContent>
@@ -395,430 +398,310 @@ export default function AdminAkvatorijMap() {
 
                         {/* Status filter */}
                         <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-36 h-9 text-xs">
+                            <SelectTrigger className="w-32 h-8 text-xs bg-[#0c1524] border-[#1e2f4a] text-white">
                                 <SelectValue placeholder="Status" />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="bg-[#162338] border-[#233857] text-white">
                                 <SelectItem value="ALL">Svi statusi</SelectItem>
-                                <SelectItem value="occupied">🟦 Zauzet (Član)</SelectItem>
-                                <SelectItem value="vacant">🟩 Slobodan</SelectItem>
-                                <SelectItem value="transit">🟨 Tranzit</SelectItem>
-                                <SelectItem value="debt_block">🟥 Dugovanje</SelectItem>
-                                <SelectItem value="maintenance">⬛ Servis</SelectItem>
+                                <SelectItem value="occupied">Zauzet (Član)</SelectItem>
+                                <SelectItem value="vacant">Slobodan</SelectItem>
+                                <SelectItem value="transit">Tranzit</SelectItem>
+                                <SelectItem value="debt_block">Dugovanje</SelectItem>
+                                <SelectItem value="maintenance">Servis</SelectItem>
                             </SelectContent>
                         </Select>
 
-                        {/* Prebacivač prikaza */}
-                        <div className="flex border rounded-lg overflow-hidden shrink-0 bg-muted/30">
+                        {/* Zoom kontrole */}
+                        <div className="flex border border-[#1e2f4a] rounded overflow-hidden bg-[#0c1524]">
                             <Button
                                 size="sm"
-                                variant={viewMode === "schematic" ? "default" : "ghost"}
-                                onClick={() => setViewMode("schematic")}
-                                className="h-9 px-3 text-xs rounded-none font-semibold"
+                                variant={zoomLevel === "compact" ? "default" : "ghost"}
+                                onClick={() => setZoomLevel("compact")}
+                                className="h-8 px-2 text-[11px] rounded-none"
+                                title="Kompaktan prikaz"
                             >
-                                <LayoutGrid className="w-3.5 h-3.5 mr-1.5" /> Shema privezišta
+                                S
                             </Button>
                             <Button
                                 size="sm"
-                                variant={viewMode === "table" ? "default" : "ghost"}
-                                onClick={() => setViewMode("table")}
-                                className="h-9 px-3 text-xs rounded-none font-semibold"
+                                variant={zoomLevel === "normal" ? "default" : "ghost"}
+                                onClick={() => setZoomLevel("normal")}
+                                className="h-8 px-2 text-[11px] rounded-none"
+                                title="Standardni prikaz"
                             >
-                                <Table className="w-3.5 h-3.5 mr-1.5" /> Tablica
+                                M
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant={zoomLevel === "large" ? "default" : "ghost"}
+                                onClick={() => setZoomLevel("large")}
+                                className="h-8 px-2 text-[11px] rounded-none"
+                                title="Uvećani prikaz"
+                            >
+                                L
                             </Button>
                         </div>
                     </div>
                 </div>
 
-                {/* Traka sa statistikom u boji */}
-                <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t text-xs">
-                    <span className="font-semibold text-muted-foreground mr-1">Stanje u moru:</span>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300 font-medium">
-                        <span className="w-2 h-2 rounded-full bg-blue-500" />
-                        <span>Zauzeto (Član):</span>
+                {/* Semafor traka u boji */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#1e2f4a] text-[11px]">
+                    <span className="font-semibold text-slate-400 mr-1">Statusi:</span>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#e2e8f0] text-slate-900 font-bold border border-slate-300">
+                        <span className="w-2 h-2 rounded-full bg-blue-600" />
+                        <span>Zauzet (Član):</span>
                         <strong>{stats.occupied}</strong>
                     </div>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 font-medium">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#10b981] text-white font-bold border border-emerald-600">
+                        <ArrowUp className="w-3 h-3 text-white" />
                         <span>Slobodno:</span>
                         <strong>{stats.vacant}</strong>
                     </div>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-300 font-medium">
-                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#fef08a] text-amber-950 font-bold border border-amber-400">
+                        <span className="w-2 h-2 rounded-full bg-amber-600" />
                         <span>Tranzit:</span>
                         <strong>{stats.transit}</strong>
                     </div>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 font-medium">
-                        <span className="w-2 h-2 rounded-full bg-rose-500" />
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#fee2e2] text-rose-950 font-bold border border-rose-400">
+                        <span className="w-2 h-2 rounded-full bg-rose-600" />
                         <span>Dugovanje:</span>
                         <strong>{stats.debtBlock}</strong>
                     </div>
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium">
-                        <span className="w-2 h-2 rounded-full bg-slate-500" />
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#64748b] text-white font-bold border border-slate-600">
+                        <span className="w-2 h-2 rounded-full bg-slate-400" />
                         <span>Servis:</span>
                         <strong>{stats.maintenance}</strong>
                     </div>
                 </div>
             </div>
 
-            {/* ─── Prikaz 1: ORGANSKA SHEMA PRIVEZIŠTA (Pure CSS/DOM Harbor Board) ── */}
-            {viewMode === "schematic" && (
-                <div className="flex-1 bg-card border rounded-xl shadow-sm overflow-hidden flex flex-col">
-                    <div className="flex-1 overflow-x-auto overflow-y-auto p-4 flex flex-col gap-4 select-none bg-slate-50/60 dark:bg-slate-950/40">
-                        
-                        {/* 1. SJEVERNI LUKOBRAN (L - 46 vezova) - Horizontalni ponton na vrhu */}
-                        {lukobranPier && (selectedPierCode === "ALL" || selectedPierCode === "L") && (
-                            <div className="bg-background border-2 border-slate-300 dark:border-slate-800 rounded-xl shadow-sm p-3 flex flex-col gap-2">
-                                <div className="flex items-center justify-between border-b pb-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="w-6 h-6 rounded-full bg-slate-700 text-white flex items-center justify-center font-bold text-xs">
-                                            L
+            {/* ─── 2. SREDIŠNJA 2D PONTONSKA REŠETKA (Screenshot_30 STIL) ────────── */}
+            <div
+                ref={containerRef}
+                className="flex-1 overflow-x-auto overflow-y-auto p-4 flex gap-5 bg-[#0b1320]"
+                style={{
+                    backgroundImage: "radial-gradient(#152438 1px, transparent 1px)",
+                    backgroundSize: "20px 20px",
+                }}
+            >
+                {verticalPiers.map((pier) => {
+                    // Grupiranje u parove: Strana 1 (lijevo) i Strana 2 (desno)
+                    const totalRows = Math.ceil(pier.totalBerths / 2);
+                    const berthRows: { rowNumber: number; left?: any; right?: any }[] = [];
+
+                    for (let r = 1; r <= totalRows; r++) {
+                        const leftNum = (r - 1) * 2 + 1;
+                        const rightNum = (r - 1) * 2 + 2;
+
+                        const leftBerth = pier.filteredBerths.find((b) => b.berthNumber === leftNum);
+                        const rightBerth = pier.filteredBerths.find((b) => b.berthNumber === rightNum);
+
+                        berthRows.push({
+                            rowNumber: r,
+                            left: leftBerth,
+                            right: rightBerth,
+                        });
+                    }
+
+                    const occupiedCount = pier.filteredBerths.filter((b) => b.status !== "vacant").length;
+                    const freeCount = pier.totalBerths - occupiedCount;
+                    const occupancyPercent = Math.round((occupiedCount / pier.totalBerths) * 100) || 0;
+
+                    return (
+                        <div
+                            key={pier.id}
+                            className="flex flex-col shrink-0 bg-[#131f33] border-2 border-[#203350] rounded-xl shadow-xl overflow-hidden h-fit"
+                        >
+                            {/* Zaglavlje Pontona (Ponton X) */}
+                            <div className="bg-[#1b2b44] border-b border-[#284065] p-2.5 flex flex-col gap-1">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="w-5 h-5 rounded bg-blue-600 text-white flex items-center justify-center font-mono font-bold text-xs">
+                                            {pier.code}
                                         </span>
-                                        <h3 className="font-bold text-sm tracking-wide text-foreground">
-                                            ⚓ SJEVERNI LUKOBRAN (L) — 46 vezova
+                                        <h3 className="font-bold text-sm text-white tracking-wide uppercase">
+                                            {pier.name}
                                         </h3>
                                     </div>
-                                    <Badge variant="outline" className="text-xs">
-                                        Popunjenost: {lukobranPier.berths.filter((b) => b.status !== "vacant").length} / {lukobranPier.totalBerths}
-                                    </Badge>
+                                    <span className="text-[11px] font-mono text-slate-300">
+                                        {pier.totalBerths} vezova
+                                    </span>
                                 </div>
-
-                                {/* Horizontalni raspored kartica vezova na lukobranu */}
-                                <div className="flex gap-1.5 overflow-x-auto pb-1.5">
-                                    {lukobranPier.berths.map((b) => (
-                                        <BerthCard
-                                            key={b.id}
-                                            berth={b}
-                                            isHighlighted={highlightedBerthId === b.id}
-                                            onSelect={() => {
-                                                setSelectedBerth(b);
-                                                setHighlightedBerthId(b.id);
-                                            }}
-                                            cardRef={(el) => (berthRefs.current[b.id] = el)}
-                                        />
-                                    ))}
+                                <div className="flex items-center justify-between text-[10px] text-slate-300">
+                                    <span>Zauzeto: <strong className="text-white">{occupiedCount}</strong> | Slobodno: <strong className="text-emerald-400">{freeCount}</strong></span>
+                                    <span className="font-bold text-blue-400">{occupancyPercent}%</span>
+                                </div>
+                                {/* Traka popunjenosti */}
+                                <div className="w-full h-1 bg-[#0b1320] rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-blue-500 transition-all duration-300"
+                                        style={{ width: `${occupancyPercent}%` }}
+                                    />
                                 </div>
                             </div>
-                        )}
 
-                        {/* 2. SREDIŠNJI AKVATORIJ: ZAPADNA OBALA (Lijevo) + GATOVI 1 DO 12 (Sredina/Desno) */}
-                        <div className="flex gap-4 items-start">
-                            
-                            {/* ZAPADNA OBALA (ZO - 34 veza + Dizalica + 3 Kluba) */}
-                            {zapadnaObalaPier && (selectedPierCode === "ALL" || selectedPierCode === "ZO") && (
-                                <div className="flex flex-col shrink-0 bg-background border-2 border-slate-300 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden w-[340px]">
-                                    <div className="bg-slate-800 text-white p-3 flex flex-col gap-1.5">
-                                        <div className="flex items-center justify-between">
-                                            <div className="flex items-center gap-2">
-                                                <span className="w-6 h-6 rounded-full bg-amber-500 text-black flex items-center justify-center font-bold text-xs">
-                                                    ZO
-                                                </span>
-                                                <h3 className="font-bold text-sm tracking-wide">Zapadna obala</h3>
-                                            </div>
-                                            <Badge variant="outline" className="text-white border-slate-600 text-[11px]">
-                                                {zapadnaObalaPier.totalBerths} vezova
-                                            </Badge>
-                                        </div>
-                                    </div>
+                            {/* Oznake strana (Strana 1 | Br. | Strana 2) */}
+                            <div className="grid grid-cols-[1fr_32px_1fr] bg-[#0e1726] border-b border-[#203350] text-[10px] font-bold text-slate-400 text-center py-1">
+                                <span>Strana 1</span>
+                                <span className="text-slate-500 font-mono">#</span>
+                                <span>Strana 2</span>
+                            </div>
 
-                                    {/* Operativna zona: Dizalica 9T & Klubovi */}
-                                    <div className="p-2 bg-muted/40 border-b flex flex-col gap-1.5 text-xs">
-                                        <div className="flex items-center justify-between p-2 rounded-lg bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-900 text-amber-900 dark:text-amber-200 font-semibold">
-                                            <span>🏗️ DIZALICA 9T (Travelift)</span>
-                                            <Badge variant="outline" className="text-[10px] bg-amber-200/60">Operativno</Badge>
-                                        </div>
-                                        <div className="grid grid-cols-3 gap-1 text-[10px] text-center font-medium">
-                                            <div className="p-1 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200">JK Špinut</div>
-                                            <div className="p-1 rounded bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-200">RK Špinut</div>
-                                            <div className="p-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200">KŠR Špinut</div>
-                                        </div>
-                                    </div>
-
-                                    {/* Vezovi zapadne obale */}
-                                    <div className="flex flex-col divide-y p-2 gap-1 overflow-y-auto max-h-[600px]">
-                                        {zapadnaObalaPier.berths.map((b) => (
-                                            <BerthCard
-                                                key={b.id}
-                                                berth={b}
-                                                isHighlighted={highlightedBerthId === b.id}
+                            {/* Kompaktna rešetka vezova (bez rupa) */}
+                            <div className="flex flex-col divide-y divide-[#203350] bg-[#0c1524]">
+                                {berthRows.map((row) => (
+                                    <div
+                                        key={row.rowNumber}
+                                        className="grid grid-cols-[auto_32px_auto] items-center"
+                                    >
+                                        {/* Lijeva ćelija (Strana 1) */}
+                                        {row.left ? (
+                                            <BerthCell
+                                                berth={row.left}
+                                                widthClass={cardWidth}
+                                                heightClass={cardHeight}
+                                                titleSizeClass={fontSizeTitle}
+                                                subSizeClass={fontSizeSub}
+                                                isHighlighted={highlightedBerthId === row.left.id}
                                                 onSelect={() => {
-                                                    setSelectedBerth(b);
-                                                    setHighlightedBerthId(b.id);
+                                                    setSelectedBerth(row.left);
+                                                    setHighlightedBerthId(row.left.id);
                                                 }}
-                                                cardRef={(el) => (berthRefs.current[b.id] = el)}
+                                                cellRef={(el) => (berthRefs.current[row.left.id] = el)}
                                             />
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* GATOVI 1 DO 12 (Vertikalni pontoni s 2D scrollom) */}
-                            <div className="flex gap-4 overflow-x-auto pb-2 flex-1">
-                                {verticalPiers.map((pier) => {
-                                    const totalRows = Math.ceil(pier.totalBerths / 2);
-                                    const berthRows: { rowNumber: number; left?: any; right?: any }[] = [];
-
-                                    for (let r = 1; r <= totalRows; r++) {
-                                        const leftNum = (r - 1) * 2 + 1;
-                                        const rightNum = (r - 1) * 2 + 2;
-
-                                        const leftBerth = pier.filteredBerths.find((b) => b.berthNumber === leftNum);
-                                        const rightBerth = pier.filteredBerths.find((b) => b.berthNumber === rightNum);
-
-                                        berthRows.push({
-                                            rowNumber: r,
-                                            left: leftBerth,
-                                            right: rightBerth,
-                                        });
-                                    }
-
-                                    const occupiedCount = pier.filteredBerths.filter((b) => b.status !== "vacant").length;
-                                    const occupancyPercent = Math.round((occupiedCount / pier.totalBerths) * 100) || 0;
-
-                                    return (
-                                        <div
-                                            key={pier.id}
-                                            className="flex flex-col shrink-0 bg-background border-2 border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden min-w-[340px]"
-                                        >
-                                            {/* Zaglavlje Gata */}
-                                            <div className="bg-slate-800 text-white p-3 flex flex-col gap-1.5">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center font-bold text-xs">
-                                                            {pier.code}
-                                                        </span>
-                                                        <h3 className="font-bold text-sm tracking-wide">{pier.name}</h3>
-                                                    </div>
-                                                    <Badge variant="outline" className="text-white border-slate-600 text-[11px]">
-                                                        {pier.totalBerths} vezova
-                                                    </Badge>
-                                                </div>
-                                                <div className="flex items-center justify-between text-[11px] text-slate-300">
-                                                    <span>Popunjenost: {occupiedCount} / {pier.totalBerths}</span>
-                                                    <span className="font-semibold">{occupancyPercent}%</span>
-                                                </div>
-                                                <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-blue-500 transition-all duration-300"
-                                                        style={{ width: `${occupancyPercent}%` }}
-                                                    />
-                                                </div>
+                                        ) : (
+                                            <div className={`${cardWidth} ${cardHeight} bg-[#0b1320] flex items-center justify-center text-[10px] text-slate-700`}>
+                                                —
                                             </div>
+                                        )}
 
-                                            {/* Oznake strana */}
-                                            <div className="grid grid-cols-[145px_36px_145px] bg-muted/60 border-b text-[11px] font-semibold text-muted-foreground text-center py-1.5 px-2">
-                                                <span>Strana 1 (Zapad)</span>
-                                                <span>Br</span>
-                                                <span>Strana 2 (Istok)</span>
-                                            </div>
-
-                                            {/* Redovi s vezovima */}
-                                            <div className="flex flex-col divide-y p-2 gap-1 overflow-y-auto max-h-[550px]">
-                                                {berthRows.map((row) => (
-                                                    <div
-                                                        key={row.rowNumber}
-                                                        className="grid grid-cols-[145px_36px_145px] items-center gap-1 py-0.5"
-                                                    >
-                                                        {row.left ? (
-                                                            <BerthCard
-                                                                berth={row.left}
-                                                                isHighlighted={highlightedBerthId === row.left.id}
-                                                                onSelect={() => {
-                                                                    setSelectedBerth(row.left);
-                                                                    setHighlightedBerthId(row.left.id);
-                                                                }}
-                                                                cardRef={(el) => (berthRefs.current[row.left.id] = el)}
-                                                            />
-                                                        ) : (
-                                                            <div className="h-[46px] rounded-lg border border-dashed border-muted flex items-center justify-center text-[10px] text-muted-foreground">
-                                                                —
-                                                            </div>
-                                                        )}
-
-                                                        <div className="flex items-center justify-center font-mono font-bold text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 rounded h-7">
-                                                            {row.rowNumber.toString().padStart(2, "0")}
-                                                        </div>
-
-                                                        {row.right ? (
-                                                            <BerthCard
-                                                                berth={row.right}
-                                                                isHighlighted={highlightedBerthId === row.right.id}
-                                                                onSelect={() => {
-                                                                    setSelectedBerth(row.right);
-                                                                    setHighlightedBerthId(row.right.id);
-                                                                }}
-                                                                cardRef={(el) => (berthRefs.current[row.right.id] = el)}
-                                                            />
-                                                        ) : (
-                                                            <div className="h-[46px] rounded-lg border border-dashed border-muted flex items-center justify-center text-[10px] text-muted-foreground">
-                                                                —
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                ))}
-                                            </div>
+                                        {/* Središnja betonska kralježnica s brojem */}
+                                        <div className={`${cardHeight} w-[32px] bg-[#1a273e] text-slate-200 border-x border-[#284065] flex items-center justify-center font-mono font-bold text-[11px]`}>
+                                            {row.rowNumber.toString().padStart(2, "0")}
                                         </div>
-                                    );
-                                })}
+
+                                        {/* Desna ćelija (Strana 2) */}
+                                        {row.right ? (
+                                            <BerthCell
+                                                berth={row.right}
+                                                widthClass={cardWidth}
+                                                heightClass={cardHeight}
+                                                titleSizeClass={fontSizeTitle}
+                                                subSizeClass={fontSizeSub}
+                                                isHighlighted={highlightedBerthId === row.right.id}
+                                                onSelect={() => {
+                                                    setSelectedBerth(row.right);
+                                                    setHighlightedBerthId(row.right.id);
+                                                }}
+                                                cellRef={(el) => (berthRefs.current[row.right.id] = el)}
+                                            />
+                                        ) : (
+                                            <div className={`${cardWidth} ${cardHeight} bg-[#0b1320] flex items-center justify-center text-[10px] text-slate-700`}>
+                                                —
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         </div>
+                    );
+                })}
+            </div>
 
-                        {/* 3. JUŽNA OBALA & ŠETALIŠTE BENE (Poveznica svih gatova) */}
-                        <div className="bg-slate-800 text-slate-300 rounded-xl p-3 text-center text-xs font-semibold tracking-wider flex items-center justify-between">
-                            <span>🚶‍♂️ ŠETALIŠTE BENE — JUŽNA OBALA</span>
-                            <span className="text-slate-400 font-normal">Pristup gatovima 1 do 12 s kopna</span>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* ─── Prikaz 2: TABLIČNI POPIS ────────────────────────────────────── */}
-            {viewMode === "table" && (
-                <div className="flex-1 bg-card border rounded-xl shadow-sm overflow-auto p-4">
-                    <table className="w-full text-xs text-left border-collapse">
-                        <thead>
-                            <tr className="border-b bg-muted/60 text-muted-foreground font-semibold">
-                                <th className="p-3">Šifra veza</th>
-                                <th className="p-3">Gat</th>
-                                <th className="p-3">Broj</th>
-                                <th className="p-3">Status</th>
-                                <th className="p-3">Registracija</th>
-                                <th className="p-3">Naziv broda</th>
-                                <th className="p-3">Član / Korisnik</th>
-                                <th className="p-3">OIB</th>
-                                <th className="p-3">Ugovor</th>
-                                <th className="p-3 text-right">Akcija</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {displayedPiers.flatMap((p) =>
-                                p.filteredBerths.map((b) => {
-                                    const statusCfg = STATUS_CONFIG[b.status] || STATUS_CONFIG.vacant;
-                                    return (
-                                        <tr key={b.id} className="hover:bg-muted/30 transition-colors">
-                                            <td className="p-3 font-mono font-bold text-blue-600">{b.code}</td>
-                                            <td className="p-3 font-semibold">{p.name}</td>
-                                            <td className="p-3 font-mono">{b.berthNumber}</td>
-                                            <td className="p-3">
-                                                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusCfg.badgeBg}`}>
-                                                    <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dot}`} />
-                                                    {statusCfg.label}
-                                                </span>
-                                            </td>
-                                            <td className="p-3 font-mono font-bold text-foreground">{b.vesselRegistration || "—"}</td>
-                                            <td className="p-3 font-medium">{b.vesselName || "—"}</td>
-                                            <td className="p-3">{b.userName || "—"}</td>
-                                            <td className="p-3 font-mono">{b.userOib || "—"}</td>
-                                            <td className="p-3 font-mono text-muted-foreground">{b.contractNumber || "—"}</td>
-                                            <td className="p-3 text-right">
-                                                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setSelectedBerth(b)}>
-                                                    Upravljaj
-                                                </Button>
-                                            </td>
-                                        </tr>
-                                    );
-                                })
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-
-            {/* ─── Bočni Drawer za upravljanje pojedinim vezom ─────────────────── */}
+            {/* ─── 3. BOČNI DRAWER ZA DETALJE I UPRAVLJANJE VEZOM ─────────────── */}
             <Sheet open={!!selectedBerth} onOpenChange={(open) => !open && setSelectedBerth(null)}>
-                <SheetContent className="w-[420px] sm:w-[500px] overflow-y-auto p-6">
+                <SheetContent className="w-[420px] sm:w-[480px] overflow-y-auto p-6 bg-[#111c2e] text-slate-100 border-l border-[#1e2f4a]">
                     {selectedBerth && (
-                        <div className="flex flex-col gap-6">
-                            <SheetHeader className="p-0 border-b pb-4">
+                        <div className="flex flex-col gap-5">
+                            <SheetHeader className="p-0 border-b border-[#1e2f4a] pb-3 text-left">
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2">
-                                        <Badge className="text-base px-3 py-1 font-mono bg-blue-600">
+                                        <Badge className="text-base px-3 py-1 font-mono bg-blue-600 text-white font-bold">
                                             {selectedBerth.code}
                                         </Badge>
-                                        <Badge variant="outline" className="text-xs">
+                                        <Badge variant="outline" className="text-xs text-slate-300 border-[#284065]">
                                             {selectedBerth.side === "left" ? "Strana 1 (Zapad)" : "Strana 2 (Istok)"}
                                         </Badge>
                                     </div>
-                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${STATUS_CONFIG[selectedBerth.status]?.badgeBg}`}>
-                                        <span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[selectedBerth.status]?.dot}`} />
-                                        {STATUS_CONFIG[selectedBerth.status]?.label}
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold ${STATUS_STYLES[selectedBerth.status]?.bg} ${STATUS_STYLES[selectedBerth.status]?.text}`}>
+                                        {STATUS_STYLES[selectedBerth.status]?.label}
                                     </span>
                                 </div>
-                                <SheetTitle className="text-lg font-bold mt-2">
-                                    Vez {selectedBerth.code}
+                                <SheetTitle className="text-base font-bold text-white mt-2">
+                                    Vez {selectedBerth.code} ({selectedBerth.pierName || "Gat"})
                                 </SheetTitle>
-                                <SheetDescription className="text-xs">
+                                <SheetDescription className="text-xs text-slate-400">
                                     Maksimalne dimenzije: <strong>{selectedBerth.maxLoaM}m</strong> LOA x <strong>{selectedBerth.maxBeamM}m</strong> širina x <strong>{selectedBerth.maxDraftM}m</strong> gaz
                                 </SheetDescription>
                             </SheetHeader>
 
-                            {/* Plovilo i član na vezu */}
+                            {/* Podaci o plovilu i članu */}
                             {selectedBerth.vesselId || selectedBerth.vesselRegistration ? (
-                                <div className="flex flex-col gap-4 p-4 border rounded-xl bg-card shadow-sm">
-                                    <div className="flex items-center justify-between border-b pb-3">
+                                <div className="flex flex-col gap-3.5 p-4 border border-[#233857] rounded-xl bg-[#16243a] shadow">
+                                    <div className="flex items-center justify-between border-b border-[#233857] pb-3">
                                         <div className="flex items-center gap-2.5">
-                                            <div className="w-9 h-9 rounded-lg bg-blue-100 dark:bg-blue-950 flex items-center justify-center text-blue-600">
+                                            <div className="w-9 h-9 rounded-lg bg-blue-950 flex items-center justify-center text-blue-400 border border-blue-800">
                                                 <Ship className="w-5 h-5" />
                                             </div>
                                             <div>
-                                                <h3 className="font-bold text-sm">{selectedBerth.vesselName || "Plovilo na vezu"}</h3>
-                                                <p className="font-mono text-xs text-blue-600 font-bold">{selectedBerth.vesselRegistration}</p>
+                                                <h3 className="font-bold text-sm text-white">{selectedBerth.vesselName || "Plovilo na vezu"}</h3>
+                                                <p className="font-mono text-xs text-blue-400 font-bold">{selectedBerth.vesselRegistration}</p>
                                             </div>
                                         </div>
-                                        <Badge variant="secondary" className="capitalize text-xs">
+                                        <Badge variant="secondary" className="capitalize text-xs bg-slate-800 text-slate-200">
                                             {selectedBerth.vesselType || "Brod"}
                                         </Badge>
                                     </div>
 
-                                    {/* Dimenzije broda */}
-                                    <div className="grid grid-cols-3 gap-2 text-xs text-center p-2.5 bg-muted/40 rounded-lg">
+                                    {/* Dimenzije */}
+                                    <div className="grid grid-cols-3 gap-2 text-xs text-center p-2 bg-[#0d1726] rounded-lg border border-[#1e2f4a]">
                                         <div>
-                                            <span className="text-muted-foreground block text-[10px]">Dužina (LOA)</span>
-                                            <strong>{selectedBerth.vesselLengthM ? `${selectedBerth.vesselLengthM} m` : "—"}</strong>
+                                            <span className="text-slate-400 block text-[10px]">Dužina</span>
+                                            <strong className="text-white">{selectedBerth.vesselLengthM ? `${selectedBerth.vesselLengthM} m` : "—"}</strong>
                                         </div>
                                         <div>
-                                            <span className="text-muted-foreground block text-[10px]">Širina</span>
-                                            <strong>{selectedBerth.vesselBeamM ? `${selectedBerth.vesselBeamM} m` : "—"}</strong>
+                                            <span className="text-slate-400 block text-[10px]">Širina</span>
+                                            <strong className="text-white">{selectedBerth.vesselBeamM ? `${selectedBerth.vesselBeamM} m` : "—"}</strong>
                                         </div>
                                         <div>
-                                            <span className="text-muted-foreground block text-[10px]">Gaz</span>
-                                            <strong>{selectedBerth.vesselDraftM ? `${selectedBerth.vesselDraftM} m` : "—"}</strong>
+                                            <span className="text-slate-400 block text-[10px]">Gaz</span>
+                                            <strong className="text-white">{selectedBerth.vesselDraftM ? `${selectedBerth.vesselDraftM} m` : "—"}</strong>
                                         </div>
                                     </div>
 
-                                    {/* Vlasnik / Član */}
-                                    <div className="flex flex-col gap-2 pt-2 border-t text-xs">
+                                    {/* Vlasnik */}
+                                    <div className="flex flex-col gap-2 pt-2 border-t border-[#233857] text-xs">
                                         <div className="flex items-center justify-between">
-                                            <span className="text-muted-foreground">Korisnik (Član):</span>
-                                            <strong className="text-foreground">{selectedBerth.userName || `${selectedBerth.userFirstName || ""} ${selectedBerth.userLastName || ""}`}</strong>
+                                            <span className="text-slate-400">Vlasnik (Član):</span>
+                                            <strong className="text-white">{selectedBerth.userName || `${selectedBerth.userFirstName || ""} ${selectedBerth.userLastName || ""}`}</strong>
                                         </div>
                                         {selectedBerth.userOib && (
                                             <div className="flex items-center justify-between">
-                                                <span className="text-muted-foreground">OIB:</span>
-                                                <span className="font-mono font-semibold">{selectedBerth.userOib}</span>
+                                                <span className="text-slate-400">OIB:</span>
+                                                <span className="font-mono font-semibold text-slate-200">{selectedBerth.userOib}</span>
                                             </div>
                                         )}
                                         {selectedBerth.userPhone && (
                                             <div className="flex items-center justify-between">
-                                                <span className="text-muted-foreground">Telefon:</span>
-                                                <span>{selectedBerth.userPhone}</span>
+                                                <span className="text-slate-400">Telefon:</span>
+                                                <span className="text-slate-200">{selectedBerth.userPhone}</span>
                                             </div>
                                         )}
                                         {selectedBerth.contractNumber && (
                                             <div className="flex items-center justify-between">
-                                                <span className="text-muted-foreground">Broj ugovora:</span>
-                                                <span className="font-mono text-blue-600 font-semibold">{selectedBerth.contractNumber}</span>
+                                                <span className="text-slate-400">Broj ugovora:</span>
+                                                <span className="font-mono text-blue-400 font-semibold">{selectedBerth.contractNumber}</span>
                                             </div>
                                         )}
                                     </div>
 
-                                    {/* Akcijski gumbi */}
-                                    <div className="flex items-center gap-2 pt-3 border-t">
+                                    {/* Gumbi akcija */}
+                                    <div className="flex items-center gap-2 pt-3 border-t border-[#233857]">
                                         {selectedBerth.userId && (
                                             <Button
                                                 size="sm"
                                                 variant="outline"
-                                                className="flex-1 text-xs"
+                                                className="flex-1 text-xs border-[#284065] text-slate-200 hover:bg-[#1f3352]"
                                                 onClick={() => setLocation(`/admin/users/${selectedBerth.userId}/card`)}
                                             >
                                                 <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Karton člana
@@ -827,7 +710,7 @@ export default function AdminAkvatorijMap() {
                                         <Button
                                             size="sm"
                                             variant="destructive"
-                                            className="text-xs"
+                                            className="text-xs bg-rose-700 hover:bg-rose-800"
                                             onClick={() => {
                                                 if (confirm(`Sigurno želite osloboditi vez ${selectedBerth.code}?`)) {
                                                     unassignVesselMutation.mutate({ berthId: selectedBerth.id });
@@ -840,13 +723,13 @@ export default function AdminAkvatorijMap() {
                                 </div>
                             ) : (
                                 /* Vez je slobodan */
-                                <div className="p-6 border border-dashed rounded-xl flex flex-col items-center justify-center gap-3 text-center bg-muted/10">
-                                    <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600">
+                                <div className="p-6 border border-dashed border-[#284065] rounded-xl flex flex-col items-center justify-center gap-3 text-center bg-[#0e192a]">
+                                    <div className="w-10 h-10 rounded-full bg-emerald-950 flex items-center justify-center text-emerald-400 border border-emerald-800">
                                         <CheckCircle2 className="w-5 h-5" />
                                     </div>
                                     <div>
-                                        <h4 className="font-semibold text-sm">Vez je slobodan</h4>
-                                        <p className="text-xs text-muted-foreground">Pretražite plovilo i dodijelite ga na ovaj vez</p>
+                                        <h4 className="font-semibold text-sm text-white">Vez je slobodan</h4>
+                                        <p className="text-xs text-slate-400">Pretražite plovilo i postavite ga na ovaj vez</p>
                                     </div>
                                     <Button
                                         size="sm"
@@ -855,16 +738,16 @@ export default function AdminAkvatorijMap() {
                                             setVesselSearchQuery("");
                                             setIsAssignModalOpen(true);
                                         }}
-                                        className="text-xs mt-1 bg-blue-600 hover:bg-blue-700"
+                                        className="text-xs mt-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                                     >
-                                        <Plus className="w-4 h-4 mr-1" /> Dodaj plovilo na vez
+                                        <Plus className="w-4 h-4 mr-1" /> + Dodajte plovilo na vez
                                     </Button>
                                 </div>
                             )}
 
-                            {/* Promjena operativnog statusa */}
-                            <div className="flex flex-col gap-2 pt-4 border-t">
-                                <label className="text-xs font-semibold">Operativni status veza:</label>
+                            {/* Promjena statusa */}
+                            <div className="flex flex-col gap-2 pt-4 border-t border-[#1e2f4a]">
+                                <label className="text-xs font-semibold text-slate-300">Operativni status veza:</label>
                                 <Select
                                     value={pendingStatus || selectedBerth.status}
                                     onValueChange={(val) => {
@@ -875,16 +758,16 @@ export default function AdminAkvatorijMap() {
                                         });
                                     }}
                                 >
-                                    <SelectTrigger className="text-xs h-9">
+                                    <SelectTrigger className="text-xs h-9 bg-[#0c1524] border-[#203350] text-white">
                                         <SelectValue />
                                     </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="occupied">🟦 Zauzet (Član)</SelectItem>
-                                        <SelectItem value="vacant">🟩 Slobodan vez</SelectItem>
-                                        <SelectItem value="transit">🟨 Tranzitni gost</SelectItem>
-                                        <SelectItem value="debt_block">🟥 Dugovanje / Blokada</SelectItem>
-                                        <SelectItem value="maintenance">⬛ Servis / Kvar muringa</SelectItem>
-                                        <SelectItem value="reserved">🟪 Rezervirano</SelectItem>
+                                    <SelectContent className="bg-[#162338] border-[#233857] text-white">
+                                        <SelectItem value="occupied">Zauzet (Član)</SelectItem>
+                                        <SelectItem value="vacant">Slobodan vez</SelectItem>
+                                        <SelectItem value="transit">Tranzitni gost</SelectItem>
+                                        <SelectItem value="debt_block">Dugovanje / Blokada</SelectItem>
+                                        <SelectItem value="maintenance">Servis / Kvar muringa</SelectItem>
+                                        <SelectItem value="reserved">Rezervirano</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>
@@ -893,39 +776,39 @@ export default function AdminAkvatorijMap() {
                 </SheetContent>
             </Sheet>
 
-            {/* ─── Modal za dodjelu plovila (S PRETRAŽIVIM COMBOBOXOM) ──────────── */}
+            {/* ─── 4. MODAL ZA PRETRAŽIVU DODJELU PLOVILA (COMBOBOX) ─────────────── */}
             <Dialog open={isAssignModalOpen} onOpenChange={setIsAssignModalOpen}>
-                <DialogContent className="sm:max-w-[540px]">
+                <DialogContent className="sm:max-w-[540px] bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
                     <DialogHeader>
-                        <DialogTitle>Dodjela plovila na vez {selectedBerth?.code}</DialogTitle>
-                        <DialogDescription className="text-xs">
-                            Upišite registraciju, naziv broda ili ime člana za brzi pronalazak.
+                        <DialogTitle className="text-white">Dodjela plovila na vez {selectedBerth?.code}</DialogTitle>
+                        <DialogDescription className="text-xs text-slate-400">
+                            Upišite registraciju, ime broda ili člana za brzi pronalazak.
                         </DialogDescription>
                     </DialogHeader>
 
                     <div className="flex flex-col gap-4 py-2">
-                        {/* Pretraživač plovila (Searchable Combobox) */}
+                        {/* Searchable Combobox */}
                         <div className="flex flex-col gap-1.5">
-                            <label className="text-xs font-semibold flex items-center justify-between">
+                            <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
                                 <span>Odabir plovila:</span>
-                                <span className="text-[11px] text-muted-foreground">
+                                <span className="text-[11px] text-slate-400">
                                     Prikazano: {filteredAssignableVessels.length} plovila
                                 </span>
                             </label>
-                            
+
                             <div className="relative">
-                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                                 <Input
                                     placeholder="Upiši reg. (ST-1234), ime broda ili vlasnika..."
                                     value={vesselSearchQuery}
                                     onChange={(e) => setVesselSearchQuery(e.target.value)}
-                                    className="pl-9 h-9 text-xs"
+                                    className="pl-9 h-9 text-xs bg-[#0c1524] border-[#203350] text-white placeholder:text-slate-500"
                                     autoFocus
                                 />
                                 {vesselSearchQuery && (
                                     <button
                                         onClick={() => setVesselSearchQuery("")}
-                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                                     >
                                         <X className="w-3.5 h-3.5" />
                                     </button>
@@ -933,9 +816,9 @@ export default function AdminAkvatorijMap() {
                             </div>
 
                             {/* Lista filtriranih plovila */}
-                            <div className="border rounded-lg max-h-52 overflow-y-auto divide-y bg-muted/20 text-xs mt-1">
+                            <div className="border border-[#203350] rounded-lg max-h-52 overflow-y-auto divide-y divide-[#1e2f4a] bg-[#0c1524] text-xs mt-1">
                                 {filteredAssignableVessels.length === 0 ? (
-                                    <div className="p-4 text-center text-muted-foreground text-xs">
+                                    <div className="p-4 text-center text-slate-400 text-xs">
                                         Nema plovila koja odgovaraju upitu "{vesselSearchQuery}"
                                     </div>
                                 ) : (
@@ -947,25 +830,25 @@ export default function AdminAkvatorijMap() {
                                                 onClick={() => setSelectedVesselId(v.vesselId)}
                                                 className={`p-2.5 cursor-pointer flex items-center justify-between transition-colors ${
                                                     isSelected
-                                                        ? "bg-blue-100 dark:bg-blue-950/80 border-l-4 border-blue-600 font-semibold"
-                                                        : "hover:bg-accent"
+                                                        ? "bg-blue-900/80 border-l-4 border-blue-400 text-white font-bold"
+                                                        : "hover:bg-[#162338]"
                                                 }`}
                                             >
                                                 <div className="flex items-center gap-2.5">
-                                                    <span className="font-mono font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                                                    <span className="font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
                                                         {v.vesselRegistration || "BEZ REG"}
                                                     </span>
                                                     <div>
-                                                        <p className="font-bold text-foreground">
+                                                        <p className="font-bold text-white">
                                                             {v.vesselName || "—"}
                                                         </p>
-                                                        <p className="text-[11px] text-muted-foreground">
-                                                            {v.ownerName || `${v.ownerFirstName || ""} ${v.ownerLastName || ""}`} {v.ownerOib ? `(OIB: ${v.ownerOib})` : ""}
+                                                        <p className="text-[11px] text-slate-400">
+                                                            {v.ownerName || `${v.ownerFirstName || ""} ${v.ownerLastName || ""}`} {v.ownerOib ? `(${v.ownerOib})` : ""}
                                                         </p>
                                                     </div>
                                                 </div>
-                                                <div className="text-right text-[11px] text-muted-foreground">
-                                                    <span className="block font-medium">{v.vesselLengthM ? `${v.vesselLengthM} m` : ""}</span>
+                                                <div className="text-right text-[11px] text-slate-400">
+                                                    <span className="block font-medium text-white">{v.vesselLengthM ? `${v.vesselLengthM} m` : ""}</span>
                                                     <span className="capitalize">{v.vesselType || "Brod"}</span>
                                                 </div>
                                             </div>
@@ -977,24 +860,24 @@ export default function AdminAkvatorijMap() {
 
                         {/* Broj ugovora */}
                         <div className="flex flex-col gap-1.5">
-                            <label className="text-xs font-semibold">Broj ugovora o vezu:</label>
+                            <label className="text-xs font-semibold text-slate-300">Broj ugovora o vezu:</label>
                             <Input
                                 placeholder="npr. 469/2001 ili UG-2026-0042"
                                 value={contractNumber}
                                 onChange={(e) => setContractNumber(e.target.value)}
-                                className="text-xs h-9"
+                                className="text-xs h-9 bg-[#0c1524] border-[#203350] text-white"
                             />
                         </div>
                     </div>
 
                     <DialogFooter>
-                        <Button variant="outline" size="sm" onClick={() => setIsAssignModalOpen(false)}>
+                        <Button variant="outline" size="sm" onClick={() => setIsAssignModalOpen(false)} className="border-[#284065] text-slate-300">
                             Odustani
                         </Button>
                         <Button
                             size="sm"
                             disabled={!selectedVesselId || assignVesselMutation.isPending}
-                            className="bg-blue-600 hover:bg-blue-700"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                             onClick={() => {
                                 const vessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
                                 if (!vessel || !selectedBerth) return;
@@ -1015,26 +898,26 @@ export default function AdminAkvatorijMap() {
                 </DialogContent>
             </Dialog>
 
-            {/* ─── Dijalog za potvrdu premještanja s drugog veza ───────────────── */}
+            {/* ─── 5. DIJALOG ZA POTVRDU PREMJEŠTANJA S DRUGOG VEZA ────────────── */}
             <AlertDialog open={!!relocationConflict} onOpenChange={(open) => !open && setRelocationConflict(null)}>
-                <AlertDialogContent>
+                <AlertDialogContent className="bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
                     <AlertDialogHeader>
-                        <div className="flex items-center gap-2 text-amber-600">
+                        <div className="flex items-center gap-2 text-amber-400">
                             <AlertTriangle className="w-5 h-5" />
-                            <AlertDialogTitle>Plovilo je već dodijeljeno na vez</AlertDialogTitle>
+                            <AlertDialogTitle className="text-white">Plovilo je već dodijeljeno na vez</AlertDialogTitle>
                         </div>
-                        <AlertDialogDescription className="text-xs pt-2">
+                        <AlertDialogDescription className="text-xs text-slate-300 pt-2">
                             {relocationConflict?.message}
                             <br /><br />
                             <strong>Želite li automatski osloboditi prethodni vez i premjestiti plovilo na vez {selectedBerth?.code}?</strong>
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                        <AlertDialogCancel onClick={() => setRelocationConflict(null)}>
+                        <AlertDialogCancel onClick={() => setRelocationConflict(null)} className="border-[#284065] text-slate-300">
                             Odustani
                         </AlertDialogCancel>
                         <AlertDialogAction
-                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-bold"
                             onClick={() => {
                                 const vessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
                                 if (!vessel || !selectedBerth) return;
@@ -1059,62 +942,65 @@ export default function AdminAkvatorijMap() {
 }
 
 /**
- * Pojedinačna kartica veza (Fiksna, lako čitljiva veličina 145x46px)
+ * Pojedinačna kompaktna ćelija veza (Screenshot_30 stil)
  */
-function BerthCard({
+function BerthCell({
     berth,
+    widthClass,
+    heightClass,
+    titleSizeClass,
+    subSizeClass,
     isHighlighted,
     onSelect,
-    cardRef,
+    cellRef,
 }: {
     berth: any;
+    widthClass: string;
+    heightClass: string;
+    titleSizeClass: string;
+    subSizeClass: string;
     isHighlighted: boolean;
     onSelect: () => void;
-    cardRef: (el: HTMLDivElement | null) => void;
+    cellRef: (el: HTMLDivElement | null) => void;
 }) {
-    const isOccupied = berth.status !== "vacant";
-    const statusCfg = STATUS_CONFIG[berth.status] || STATUS_CONFIG.vacant;
+    const isVacant = berth.status === "vacant";
+    const style = STATUS_STYLES[berth.status] || STATUS_STYLES.vacant;
 
     return (
         <div
-            ref={cardRef}
+            ref={cellRef}
             onClick={onSelect}
-            className={`h-[46px] w-[145px] rounded-lg border p-1.5 cursor-pointer flex flex-col justify-between transition-all duration-200 shrink-0 ${
-                statusCfg.bg
-            } ${statusCfg.border} ${
+            className={`${widthClass} ${heightClass} ${style.bg} ${style.border} border p-1 cursor-pointer flex flex-col justify-center transition-all duration-150 relative ${
                 isHighlighted
-                    ? "ring-4 ring-amber-400 dark:ring-amber-500 scale-105 shadow-lg z-20"
-                    : "hover:scale-[1.02] hover:shadow-md"
+                    ? "ring-4 ring-amber-400 z-30 scale-105 shadow-2xl"
+                    : "hover:brightness-110"
             }`}
         >
-            {/* Gornji red: Registracija plovila ili SLOBODNO */}
-            <div className="flex items-center justify-between">
-                <span className="font-mono font-bold text-[12px] truncate tracking-tight text-foreground">
-                    {isOccupied ? (
-                        berth.vesselRegistration || berth.vesselName || "Zauzeto"
-                    ) : (
-                        <span className="text-emerald-700 dark:text-emerald-300 font-semibold text-[11px] flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                            SLOBODNO
+            {isVacant ? (
+                /* Slobodan vez - Zeleni blok sa strelicom */
+                <div className="flex items-center justify-center gap-1 text-white font-bold text-[11px]">
+                    <ArrowUp className="w-3.5 h-3.5 shrink-0" />
+                    <span className="tracking-wide">SLOBODNO</span>
+                </div>
+            ) : (
+                /* Zauzet vez - Registracija + Ime člana */
+                <div className="flex flex-col justify-between h-full overflow-hidden leading-none">
+                    <div className="flex items-center justify-between">
+                        <span className={`font-mono font-bold ${titleSizeClass} ${style.text} truncate tracking-tight`}>
+                            {berth.vesselRegistration || berth.vesselName || "ZAUZETO"}
                         </span>
-                    )}
-                </span>
-                <span className={`w-2 h-2 rounded-full shrink-0 ${statusCfg.dot}`} />
-            </div>
-
-            {/* Donji red: Ime vlasnika ili max dužina */}
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground truncate">
-                <span className="truncate font-medium">
-                    {isOccupied ? (
-                        berth.userName || `${berth.userFirstName || ""} ${berth.userLastName || ""}`.trim() || "Član"
-                    ) : (
-                        `max ${berth.maxLoaM || "10"}m`
-                    )}
-                </span>
-                {berth.status === "debt_block" && (
-                    <span className="text-rose-600 font-bold ml-1">DUG ⚠️</span>
-                )}
-            </div>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${style.dot}`} />
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <span className={`truncate font-medium ${subSizeClass} ${style.subText}`}>
+                            {berth.userName || `${berth.userFirstName || ""} ${berth.userLastName || ""}`.trim() || "Član"}
+                        </span>
+                        {berth.status === "debt_block" && (
+                            <span className="text-rose-700 font-extrabold text-[9px] ml-1">DUG!</span>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
