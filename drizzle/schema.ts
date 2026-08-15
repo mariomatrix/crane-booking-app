@@ -707,3 +707,131 @@ export type SyncRun = SelectSyncRun;
 export type InsertSyncConflict = typeof syncConflicts.$inferInsert;
 export type SelectSyncConflict = typeof syncConflicts.$inferSelect;
 export type SyncConflict = SelectSyncConflict;
+
+// ─── Clubs (Matični klubovi: Jedriličarski, Ronilački, Ribolovni) ────────
+export const clubs = pgTable("clubs", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    code: varchar("code", { length: 20 }).unique().notNull(), // 'JK', 'RK', 'KSR'
+    name: varchar("name", { length: 255 }).notNull(), // 'Jedriličarski klub Špinut', 'Ronilački klub Špinut', 'Klub športskog ribolova Špinut'
+    shortName: varchar("short_name", { length: 50 }),
+    description: text("description"),
+    annualFee: decimal("annual_fee", { precision: 10, scale: 2 }).default("0.00").notNull(),
+    colorHex: varchar("color_hex", { length: 10 }).default("#3b82f6"),
+    isActive: boolean("is_active").default(true).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Piers (Gatovi i cjeline akvatorija: 1-12, Lukobran, Zapadna obala) ───
+export const pierTypeEnum = pgEnum("pier_type", [
+    "floating_pontoon", // Pomični / plutajući ponton
+    "fixed_pier",        // Fiksni gat
+    "breakwater",        // Lukobran
+    "quay",              // Obalni zid
+]);
+
+export const piers = pgTable("piers", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    code: varchar("code", { length: 20 }).unique().notNull(), // 'G1'..'G12', 'L', 'ZO'
+    name: varchar("name", { length: 255 }).notNull(), // 'Gat 1'..'Gat 12', 'Lukobran', 'Zapadna obala'
+    pierType: pierTypeEnum("pier_type").default("floating_pontoon").notNull(),
+    totalBerths: integer("total_berths").notNull(), // 62, 70, 69, 68, 70, 65, 66, 66, 66, 62, 51, 16, 46, 34
+    sortOrder: integer("sort_order").default(0).notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        codeIdx: index("piers_code_idx").on(table.code),
+        sortOrderIdx: index("piers_sort_order_idx").on(table.sortOrder),
+    };
+});
+
+// ─── Berths (Morski vezovi u akvatoriju) ──────────────────────────────────
+export const berthStatusEnum = pgEnum("berth_status", [
+    "vacant",        // Slobodan vez (spreman za dodjelu/tranzit)
+    "occupied",      // Zauzet od strane člana (redovno)
+    "transit",       // Privremeni / tranzitni gost
+    "debt_block",    // Dugovanje / blokada
+    "maintenance",   // Popravak muringa / izvan funkcije
+    "reserved",      // Rezervirano
+]);
+
+export const berthSideEnum = pgEnum("berth_side", ["left", "right", "head", "quay"]);
+
+export const berths = pgTable("berths", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    pierId: uuid("pier_id").notNull().references(() => piers.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 30 }).unique().notNull(), // npr. 'G01-01', 'G02-15', 'LUK-01', 'ZO-01'
+    berthNumber: integer("berth_number").notNull(), // 1..N
+    side: berthSideEnum("side").default("left").notNull(),
+    maxLoaM: decimal("max_loa_m", { precision: 6, scale: 2 }).default("10.00").notNull(), // max dužina
+    maxBeamM: decimal("max_beam_m", { precision: 6, scale: 2 }).default("3.20").notNull(), // max širina
+    maxDraftM: decimal("max_draft_m", { precision: 5, scale: 2 }).default("2.50").notNull(), // max gaz
+    status: berthStatusEnum("status").default("vacant").notNull(),
+    hasElectricity: boolean("has_electricity").default(true).notNull(),
+    hasWater: boolean("has_water").default(true).notNull(),
+    electricityMeterCode: varchar("electricity_meter_code", { length: 50 }),
+    waterMeterCode: varchar("water_meter_code", { length: 50 }),
+    notes: text("notes"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        pierIdIdx: index("berths_pier_id_idx").on(table.pierId),
+        codeIdx: index("berths_code_idx").on(table.code),
+        statusIdx: index("berths_status_idx").on(table.status),
+    };
+});
+
+// ─── Berth Assignments (Ugovori i dodjele vezova) ─────────────────────────
+export const berthAssignmentTypeEnum = pgEnum("berth_assignment_type", [
+    "permanent_member",      // Stalni vez za udruženika / člana
+    "transit_guest",         // Tranzitni gost
+    "club_service",          // Službeno plovilo kluba / spašavanje
+    "temporary_relocation",  // Privremeno premještanje
+]);
+
+export const berthAssignments = pgTable("berth_assignments", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    berthId: uuid("berth_id").notNull().references(() => berths.id, { onDelete: "cascade" }),
+    vesselId: uuid("vessel_id").notNull().references(() => vessels.id),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    assignmentType: berthAssignmentTypeEnum("assignment_type").default("permanent_member").notNull(),
+    contractNumber: varchar("contract_number", { length: 50 }), // Broj ugovora o korištenju veza
+    startDate: timestamp("start_date").defaultNow().notNull(),
+    endDate: timestamp("end_date"), // NULL za stalne vezove
+    isActive: boolean("is_active").default(true).notNull(),
+    assignedBy: uuid("assigned_by").references(() => users.id),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        berthIdIdx: index("berth_assignments_berth_id_idx").on(table.berthId),
+        vesselIdIdx: index("berth_assignments_vessel_id_idx").on(table.vesselId),
+        userIdIdx: index("berth_assignments_user_id_idx").on(table.userId),
+        isActiveIdx: index("berth_assignments_is_active_idx").on(table.isActive),
+    };
+});
+
+// ─── Inferred Types ─────────────────────────────────────────────────────
+export type InsertClub = typeof clubs.$inferInsert;
+export type SelectClub = typeof clubs.$inferSelect;
+export type Club = SelectClub;
+
+export type InsertPier = typeof piers.$inferInsert;
+export type SelectPier = typeof piers.$inferSelect;
+export type Pier = SelectPier;
+
+export type InsertBerth = typeof berths.$inferInsert;
+export type SelectBerth = typeof berths.$inferSelect;
+export type Berth = SelectBerth;
+
+export type InsertBerthAssignment = typeof berthAssignments.$inferInsert;
+export type SelectBerthAssignment = typeof berthAssignments.$inferSelect;
+export type BerthAssignment = SelectBerthAssignment;
+

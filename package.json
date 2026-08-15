@@ -12,6 +12,7 @@
     "test": "vitest run",
     "db:push": "drizzle-kit push",
     "db:clean-members": "tsx server/scripts/cleanMembers.ts",
+    "db:seed-akvatorij": "tsx server/scripts/seedAkvatorij.ts",
     "migrate": "node dist/migrate.js",
     "sync:push": "tsx server/memberSync/agent/cli.ts",
     "sync:daemon": "tsx server/memberSync/agent/daemon.ts"

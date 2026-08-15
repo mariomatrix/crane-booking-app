@@ -1,0 +1,11 @@
+{
+  "name": "@psd/database",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "types": "index.ts",
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.8"
+  }
+}

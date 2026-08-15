@@ -372,6 +372,120 @@ async function runMigration() {
         console.warn("Member sync tables verification warning:", e?.message || e);
     }
 
+    // ─── PŠD Marina: Clubs, Piers & Berths Tables ─────────────────────
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "pier_type" AS ENUM ('floating_pontoon', 'fixed_pier', 'breakwater', 'quay');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "berth_status" AS ENUM ('vacant', 'occupied', 'transit', 'debt_block', 'maintenance', 'reserved');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "berth_side" AS ENUM ('left', 'right', 'head', 'quay');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "berth_assignment_type" AS ENUM ('permanent_member', 'transit_guest', 'club_service', 'temporary_relocation');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "clubs" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "code" varchar(20) NOT NULL UNIQUE,
+                "name" varchar(255) NOT NULL,
+                "short_name" varchar(50),
+                "description" text,
+                "annual_fee" numeric(10, 2) DEFAULT 0.00 NOT NULL,
+                "color_hex" varchar(10) DEFAULT '#3b82f6',
+                "is_active" boolean DEFAULT true NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("clubs table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "piers" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "code" varchar(20) NOT NULL UNIQUE,
+                "name" varchar(255) NOT NULL,
+                "pier_type" "pier_type" DEFAULT 'floating_pontoon' NOT NULL,
+                "total_berths" integer NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "description" text,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "piers_code_idx" ON "piers" ("code")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "piers_sort_order_idx" ON "piers" ("sort_order")`;
+        console.log("piers table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "berths" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "pier_id" uuid NOT NULL REFERENCES "piers"("id") ON DELETE CASCADE,
+                "code" varchar(30) NOT NULL UNIQUE,
+                "berth_number" integer NOT NULL,
+                "side" "berth_side" DEFAULT 'left' NOT NULL,
+                "max_loa_m" numeric(6, 2) DEFAULT 10.00 NOT NULL,
+                "max_beam_m" numeric(6, 2) DEFAULT 3.20 NOT NULL,
+                "max_draft_m" numeric(5, 2) DEFAULT 2.50 NOT NULL,
+                "status" "berth_status" DEFAULT 'vacant' NOT NULL,
+                "has_electricity" boolean DEFAULT true NOT NULL,
+                "has_water" boolean DEFAULT true NOT NULL,
+                "electricity_meter_code" varchar(50),
+                "water_meter_code" varchar(50),
+                "notes" text,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berths_pier_id_idx" ON "berths" ("pier_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berths_code_idx" ON "berths" ("code")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berths_status_idx" ON "berths" ("status")`;
+        console.log("berths table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "berth_assignments" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "berth_id" uuid NOT NULL REFERENCES "berths"("id") ON DELETE CASCADE,
+                "vessel_id" uuid NOT NULL REFERENCES "vessels"("id"),
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "assignment_type" "berth_assignment_type" DEFAULT 'permanent_member' NOT NULL,
+                "contract_number" varchar(50),
+                "start_date" timestamp DEFAULT now() NOT NULL,
+                "end_date" timestamp,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "assigned_by" uuid REFERENCES "users"("id"),
+                "notes" text,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_berth_id_idx" ON "berth_assignments" ("berth_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_vessel_id_idx" ON "berth_assignments" ("vessel_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_user_id_idx" ON "berth_assignments" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_is_active_idx" ON "berth_assignments" ("is_active")`;
+        console.log("berth_assignments table verified.");
+    } catch (e: any) {
+        console.warn("Piers & berths tables verification warning:", e?.message || e);
+    }
+
     try {
         await migrate(db, { migrationsFolder: "drizzle" });
         console.log("Migrations completed.");
