@@ -47,8 +47,9 @@ export async function fetchAllClan03Members(): Promise<LegacyClan03Row[]> {
             KOPNO,
             KOPNOPIS
         FROM CLAN03
-        WHERE VRSTA_C IN ('U','B')
-          AND ISNULL(KLUB, 0) > 0
+        WHERE (GAT IS NOT NULL AND GAT <> '')
+           OR (BROD_BR IS NOT NULL AND BROD_BR <> '')
+           OR VRSTA_C IN ('U','B','P','K','L')
     `);
 
     return result.recordset;

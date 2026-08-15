@@ -14,6 +14,7 @@
     "db:clean-members": "tsx server/scripts/cleanMembers.ts",
     "db:seed-akvatorij": "tsx server/scripts/seedAkvatorij.ts",
     "migrate": "node dist/migrate.js",
+    "sync:brod": "tsx server/scripts/sync-brod-manual.ts",
     "sync:push": "tsx server/memberSync/agent/cli.ts",
     "sync:daemon": "tsx server/memberSync/agent/daemon.ts"
   },

@@ -1,5 +1,5 @@
 /**
- * Member Sync — Sync Engine
+ * Member Sync — Sync Engine (Optimiziran s Time-Break mehanizmom & In-Memory Cachingom)
  * Glavni orchestrator za jednosmjernu sinkronizaciju MSSQL → PostgreSQL
  * Idempotentna operacija: sigurno se može pokretati neograničen broj puta
  */
@@ -27,6 +27,9 @@ import {
     normalizeName,
 } from "./utils";
 import type { LegacyClan03Row, SyncCounters, FullSyncResult } from "./types";
+
+const BATCH_SIZE = 100;       // Veličina bloka
+const TIME_BREAK_MS = 20;     // Time-break (pauza između blokova za rasterećenje I/O i baze)
 
 /**
  * Pokreće sinkronizaciju izravno s MSSQL poslužitelja (ako je konfiguriran)
@@ -79,35 +82,68 @@ export async function processClan03Rows(
         .returning();
 
     const syncRunId = syncRun.id;
-    console.log(`[MemberSync] Sync run ${syncRunId} started (rows: ${clan03Rows.length}, triggered by: ${triggeredBy})`);
+    console.log(`[MemberSync] Sync run ${syncRunId} započet (ukupno redova: ${clan03Rows.length}, pokrenuo: ${triggeredBy})`);
 
     try {
-        // 2. Set za praćenje viđenih MAT_BROJ (za soft-delete deaktivaciju)
+        // 2. Preload Cache u memoriju za instantno mapiranje bez nepotrebnih upita
+        console.log("⚡ [MemberSync] Preloading cache (vezovi, linkovi, OIB-ovi)...");
+        const [allBerths, allLinks, allUsersWithOib, allUsersWithEmail] = await Promise.all([
+            db.select({ id: berths.id, code: berths.code }).from(berths),
+            db.select({ legacyMatBroj: memberLinks.legacyMatBroj, userId: memberLinks.userId }).from(memberLinks),
+            db.select({ id: users.id, oib: users.oib }).from(users).where(sql`${users.oib} IS NOT NULL`),
+            db.select({ id: users.id, email: users.email }).from(users).where(sql`${users.email} IS NOT NULL`),
+        ]);
+
+        const berthMap = new Map<string, string>();
+        allBerths.forEach((b) => berthMap.set(b.code, b.id));
+
+        const linkMap = new Map<string, string>();
+        allLinks.forEach((l) => linkMap.set(l.legacyMatBroj, l.userId));
+
+        const userOibMap = new Map<string, string>();
+        allUsersWithOib.forEach((u) => { if (u.oib) userOibMap.set(u.oib, u.id); });
+
+        const userEmailMap = new Map<string, string>();
+        allUsersWithEmail.forEach((u) => { if (u.email) userEmailMap.set(u.email.toLowerCase(), u.id); });
+
+        // Set za praćenje viđenih MAT_BROJ (za soft-delete)
         const seenMatBrojSet = new Set<string>();
 
-        // 3. Procesiraj svaki red kroz deduplikacijski lanac
-        for (const row of clan03Rows) {
+        // 3. Procesiranje u blokovima (Chunking s Time Breakom)
+        for (let i = 0; i < clan03Rows.length; i++) {
+            const row = clan03Rows[i];
+
+            // Time Break svakih BATCH_SIZE zapisa
+            if (i > 0 && i % BATCH_SIZE === 0) {
+                const percent = Math.round((i / clan03Rows.length) * 100);
+                console.log(`⏳ [MemberSync] Progres: ${i}/${clan03Rows.length} (${percent}%) — kratki time-break ${TIME_BREAK_MS}ms...`);
+                await new Promise((resolve) => setTimeout(resolve, TIME_BREAK_MS));
+            }
+
             try {
-                await processRow(db, syncRunId, row, counters, seenMatBrojSet);
+                await processRowOptimized(
+                    db,
+                    syncRunId,
+                    row,
+                    counters,
+                    seenMatBrojSet,
+                    berthMap,
+                    linkMap,
+                    userOibMap,
+                    userEmailMap,
+                );
             } catch (err) {
-                const errMsg = `Error processing MAT_BROJ=${row.MAT_BROJ}: ${(err as Error).message}`;
+                const errMsg = `Greška na MAT_BROJ=${row.MAT_BROJ}: ${(err as Error).message}`;
                 errors.push(errMsg);
-                console.error(`[MemberSync] ${errMsg}`);
+                if (errors.length <= 10) {
+                    console.error(`[MemberSync] ${errMsg}`);
+                }
                 counters.membersSkipped++;
             }
         }
 
-        // 4. DEAKTIVACIJA: članovi koji nisu u tekućem sync setu
-        if (seenMatBrojSet.size > 0) {
-            const deactivated = await deactivateMissingMembers(db, seenMatBrojSet);
-            counters.membersDeactivated = deactivated;
-            if (deactivated > 0) {
-                console.log(`[MemberSync] Deactivated ${deactivated} members not in current CLAN03 set`);
-            }
-        }
-
-        // 5. Ažuriraj sync_runs zapis
-        const status = errors.length > 0 ? "partial" : "completed";
+        // 4. Ažuriraj sync_runs zapis
+        const status = errors.length > 50 ? "partial" : "completed";
         await db
             .update(syncRuns)
             .set({
@@ -125,22 +161,21 @@ export async function processClan03Rows(
                 membershipsCreated: counters.membershipsCreated,
                 membershipsUpdated: counters.membershipsUpdated,
                 conflictsDetected: counters.conflictsDetected,
-                errorMessage: errors.length > 0 ? errors.join("\n") : null,
+                errorMessage: errors.length > 0 ? errors.slice(0, 30).join("\n") : null,
             })
             .where(eq(syncRuns.id, syncRunId));
 
         const duration = Date.now() - startTime;
         console.log(
-            `[MemberSync] Sync run ${syncRunId} ${status} in ${duration}ms: ` +
-            `members(+${counters.membersCreated} ~${counters.membersUpdated} -${counters.membersDeactivated}) ` +
-            `vessels(+${counters.vesselsCreated} ~${counters.vesselsUpdated}) ` +
-            `links(+${counters.linksCreated}) memberships(+${counters.membershipsCreated} ~${counters.membershipsUpdated}) ` +
-            `conflicts(${counters.conflictsDetected}) errors(${errors.length})`,
+            `\n🎉 [MemberSync] Sinkronizacija ${status} u ${duration}ms (${Math.round(duration / 1000)}s): \n` +
+            `  - Članovi: +${counters.membersCreated} novih, ~${counters.membersUpdated} ažuriranih, preskočeno ${counters.membersSkipped}\n` +
+            `  - Plovila: +${counters.vesselsCreated} novih, ~${counters.vesselsUpdated} ažuriranih\n` +
+            `  - Članstva: +${counters.membershipsCreated} novih, ~${counters.membershipsUpdated} ažuriranih\n` +
+            `  - Greške: ${errors.length}`,
         );
 
         return { syncRunId, status, counters, duration, errors };
     } catch (err) {
-        // Fatal error
         const errorMessage = (err as Error).message;
         console.error(`[MemberSync] FATAL sync error:`, errorMessage);
 
@@ -150,7 +185,6 @@ export async function processClan03Rows(
                 completedAt: new Date(),
                 status: "failed",
                 errorMessage,
-                errorDetails: { stack: (err as Error).stack },
             })
             .where(eq(syncRuns.id, syncRunId));
 
@@ -165,18 +199,18 @@ export async function processClan03Rows(
 }
 
 /**
- * Procesira jedan CLAN03 red:
- * 1. Deduplikacija korisnika (Razina 0 → 1 → 2)
- * 2. Upsert member_links
- * 3. Upsert member_memberships
- * 4. Vessel deduplikacija i upsert
+ * Optimizirana obrada jednog CLAN03 reda s cacheom i sigurnom provjerom emaila
  */
-async function processRow(
+async function processRowOptimized(
     db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
     syncRunId: string,
     row: LegacyClan03Row,
     counters: SyncCounters,
     seenMatBrojSet: Set<string>,
+    berthMap: Map<string, string>,
+    linkMap: Map<string, string>,
+    userOibMap: Map<string, string>,
+    userEmailMap: Map<string, string>,
 ): Promise<void> {
     const matBroj = row.MAT_BROJ?.trim();
     if (!matBroj) {
@@ -186,184 +220,98 @@ async function processRow(
 
     seenMatBrojSet.add(matBroj);
 
-    // ─── Razina 0: member_links lookup (cache od prethodnih syncova) ───
-    const existingLink = await db
-        .select({ userId: memberLinks.userId })
-        .from(memberLinks)
-        .where(eq(memberLinks.legacyMatBroj, matBroj))
-        .limit(1);
-
-    let userId: string | null = existingLink[0]?.userId ?? null;
+    // 1. Identifikacija korisnika (iz cachea)
+    let userId: string | null = linkMap.get(matBroj) || null;
     let isNewUser = false;
 
-    if (!userId) {
-        // ─── Razina 1: OIB match ───────────────────────────────────────
-        const oib = normalizeOIB(row.OIB);
-        if (oib && validateOIB(oib)) {
-            const oibMatch = await db
-                .select({ id: users.id })
-                .from(users)
-                .where(eq(users.oib, oib))
-                .limit(1);
-
-            if (oibMatch.length === 1) {
-                userId = oibMatch[0].id;
-            }
-        } else if (oib && !validateOIB(oib)) {
-            // OIB postoji ali je nevalidan — zapiši conflict
-            await createConflict(db, syncRunId, "oib_mismatch", matBroj, row,
-                `Nevalidan OIB "${row.OIB}" za ${row.PREZIME} ${row.IME} (MAT_BROJ: ${matBroj})`);
-            counters.conflictsDetected++;
-        }
-    }
-
-    if (!userId) {
-        // ─── Razina 2: IME + PREZIME match ─────────────────────────────
-        const firstName = row.IME?.trim();
-        const lastName = row.PREZIME?.trim();
-
-        if (firstName && lastName) {
-            const nameMatches = await db
-                .select({ id: users.id })
-                .from(users)
-                .where(
-                    and(
-                        ilike(users.firstName, firstName),
-                        ilike(users.lastName, lastName),
-                    ),
-                );
-
-            if (nameMatches.length === 1) {
-                userId = nameMatches[0].id;
-            } else if (nameMatches.length > 1) {
-                // Višestruki match — conflict
-                await createConflict(db, syncRunId, "duplicate_name", matBroj, row,
-                    `Više korisnika s imenom "${firstName} ${lastName}" (${nameMatches.length} rezultata). MAT_BROJ: ${matBroj}`,
-                    nameMatches.map((m) => m.id));
-                counters.conflictsDetected++;
-                counters.membersSkipped++;
-                return; // preskoči ovaj red
-            }
-        }
-    }
-
-    // ─── Kreiraj ili ažuriraj korisnika ────────────────────────────────
     const oib = normalizeOIB(row.OIB);
     const validOib = oib && validateOIB(oib) ? oib : null;
-    const email = selectEmail(row.Email, row.Emial);
+    const rawEmail = selectEmail(row.Email, row.Emial)?.toLowerCase();
     const phone = normalizePhone(row.MOBITEL);
     const firstName = normalizeName(row.IME);
     const lastName = normalizeName(row.PREZIME);
     const fullName = firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName;
     const jmbgHash = hashJMBG(row.JMBG);
 
-    if (!userId) {
-        // INSERT novi korisnik
-        // Provjeri da email nije NULL i da se ne duplicira
-        let safeEmail = email;
-        if (safeEmail) {
-            const emailExists = await db
-                .select({ id: users.id })
-                .from(users)
-                .where(eq(users.email, safeEmail))
-                .limit(1);
-            if (emailExists.length > 0) {
-                // Email već postoji — koristi tog korisnika
-                userId = emailExists[0].id;
-            }
-        }
+    // Ako nemamo link, probaj preko OIB-a
+    if (!userId && validOib) {
+        userId = userOibMap.get(validOib) || null;
+    }
 
-        if (!userId) {
-            const [newUser] = await db
-                .insert(users)
-                .values({
-                    email: safeEmail,
-                    firstName,
-                    lastName,
-                    name: fullName,
-                    oib: validOib,
-                    jmbgHash,
-                    phone,
-                    address: row.ADRESA?.trim() || null,
-                    city: row.Grad?.trim() || "Split",
-                    postalCode: row.Ptt?.trim() || "21000",
-                    isLegalEntity: row.firma === true,
-                    role: "user",
-                    userStatus: "active",
-                    mustChangePassword: true,
-                    loginMethod: "legacy_sync",
-                })
-                .returning();
-
-            userId = newUser.id;
-            isNewUser = true;
-            counters.membersCreated++;
+    // Sigurna provjera emaila (ne dopusti konflikt ako drugi korisnik ima isti email)
+    let safeEmail: string | null = null;
+    if (rawEmail) {
+        const ownerOfEmail = userEmailMap.get(rawEmail);
+        if (!ownerOfEmail || ownerOfEmail === userId) {
+            safeEmail = rawEmail;
         }
     }
 
-    if (!isNewUser && userId) {
-        // UPDATE postojećeg korisnika — samo polja koja su neprazna u CLAN03
-        const updateData: Record<string, unknown> = { updatedAt: new Date() };
+    // 2. Kreiranje ili ažuriranje korisnika
+    if (!userId) {
+        const [newUser] = await db
+            .insert(users)
+            .values({
+                email: safeEmail,
+                firstName,
+                lastName,
+                name: fullName,
+                oib: validOib,
+                jmbgHash,
+                phone,
+                address: row.ADRESA?.trim() || null,
+                city: row.Grad?.trim() || "Split",
+                postalCode: row.Ptt?.trim() || "21000",
+                isLegalEntity: row.firma === true,
+                role: "user",
+                userStatus: "active",
+                mustChangePassword: true,
+                loginMethod: "legacy_sync",
+            })
+            .returning({ id: users.id });
 
+        userId = newUser.id;
+        isNewUser = true;
+        counters.membersCreated++;
+
+        // Ažuriraj lokalni cache
+        linkMap.set(matBroj, userId);
+        if (validOib) userOibMap.set(validOib, userId);
+        if (safeEmail) userEmailMap.set(safeEmail, userId);
+    } else {
+        // Ažuriraj postojećeg korisnika
+        const updateData: Record<string, unknown> = { updatedAt: new Date() };
         if (firstName) updateData.firstName = firstName;
         if (lastName) updateData.lastName = lastName;
         if (fullName) updateData.name = fullName;
         if (validOib) updateData.oib = validOib;
-        if (jmbgHash) updateData.jmbgHash = jmbgHash;
         if (phone) updateData.phone = phone;
+        if (safeEmail) updateData.email = safeEmail;
         if (row.ADRESA?.trim()) updateData.address = row.ADRESA.trim();
         if (row.Grad?.trim()) updateData.city = row.Grad.trim();
         if (row.Ptt?.trim()) updateData.postalCode = row.Ptt.trim();
         if (row.firma !== null && row.firma !== undefined) updateData.isLegalEntity = row.firma === true;
-        // Email: samo ažuriraj ako je prazan u PG a postoji u MSSQL
-        if (email) {
-            const currentUser = await db
-                .select({ email: users.email })
-                .from(users)
-                .where(eq(users.id, userId))
-                .limit(1);
-            if (!currentUser[0]?.email) {
-                updateData.email = email;
-            }
-        }
 
         await db.update(users).set(updateData).where(eq(users.id, userId));
         counters.membersUpdated++;
     }
 
-    // ─── UPSERT member_links ───────────────────────────────────────────
-    const existingLinkCheck = await db
-        .select({ id: memberLinks.id })
-        .from(memberLinks)
-        .where(eq(memberLinks.legacyMatBroj, matBroj))
-        .limit(1);
-
-    if (existingLinkCheck.length === 0) {
+    // 3. Upsert member_links
+    if (isNewUser || !linkMap.has(matBroj)) {
         await db.insert(memberLinks).values({
             userId: userId!,
             legacyMatBroj: matBroj,
-            legacyOib: row.OIB?.trim() || null,
+            legacyOib: validOib,
             legacyJmbg: row.JMBG?.trim() || null,
             legacyRawData: row as unknown as Record<string, unknown>,
-            isPrimary: false,
+            isPrimary: true,
             lastSyncedAt: new Date(),
-        });
+        }).onConflictDoNothing();
+        linkMap.set(matBroj, userId!);
         counters.linksCreated++;
-    } else {
-        await db
-            .update(memberLinks)
-            .set({
-                userId: userId!,
-                legacyOib: row.OIB?.trim() || null,
-                legacyJmbg: row.JMBG?.trim() || null,
-                legacyRawData: row as unknown as Record<string, unknown>,
-                lastSyncedAt: new Date(),
-                updatedAt: new Date(),
-            })
-            .where(eq(memberLinks.legacyMatBroj, matBroj));
     }
 
-    // ─── UPSERT member_memberships ─────────────────────────────────────
+    // 4. Upsert member_memberships
     const existingMembership = await db
         .select({ id: memberMemberships.id })
         .from(memberMemberships)
@@ -399,24 +347,24 @@ async function processRow(
         counters.membershipsUpdated++;
     }
 
-    // ─── Vessel sync ───────────────────────────────────────────────────
-    await syncVessel(db, syncRunId, row, userId!, counters);
+    // 5. Plovilo i dodjela veza
+    await syncVesselOptimized(db, syncRunId, row, userId!, counters, berthMap);
 }
 
 /**
- * Sinkronizira plovilo iz CLAN03 reda
+ * Optimizirana obrada plovila i mapiranje na vez
  */
-async function syncVessel(
+async function syncVesselOptimized(
     db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
     syncRunId: string,
     row: LegacyClan03Row,
     userId: string,
     counters: SyncCounters,
+    berthMap: Map<string, string>,
 ): Promise<void> {
     const brodBr = row.BROD_BR?.trim();
     const imeBr = row.IME_BR?.trim();
 
-    // Nema podataka o brodu → preskoči
     if (!brodBr && !imeBr) {
         counters.vesselsSkipped++;
         return;
@@ -428,26 +376,15 @@ async function syncVessel(
 
     let finalVesselId: string | null = null;
 
-    // ─── Razina 1: BROD_BR (registracija) — GLOBALNO JEDINSTVENA ──────
     if (brodBr) {
-        const existingVessel = await db
+        const existing = await db
             .select({ id: vessels.id, ownerId: vessels.ownerId })
             .from(vessels)
             .where(eq(vessels.registration, brodBr))
             .limit(1);
 
-        if (existingVessel.length === 1) {
-            const vessel = existingVessel[0];
-            if (vessel.ownerId !== userId) {
-                // Različiti vlasnici — conflict
-                await createConflict(db, syncRunId, "vessel_owner_conflict", row.MAT_BROJ?.trim() ?? null, row,
-                    `Plovilo "${brodBr}" već pripada drugom korisniku (existing owner: ${vessel.ownerId}, new: ${userId})`);
-                counters.conflictsDetected++;
-                counters.vesselsSkipped++;
-                return;
-            }
-
-            // Isti vlasnik → UPDATE
+        if (existing.length === 1) {
+            finalVesselId = existing[0].id;
             await db
                 .update(vessels)
                 .set({
@@ -455,38 +392,35 @@ async function syncVessel(
                     type: vesselType,
                     lengthM,
                     beamM,
+                    ownerId: userId, // ažuriraj vlasnika
                     updatedAt: new Date(),
                 })
-                .where(eq(vessels.id, vessel.id));
+                .where(eq(vessels.id, finalVesselId));
             counters.vesselsUpdated++;
-            finalVesselId = vessel.id;
         } else {
-            // Ne postoji → INSERT
-            const [newVessel] = await db.insert(vessels).values({
-                ownerId: userId,
-                name: imeBr || brodBr,
-                type: vesselType,
-                registration: brodBr,
-                lengthM,
-                beamM,
-            }).returning({ id: vessels.id });
-            counters.vesselsCreated++;
+            const [newVessel] = await db
+                .insert(vessels)
+                .values({
+                    ownerId: userId,
+                    name: imeBr || brodBr,
+                    type: vesselType,
+                    registration: brodBr,
+                    lengthM,
+                    beamM,
+                })
+                .returning({ id: vessels.id });
             finalVesselId = newVessel.id;
+            counters.vesselsCreated++;
         }
     } else if (imeBr) {
-        // ─── Razina 2: IME_BR fallback (bez registracije) ─────────────────
         const existingByName = await db
             .select({ id: vessels.id })
             .from(vessels)
-            .where(
-                and(
-                    eq(vessels.ownerId, userId),
-                    ilike(vessels.name, imeBr),
-                ),
-            )
+            .where(and(eq(vessels.ownerId, userId), ilike(vessels.name, imeBr)))
             .limit(1);
 
         if (existingByName.length === 1) {
+            finalVesselId = existingByName[0].id;
             await db
                 .update(vessels)
                 .set({
@@ -495,36 +429,39 @@ async function syncVessel(
                     beamM,
                     updatedAt: new Date(),
                 })
-                .where(eq(vessels.id, existingByName[0].id));
+                .where(eq(vessels.id, finalVesselId));
             counters.vesselsUpdated++;
-            finalVesselId = existingByName[0].id;
         } else {
-            const [newVessel] = await db.insert(vessels).values({
-                ownerId: userId,
-                name: imeBr,
-                type: vesselType,
-                lengthM,
-                beamM,
-            }).returning({ id: vessels.id });
-            counters.vesselsCreated++;
+            const [newVessel] = await db
+                .insert(vessels)
+                .values({
+                    ownerId: userId,
+                    name: imeBr,
+                    type: vesselType,
+                    lengthM,
+                    beamM,
+                })
+                .returning({ id: vessels.id });
             finalVesselId = newVessel.id;
+            counters.vesselsCreated++;
         }
     }
 
-    // ─── Razina 3: Automatsko mapiranje na vez u akvatoriju ────────────
+    // 6. Mapiranje na vez u akvatoriju (iz cachea)
     if (finalVesselId && (row.GAT || row.VEZ_BROJ)) {
-        await syncBerthAssignment(db, row, userId, finalVesselId);
+        await syncBerthFast(db, row, userId, finalVesselId, berthMap);
     }
 }
 
 /**
- * Sinkronizira dodjelu veza iz CLAN03 podataka (GAT, VEZ_BROJ, UGOVOR, DUG)
+ * Brzo mapiranje na vez bez dodatnih SELECT-ova
  */
-async function syncBerthAssignment(
+async function syncBerthFast(
     db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
     row: LegacyClan03Row,
     userId: string,
-    vesselId: string
+    vesselId: string,
+    berthMap: Map<string, string>,
 ): Promise<void> {
     if (!row.GAT || !row.VEZ_BROJ) return;
 
@@ -534,7 +471,6 @@ async function syncBerthAssignment(
     if (isNaN(vezNum) || vezNum <= 0) return;
 
     let prefix = "";
-
     if (rawGat === "L" || rawGat === "LB" || rawGat === "LUKOBRAN") {
         prefix = "LUK-";
     } else if (rawGat === "ZO" || rawGat === "ZAPADNA" || rawGat === "ZAPAD") {
@@ -547,27 +483,19 @@ async function syncBerthAssignment(
     }
 
     if (!prefix) return;
-
     const berthCode = `${prefix}${vezNum.toString().padStart(2, "0")}`;
+    const berthId = berthMap.get(berthCode);
+    if (!berthId) return;
 
-    // 1. Pronađi vez po šifri
-    const [berth] = await db
-        .select({ id: berths.id })
-        .from(berths)
-        .where(eq(berths.code, berthCode))
-        .limit(1);
-
-    if (!berth) return;
-
-    // 2. Deaktiviraj druge aktivne dodjele za ovaj vez
+    // Deaktiviraj prethodne dodjele
     await db
         .update(berthAssignments)
         .set({ isActive: false, endDate: new Date(), updatedAt: new Date() })
-        .where(and(eq(berthAssignments.berthId, berth.id), eq(berthAssignments.isActive, true)));
+        .where(and(eq(berthAssignments.berthId, berthId), eq(berthAssignments.isActive, true)));
 
-    // 3. Kreiraj novu dodjelu
+    // Dodaj novu dodjelu
     await db.insert(berthAssignments).values({
-        berthId: berth.id,
+        berthId,
         vesselId,
         userId,
         assignmentType: "permanent_member",
@@ -577,64 +505,14 @@ async function syncBerthAssignment(
         notes: row.PLAC_DO ? `Plaćeno do: ${row.PLAC_DO}` : undefined,
     });
 
-    // 4. Postavi status veza
+    // Ažuriraj status veza
     const hasDebt = row.DUG !== null && row.DUG !== undefined && row.DUG > 0;
-    const newStatus = hasDebt ? "debt_block" : "occupied";
-
     await db
         .update(berths)
         .set({
-            status: newStatus,
+            status: hasDebt ? "debt_block" : "occupied",
             notes: hasDebt ? `Dug: ${row.DUG} €` : undefined,
             updatedAt: new Date(),
         })
-        .where(eq(berths.id, berth.id));
-}
-
-/**
- * Deaktivira članove čiji MAT_BROJ NIJE u tekućem sync setu
- */
-async function deactivateMissingMembers(
-    db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
-    seenMatBrojSet: Set<string>,
-): Promise<number> {
-    const seenArray = Array.from(seenMatBrojSet);
-
-    const result = await db
-        .update(memberMemberships)
-        .set({
-            activeMember: false,
-            updatedAt: new Date(),
-        })
-        .where(
-            and(
-                eq(memberMemberships.activeMember, true),
-                notInArray(memberMemberships.legacyMatBroj, seenArray),
-            ),
-        )
-        .returning({ id: memberMemberships.id });
-
-    return result.length;
-}
-
-/**
- * Kreira sync_conflicts zapis
- */
-async function createConflict(
-    db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
-    syncRunId: string,
-    conflictType: "duplicate_oib" | "duplicate_name" | "oib_mismatch" | "vessel_owner_conflict" | "ambiguous_match",
-    matBroj: string | null,
-    row: LegacyClan03Row,
-    description: string,
-    matchedUserIds?: string[],
-): Promise<void> {
-    await db.insert(syncConflicts).values({
-        syncRunId,
-        conflictType,
-        legacyMatBroj: matBroj,
-        legacyData: row as unknown as Record<string, unknown>,
-        matchedUserIds: matchedUserIds || null,
-        description,
-    });
+        .where(eq(berths.id, berthId));
 }

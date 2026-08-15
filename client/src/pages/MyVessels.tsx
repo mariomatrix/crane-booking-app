@@ -30,6 +30,7 @@ export default function MyVessels() {
 
     // Form state
     const [name, setName] = useState("");
+    const [registration, setRegistration] = useState("");
     const [type, setType] = useState<"jedrilica" | "motorni" | "katamaran" | "ostalo">("motorni");
     const [length, setLength] = useState("");
     const [width, setWidth] = useState("");
@@ -61,6 +62,7 @@ export default function MyVessels() {
 
     const resetForm = () => {
         setName("");
+        setRegistration("");
         setType("motorni");
         setLength("");
         setWidth("");
@@ -72,6 +74,7 @@ export default function MyVessels() {
         e.preventDefault();
         createMutation.mutate({
             name,
+            registration: registration || undefined,
             type,
             lengthM: length ? Number(length) : undefined,
             beamM: width ? Number(width) : undefined,
@@ -125,9 +128,15 @@ export default function MyVessels() {
                                         </DialogDescription>
                                     </DialogHeader>
                                     <div className="grid gap-4 py-4">
-                                        <div className="grid gap-2">
-                                            <Label htmlFor="name">{t.vessels.vesselName} *</Label>
-                                            <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="name">{t.vessels.vesselName} *</Label>
+                                                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="registration">Registracijska oznaka</Label>
+                                                <Input id="registration" placeholder="npr. ST-1234 ili KS-9923" value={registration} onChange={(e) => setRegistration(e.target.value)} />
+                                            </div>
                                         </div>
                                         <div className="grid gap-2">
                                             <Label>{t.vessels.vesselType} *</Label>
@@ -196,10 +205,17 @@ export default function MyVessels() {
                             <Card key={vessel.id}>
                                 <CardHeader className="pb-2">
                                     <div className="flex items-start justify-between">
-                                        <CardTitle className="text-lg flex items-center gap-2">
-                                            <Ship className="h-5 w-5 text-primary" />
-                                            {vessel.name}
-                                        </CardTitle>
+                                        <div className="flex flex-col gap-1">
+                                            <CardTitle className="text-lg flex items-center gap-2">
+                                                <Ship className="h-5 w-5 text-primary" />
+                                                {vessel.name}
+                                            </CardTitle>
+                                            {vessel.registration && (
+                                                <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900 w-fit">
+                                                    {vessel.registration}
+                                                </span>
+                                            )}
+                                        </div>
                                         <Button
                                             variant="ghost"
                                             size="icon"
