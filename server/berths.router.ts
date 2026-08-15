@@ -287,7 +287,33 @@ export const berthsRouter = router({
         }),
 
     /**
-     * Dodjela plovila i člana na vez (kreiranje ugovora/dodjele)
+     * Provjera nalazi li se plovilo već na nekom vezu
+     */
+    checkVesselBerth: operatorProcedure
+        .input(z.object({ vesselId: z.string().uuid() }))
+        .query(async ({ input }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
+
+            const [existing] = await db
+                .select({
+                    assignmentId: berthAssignments.id,
+                    berthId: berthAssignments.berthId,
+                    berthCode: berths.code,
+                    vesselName: vessels.name,
+                    vesselRegistration: vessels.registration,
+                })
+                .from(berthAssignments)
+                .innerJoin(berths, eq(berthAssignments.berthId, berths.id))
+                .innerJoin(vessels, eq(berthAssignments.vesselId, vessels.id))
+                .where(and(eq(berthAssignments.vesselId, input.vesselId), eq(berthAssignments.isActive, true)))
+                .limit(1);
+
+            return existing || null;
+        }),
+
+    /**
+     * Dodjela plovila i člana na vez (s provjerom premještanja)
      */
     assignVessel: operatorProcedure
         .input(
@@ -299,19 +325,57 @@ export const berthsRouter = router({
                 contractNumber: z.string().optional(),
                 startDate: z.date().optional(),
                 notes: z.string().optional(),
+                forceRelocate: z.boolean().optional().default(false),
             })
         )
         .mutation(async ({ input, ctx }) => {
             const db = await getDb();
             if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
 
-            // Deaktiviraj prethodne aktivne dodjele za ovaj vez
+            // 1. Provjeri nalazi li se plovilo već na nekom drugom vezu
+            const existingVesselAssignment = await db
+                .select({
+                    assignmentId: berthAssignments.id,
+                    berthId: berthAssignments.berthId,
+                    berthCode: berths.code,
+                })
+                .from(berthAssignments)
+                .innerJoin(berths, eq(berthAssignments.berthId, berths.id))
+                .where(and(eq(berthAssignments.vesselId, input.vesselId), eq(berthAssignments.isActive, true)))
+                .limit(1);
+
+            if (existingVesselAssignment.length > 0 && existingVesselAssignment[0].berthId !== input.berthId) {
+                if (!input.forceRelocate) {
+                    throw new TRPCError({
+                        code: "CONFLICT",
+                        message: `Plovilo se već nalazi na vezu ${existingVesselAssignment[0].berthCode}.`,
+                    });
+                }
+
+                // Ako je potvrđeno premještanje: oslobodi stari vez
+                await db
+                    .update(berths)
+                    .set({ status: "vacant", updatedAt: new Date() })
+                    .where(eq(berths.id, existingVesselAssignment[0].berthId));
+
+                await db
+                    .update(berthAssignments)
+                    .set({
+                        isActive: false,
+                        endDate: new Date(),
+                        notes: `Automatski premješteno na novi vez (${input.notes || ""})`.trim(),
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(berthAssignments.id, existingVesselAssignment[0].assignmentId));
+            }
+
+            // 2. Deaktiviraj prethodne aktivne dodjele za ciljani novi vez
             await db
                 .update(berthAssignments)
                 .set({ isActive: false, endDate: new Date(), updatedAt: new Date() })
                 .where(and(eq(berthAssignments.berthId, input.berthId), eq(berthAssignments.isActive, true)));
 
-            // Kreiraj novu aktivnu dodjelu
+            // 3. Kreiraj novu aktivnu dodjelu
             const [assignment] = await db
                 .insert(berthAssignments)
                 .values({
@@ -327,7 +391,7 @@ export const berthsRouter = router({
                 })
                 .returning();
 
-            // Ažuriraj status veza
+            // 4. Ažuriraj status novog veza
             const newStatus = input.assignmentType === "transit_guest" ? "transit" : "occupied";
             await db
                 .update(berths)

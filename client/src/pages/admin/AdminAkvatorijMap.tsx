@@ -1,14 +1,12 @@
 /**
- * PŠD Špinut — Digitalni blizanac akvatorija & Operativno upravljanje vezovima
+ * PŠD Špinut — Interaktivni shematski akvatorij & Upravljanje vezovima
  * 
- * Sadrži:
- * 1. Zračni Digital Twin (Georeferencirani tlocrt prema snimku iz zraka i katastru)
- * 2. Operativnu ploču gatova (Čitljive kartice fiksne veličine 145x46px s 2D scrollom)
- * 3. Suhi vez & Plato (Arla 1, 2, 3, Servisna zona, Plato)
- * 4. Pametnu tražilicu s auto-fokusom i skrolanjem
- * 5. Brze akcije nad vezom (dodjela, premještanje, dugovanje, status, karton člana)
+ * 1. Organski CSS/DOM shematski prikaz lučice (Sjeverni lukobran gore, Zapadna obala lijevo, Gatovi 1-12 u sredini, Suhi vez)
+ * 2. Pametna tražilica s auto-fokusom i skrolanjem
+ * 3. Pretraživi Combobox za dodjelu plovila s provjerom premještanja (sprječavanje višestrukih vezova)
+ * 4. Puna podrška za operativni rad u realnom vremenu (14 gatova, 811 morskih vezova, suhi dokovi)
  */
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +19,16 @@ import {
     DialogDescription,
     DialogFooter,
 } from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
     Select,
     SelectContent,
@@ -37,9 +45,6 @@ import {
 } from "@/components/ui/sheet";
 import {
     Search,
-    ZoomIn,
-    ZoomOut,
-    RotateCcw,
     Anchor,
     Ship,
     User,
@@ -50,19 +55,15 @@ import {
     AlertTriangle,
     CheckCircle2,
     Wrench,
-    Clock,
     X,
-    Filter,
-    Layers,
     ExternalLink,
     Plus,
-    Maximize2,
     Compass,
-    MapPin,
-    ArrowRight,
-    MoveRight,
     SlidersHorizontal,
     Table,
+    ArrowRightLeft,
+    Layers,
+    LayoutGrid,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
@@ -74,7 +75,7 @@ const STATUS_CONFIG: Record<
 > = {
     vacant: {
         label: "Slobodan vez",
-        bg: "bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100/80",
+        bg: "bg-emerald-50/90 dark:bg-emerald-950/40 hover:bg-emerald-100",
         border: "border-emerald-500/80 dark:border-emerald-600",
         text: "text-emerald-800 dark:text-emerald-200",
         fill: "#10b981",
@@ -83,7 +84,7 @@ const STATUS_CONFIG: Record<
     },
     occupied: {
         label: "Zauzet (Član)",
-        bg: "bg-blue-50/90 dark:bg-blue-950/40 hover:bg-blue-100/90",
+        bg: "bg-blue-50/95 dark:bg-blue-950/40 hover:bg-blue-100",
         border: "border-blue-500/80 dark:border-blue-600",
         text: "text-blue-900 dark:text-blue-100",
         fill: "#3b82f6",
@@ -149,12 +150,25 @@ export default function AdminAkvatorijMap() {
 
     const assignVesselMutation = trpc.berths.assignVessel.useMutation({
         onSuccess: () => {
-            toast.success("Plovilo uspješno dodijeljeno na vez");
+            toast.success("Plovilo uspješno postavljeno na vez");
             setIsAssignModalOpen(false);
+            setRelocationConflict(null);
             refetch();
             setSelectedBerth(null);
         },
-        onError: (err) => toast.error(`Greška: ${err.message}`),
+        onError: (err) => {
+            if (err.message.includes("se već nalazi na vezu")) {
+                // Konflikt - otvori dijalog za potvrdu premještanja
+                const targetVessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
+                setRelocationConflict({
+                    vesselName: targetVessel?.vesselName || targetVessel?.vesselRegistration || "Odabrano plovilo",
+                    vesselRegistration: targetVessel?.vesselRegistration || "",
+                    message: err.message,
+                });
+            } else {
+                toast.error(`Greška: ${err.message}`);
+            }
+        },
     });
 
     const unassignVesselMutation = trpc.berths.unassignVessel.useMutation({
@@ -167,7 +181,7 @@ export default function AdminAkvatorijMap() {
     });
 
     // Stanja UI-ja
-    const [viewMode, setViewMode] = useState<"board" | "aerial" | "table">("board");
+    const [viewMode, setViewMode] = useState<"schematic" | "table">("schematic");
     const [selectedPierCode, setSelectedPierCode] = useState<string>("ALL");
     const [statusFilter, setStatusFilter] = useState<string>("ALL");
     const [searchQuery, setSearchQuery] = useState<string>("");
@@ -175,14 +189,22 @@ export default function AdminAkvatorijMap() {
 
     const [selectedBerth, setSelectedBerth] = useState<any | null>(null);
     const [pendingStatus, setPendingStatus] = useState<string>("");
+
+    // Modal za dodjelu plovila & pretraživi Combobox
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+    const [vesselSearchQuery, setVesselSearchQuery] = useState("");
     const [selectedVesselId, setSelectedVesselId] = useState<string>("");
     const [contractNumber, setContractNumber] = useState<string>("");
+    const [relocationConflict, setRelocationConflict] = useState<{
+        vesselName: string;
+        vesselRegistration: string;
+        message: string;
+    } | null>(null);
 
-    // Ref za automatsko skrolanje do pronađenog veza
+    // Refovi za auto-skrolanje
     const berthRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-    // Tražilica i auto-fokus
+    // Pametna tražilica po akvatoriju
     const searchResults = useMemo(() => {
         if (!searchQuery.trim() || !mapData?.piers) return [];
         const q = searchQuery.toLowerCase().trim();
@@ -208,7 +230,6 @@ export default function AdminAkvatorijMap() {
         setHighlightedBerthId(berth.id);
         setSelectedBerth(berth);
 
-        // Ako smo u "board" prikazu, automatski odskrolaj do tog elementa
         setTimeout(() => {
             const el = berthRefs.current[berth.id];
             if (el) {
@@ -217,7 +238,22 @@ export default function AdminAkvatorijMap() {
         }, 100);
     };
 
-    // Filtrirani podaci po gatu i statusu
+    // Filtriranje plovila u Comboboxu modala za dodjelu
+    const filteredAssignableVessels = useMemo(() => {
+        if (!assignableVessels) return [];
+        if (!vesselSearchQuery.trim()) return assignableVessels;
+        const q = vesselSearchQuery.toLowerCase().trim();
+
+        return assignableVessels.filter((v) => {
+            const reg = v.vesselRegistration?.toLowerCase() || "";
+            const name = v.vesselName?.toLowerCase() || "";
+            const owner = (v.ownerName || `${v.ownerFirstName} ${v.ownerLastName}`).toLowerCase();
+            const oib = v.ownerOib || "";
+            return reg.includes(q) || name.includes(q) || owner.includes(q) || oib.includes(q);
+        });
+    }, [assignableVessels, vesselSearchQuery]);
+
+    // Podaci za prikaz gatova
     const displayedPiers = useMemo(() => {
         if (!mapData?.piers) return [];
         let piers = mapData.piers;
@@ -238,11 +274,19 @@ export default function AdminAkvatorijMap() {
         });
     }, [mapData, selectedPierCode, statusFilter]);
 
+    // Izdvojeni Lukobran (L) i Zapadna obala (ZO)
+    const lukobranPier = useMemo(() => mapData?.piers.find((p) => p.code === "L"), [mapData]);
+    const zapadnaObalaPier = useMemo(() => mapData?.piers.find((p) => p.code === "ZO"), [mapData]);
+    const verticalPiers = useMemo(
+        () => displayedPiers.filter((p) => p.code.startsWith("G")),
+        [displayedPiers]
+    );
+
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center min-h-[600px] gap-4">
                 <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                <p className="text-muted-foreground font-medium">Učitavanje digitalnog modela akvatorija PŠD Špinut...</p>
+                <p className="text-muted-foreground font-medium">Učitavanje shematskog akvatorija PŠD Špinut...</p>
             </div>
         );
     }
@@ -258,8 +302,8 @@ export default function AdminAkvatorijMap() {
     };
 
     return (
-        <div className="flex flex-col h-[calc(100vh-4rem)] p-3 gap-3 bg-slate-100/70 dark:bg-slate-950/70 overflow-hidden">
-            {/* ─── Gornja kontrolna traka i pametna tražilica ────────────────── */}
+        <div className="flex flex-col h-[calc(100vh-4rem)] p-3 gap-3 bg-slate-100/80 dark:bg-slate-950/80 overflow-hidden">
+            {/* ─── Kontrolna traka i pametna tražilica ───────────────────────── */}
             <div className="bg-card border rounded-xl p-3.5 shadow-sm flex flex-col gap-3 shrink-0">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
@@ -269,21 +313,21 @@ export default function AdminAkvatorijMap() {
                         <div>
                             <div className="flex items-center gap-2">
                                 <h1 className="text-lg font-bold tracking-tight text-foreground">
-                                    PŠD Špinut — Akvatorij & Vezovi
+                                    PŠD Špinut — Upravljanje Akvatorijem & Vezovima
                                 </h1>
                                 <Badge variant="outline" className="bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 font-semibold text-xs">
-                                    811 Vezova u moru
+                                    811 Morskih vezova
                                 </Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                                Digitalni model 14 gatova, lukobrana i platoa lučice Špinut s brzim pregledom statusa i plovila
+                                Interaktivni shematski prikaz svih 14 cjelina (Lukobran, Zapadna obala, Gatovi 1–12)
                             </p>
                         </div>
                     </div>
 
-                    {/* Pretraga s brzim rezultatima */}
+                    {/* Pretraga s auto-fokusom */}
                     <div className="flex items-center gap-2">
-                        <div className="relative w-72">
+                        <div className="relative w-80">
                             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                             <Input
                                 placeholder="Traži reg. (ST-1234), brod, člana, OIB..."
@@ -300,7 +344,7 @@ export default function AdminAkvatorijMap() {
                                 </button>
                             )}
 
-                            {/* Dropdown s brzim rezultatima pretrage */}
+                            {/* Dropdown rezultati pretrage */}
                             {searchResults.length > 0 && searchQuery.trim().length >= 2 && (
                                 <div className="absolute top-10 left-0 right-0 z-50 bg-popover border rounded-lg shadow-xl max-h-72 overflow-y-auto p-1 text-xs">
                                     <div className="px-2 py-1 text-[10px] font-semibold text-muted-foreground uppercase border-b">
@@ -364,23 +408,15 @@ export default function AdminAkvatorijMap() {
                             </SelectContent>
                         </Select>
 
-                        {/* Prebacivač načina prikaza */}
+                        {/* Prebacivač prikaza */}
                         <div className="flex border rounded-lg overflow-hidden shrink-0 bg-muted/30">
                             <Button
                                 size="sm"
-                                variant={viewMode === "board" ? "default" : "ghost"}
-                                onClick={() => setViewMode("board")}
+                                variant={viewMode === "schematic" ? "default" : "ghost"}
+                                onClick={() => setViewMode("schematic")}
                                 className="h-9 px-3 text-xs rounded-none font-semibold"
                             >
-                                <SlidersHorizontal className="w-3.5 h-3.5 mr-1.5" /> Operativna ploča
-                            </Button>
-                            <Button
-                                size="sm"
-                                variant={viewMode === "aerial" ? "default" : "ghost"}
-                                onClick={() => setViewMode("aerial")}
-                                className="h-9 px-3 text-xs rounded-none font-semibold"
-                            >
-                                <Layers className="w-3.5 h-3.5 mr-1.5" /> Zračni tlocrt
+                                <LayoutGrid className="w-3.5 h-3.5 mr-1.5" /> Shema privezišta
                             </Button>
                             <Button
                                 size="sm"
@@ -396,7 +432,7 @@ export default function AdminAkvatorijMap() {
 
                 {/* Traka sa statistikom u boji */}
                 <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t text-xs">
-                    <span className="font-semibold text-muted-foreground mr-1">Pregled stanja:</span>
+                    <span className="font-semibold text-muted-foreground mr-1">Stanje u moru:</span>
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300 font-medium">
                         <span className="w-2 h-2 rounded-full bg-blue-500" />
                         <span>Zauzeto (Član):</span>
@@ -414,260 +450,229 @@ export default function AdminAkvatorijMap() {
                     </div>
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 font-medium">
                         <span className="w-2 h-2 rounded-full bg-rose-500" />
-                        <span>Dugovanje / Blokada:</span>
+                        <span>Dugovanje:</span>
                         <strong>{stats.debtBlock}</strong>
                     </div>
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium">
                         <span className="w-2 h-2 rounded-full bg-slate-500" />
-                        <span>Servis muringa:</span>
+                        <span>Servis:</span>
                         <strong>{stats.maintenance}</strong>
                     </div>
                 </div>
             </div>
 
-            {/* ─── Prikaz 1: OPERATIVNA PLOČA GATOVA (2D Scrollable Board) ────────── */}
-            {viewMode === "board" && (
+            {/* ─── Prikaz 1: ORGANSKA SHEMA PRIVEZIŠTA (Pure CSS/DOM Harbor Board) ── */}
+            {viewMode === "schematic" && (
                 <div className="flex-1 bg-card border rounded-xl shadow-sm overflow-hidden flex flex-col">
-                    {/* Horizontalni scroll kontejner za sve gatove */}
-                    <div className="flex-1 overflow-x-auto overflow-y-auto p-4 flex gap-6 select-none bg-slate-50/60 dark:bg-slate-950/40">
-                        {displayedPiers.map((pier) => {
-                            // Grupiraj vezove po parovima za Strana 1 (lijevo) i Strana 2 (desno)
-                            const totalRows = Math.ceil(pier.totalBerths / 2);
-                            const berthRows: { rowNumber: number; left?: any; right?: any }[] = [];
+                    <div className="flex-1 overflow-x-auto overflow-y-auto p-4 flex flex-col gap-4 select-none bg-slate-50/60 dark:bg-slate-950/40">
+                        
+                        {/* 1. SJEVERNI LUKOBRAN (L - 46 vezova) - Horizontalni ponton na vrhu */}
+                        {lukobranPier && (selectedPierCode === "ALL" || selectedPierCode === "L") && (
+                            <div className="bg-background border-2 border-slate-300 dark:border-slate-800 rounded-xl shadow-sm p-3 flex flex-col gap-2">
+                                <div className="flex items-center justify-between border-b pb-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-6 h-6 rounded-full bg-slate-700 text-white flex items-center justify-center font-bold text-xs">
+                                            L
+                                        </span>
+                                        <h3 className="font-bold text-sm tracking-wide text-foreground">
+                                            ⚓ SJEVERNI LUKOBRAN (L) — 46 vezova
+                                        </h3>
+                                    </div>
+                                    <Badge variant="outline" className="text-xs">
+                                        Popunjenost: {lukobranPier.berths.filter((b) => b.status !== "vacant").length} / {lukobranPier.totalBerths}
+                                    </Badge>
+                                </div>
 
-                            for (let r = 1; r <= totalRows; r++) {
-                                const leftNum = (r - 1) * 2 + 1;
-                                const rightNum = (r - 1) * 2 + 2;
+                                {/* Horizontalni raspored kartica vezova na lukobranu */}
+                                <div className="flex gap-1.5 overflow-x-auto pb-1.5">
+                                    {lukobranPier.berths.map((b) => (
+                                        <BerthCard
+                                            key={b.id}
+                                            berth={b}
+                                            isHighlighted={highlightedBerthId === b.id}
+                                            onSelect={() => {
+                                                setSelectedBerth(b);
+                                                setHighlightedBerthId(b.id);
+                                            }}
+                                            cardRef={(el) => (berthRefs.current[b.id] = el)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
-                                const leftBerth = pier.filteredBerths.find((b) => b.berthNumber === leftNum);
-                                const rightBerth = pier.filteredBerths.find((b) => b.berthNumber === rightNum);
-
-                                berthRows.push({
-                                    rowNumber: r,
-                                    left: leftBerth,
-                                    right: rightBerth,
-                                });
-                            }
-
-                            const occupiedCount = pier.filteredBerths.filter((b) => b.status !== "vacant").length;
-                            const occupancyPercent = Math.round((occupiedCount / pier.totalBerths) * 100) || 0;
-
-                            return (
-                                <div
-                                    key={pier.id}
-                                    className="flex flex-col shrink-0 bg-background border-2 border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden min-w-[340px]"
-                                >
-                                    {/* Zaglavlje Gata */}
+                        {/* 2. SREDIŠNJI AKVATORIJ: ZAPADNA OBALA (Lijevo) + GATOVI 1 DO 12 (Sredina/Desno) */}
+                        <div className="flex gap-4 items-start">
+                            
+                            {/* ZAPADNA OBALA (ZO - 34 veza + Dizalica + 3 Kluba) */}
+                            {zapadnaObalaPier && (selectedPierCode === "ALL" || selectedPierCode === "ZO") && (
+                                <div className="flex flex-col shrink-0 bg-background border-2 border-slate-300 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden w-[340px]">
                                     <div className="bg-slate-800 text-white p-3 flex flex-col gap-1.5">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2">
-                                                <span className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center font-bold text-xs">
-                                                    {pier.code}
+                                                <span className="w-6 h-6 rounded-full bg-amber-500 text-black flex items-center justify-center font-bold text-xs">
+                                                    ZO
                                                 </span>
-                                                <h3 className="font-bold text-sm tracking-wide">{pier.name}</h3>
+                                                <h3 className="font-bold text-sm tracking-wide">Zapadna obala</h3>
                                             </div>
                                             <Badge variant="outline" className="text-white border-slate-600 text-[11px]">
-                                                {pier.totalBerths} vezova
+                                                {zapadnaObalaPier.totalBerths} vezova
                                             </Badge>
                                         </div>
-                                        <div className="flex items-center justify-between text-[11px] text-slate-300">
-                                            <span>Popunjenost: {occupiedCount} / {pier.totalBerths}</span>
-                                            <span className="font-semibold">{occupancyPercent}%</span>
+                                    </div>
+
+                                    {/* Operativna zona: Dizalica 9T & Klubovi */}
+                                    <div className="p-2 bg-muted/40 border-b flex flex-col gap-1.5 text-xs">
+                                        <div className="flex items-center justify-between p-2 rounded-lg bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-900 text-amber-900 dark:text-amber-200 font-semibold">
+                                            <span>🏗️ DIZALICA 9T (Travelift)</span>
+                                            <Badge variant="outline" className="text-[10px] bg-amber-200/60">Operativno</Badge>
                                         </div>
-                                        {/* Progress bar */}
-                                        <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                            <div
-                                                className="h-full bg-blue-500 transition-all duration-300"
-                                                style={{ width: `${occupancyPercent}%` }}
+                                        <div className="grid grid-cols-3 gap-1 text-[10px] text-center font-medium">
+                                            <div className="p-1 rounded bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200">JK Špinut</div>
+                                            <div className="p-1 rounded bg-cyan-100 dark:bg-cyan-950 text-cyan-800 dark:text-cyan-200">RK Špinut</div>
+                                            <div className="p-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200">KŠR Špinut</div>
+                                        </div>
+                                    </div>
+
+                                    {/* Vezovi zapadne obale */}
+                                    <div className="flex flex-col divide-y p-2 gap-1 overflow-y-auto max-h-[600px]">
+                                        {zapadnaObalaPier.berths.map((b) => (
+                                            <BerthCard
+                                                key={b.id}
+                                                berth={b}
+                                                isHighlighted={highlightedBerthId === b.id}
+                                                onSelect={() => {
+                                                    setSelectedBerth(b);
+                                                    setHighlightedBerthId(b.id);
+                                                }}
+                                                cardRef={(el) => (berthRefs.current[b.id] = el)}
                                             />
-                                        </div>
-                                    </div>
-
-                                    {/* Oznake strana (Strana 1 | Broj | Strana 2) */}
-                                    <div className="grid grid-cols-[145px_36px_145px] bg-muted/60 border-b text-[11px] font-semibold text-muted-foreground text-center py-1.5 px-2">
-                                        <span>Strana 1 (Zapad)</span>
-                                        <span>Br</span>
-                                        <span>Strana 2 (Istok)</span>
-                                    </div>
-
-                                    {/* Lista redova i vezova */}
-                                    <div className="flex flex-col divide-y p-2 gap-1 overflow-y-auto max-h-[calc(100vh-18rem)]">
-                                        {berthRows.map((row) => {
-                                            return (
-                                                <div
-                                                    key={row.rowNumber}
-                                                    className="grid grid-cols-[145px_36px_145px] items-center gap-1 py-0.5"
-                                                >
-                                                    {/* Lijevi vez (Strana 1) */}
-                                                    {row.left ? (
-                                                        <BerthCard
-                                                            berth={row.left}
-                                                            isHighlighted={highlightedBerthId === row.left.id}
-                                                            onSelect={() => {
-                                                                setSelectedBerth(row.left);
-                                                                setHighlightedBerthId(row.left.id);
-                                                            }}
-                                                            cardRef={(el) => (berthRefs.current[row.left.id] = el)}
-                                                        />
-                                                    ) : (
-                                                        <div className="h-[46px] rounded-lg border border-dashed border-muted flex items-center justify-center text-[10px] text-muted-foreground">
-                                                            —
-                                                        </div>
-                                                    )}
-
-                                                    {/* Središnji stupić s brojem */}
-                                                    <div className="flex items-center justify-center font-mono font-bold text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 rounded h-7">
-                                                        {row.rowNumber.toString().padStart(2, "0")}
-                                                    </div>
-
-                                                    {/* Desni vez (Strana 2) */}
-                                                    {row.right ? (
-                                                        <BerthCard
-                                                            berth={row.right}
-                                                            isHighlighted={highlightedBerthId === row.right.id}
-                                                            onSelect={() => {
-                                                                setSelectedBerth(row.right);
-                                                                setHighlightedBerthId(row.right.id);
-                                                            }}
-                                                            cardRef={(el) => (berthRefs.current[row.right.id] = el)}
-                                                        />
-                                                    ) : (
-                                                        <div className="h-[46px] rounded-lg border border-dashed border-muted flex items-center justify-center text-[10px] text-muted-foreground">
-                                                            —
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
+                                        ))}
                                     </div>
                                 </div>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
+                            )}
 
-            {/* ─── Prikaz 2: ZRAČNI DIGITAL TWIN (Georeferencirani tlocrt) ──────── */}
-            {viewMode === "aerial" && (
-                <div className="flex-1 bg-card border rounded-xl shadow-sm overflow-hidden flex flex-col p-4">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                            <Layers className="w-5 h-5 text-blue-600" />
-                            <h2 className="text-sm font-bold">Panoramski zračni tlocrt (Lucica 7 — Geometrijski model)</h2>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                            Klikom na pojedini gat automatski se otvara u operativnoj ploči
-                        </span>
-                    </div>
+                            {/* GATOVI 1 DO 12 (Vertikalni pontoni s 2D scrollom) */}
+                            <div className="flex gap-4 overflow-x-auto pb-2 flex-1">
+                                {verticalPiers.map((pier) => {
+                                    const totalRows = Math.ceil(pier.totalBerths / 2);
+                                    const berthRows: { rowNumber: number; left?: any; right?: any }[] = [];
 
-                    <div className="flex-1 bg-sky-950/20 dark:bg-sky-950/50 rounded-xl border border-sky-600/30 relative overflow-hidden flex items-center justify-center">
-                        <svg viewBox="0 0 1600 900" className="w-full h-full">
-                            {/* Vodena površina bazena */}
-                            <defs>
-                                <linearGradient id="aerialSea" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="0%" stopColor="#0284c7" stopOpacity="0.2" />
-                                    <stop offset="100%" stopColor="#0369a1" stopOpacity="0.35" />
-                                </linearGradient>
-                            </defs>
-                            <rect x="20" y="20" width="1560" height="860" rx="12" fill="url(#aerialSea)" stroke="#0284c7" strokeWidth="1.5" />
+                                    for (let r = 1; r <= totalRows; r++) {
+                                        const leftNum = (r - 1) * 2 + 1;
+                                        const rightNum = (r - 1) * 2 + 2;
 
-                            {/* Sjeverni zakrivljeni lukobran (L) */}
-                            <g className="breakwater cursor-pointer" onClick={() => { setSelectedPierCode("L"); setViewMode("board"); }}>
-                                <path
-                                    d="M 120 70 Q 800 50 1520 80 L 1520 115 Q 800 85 120 105 Z"
-                                    fill="#475569"
-                                    stroke="#334155"
-                                    strokeWidth="2"
-                                />
-                                <text x="820" y="98" fill="#ffffff" fontSize="13" fontWeight="bold" textAnchor="middle" letterSpacing="2">
-                                    ⚓ SJEVERNI LUKOBRAN (L) — 46 VEZOVA (KLIKNI ZA OTVARANJE)
-                                </text>
-                            </g>
+                                        const leftBerth = pier.filteredBerths.find((b) => b.berthNumber === leftNum);
+                                        const rightBerth = pier.filteredBerths.find((b) => b.berthNumber === rightNum);
 
-                            {/* Zapadna obala (ZO) + Dizalica + Klubovi */}
-                            <g className="west-coast cursor-pointer" onClick={() => { setSelectedPierCode("ZO"); setViewMode("board"); }}>
-                                <rect x="40" y="80" width="120" height="740" rx="8" fill="#334155" />
-                                <text x="100" y="140" fill="#ffffff" fontSize="12" fontWeight="bold" textAnchor="middle">ZAPADNA OBALA (ZO)</text>
-                                <text x="100" y="158" fill="#94a3b8" fontSize="10" textAnchor="middle">34 veza</text>
+                                        berthRows.push({
+                                            rowNumber: r,
+                                            left: leftBerth,
+                                            right: rightBerth,
+                                        });
+                                    }
 
-                                {/* Dizalica */}
-                                <rect x="50" y="220" width="100" height="50" rx="4" fill="#f59e0b" />
-                                <text x="100" y="245" fill="#000000" fontSize="10" fontWeight="bold" textAnchor="middle">DIZALICA 9T</text>
-                                <text x="100" y="260" fill="#000000" fontSize="8.5" textAnchor="middle">Travelift</text>
-
-                                {/* Klubovi */}
-                                <rect x="50" y="300" width="100" height="28" rx="4" fill="#2563eb" />
-                                <text x="100" y="318" fill="#ffffff" fontSize="9.5" fontWeight="bold" textAnchor="middle">JK Špinut</text>
-
-                                <rect x="50" y="336" width="100" height="28" rx="4" fill="#0891b2" />
-                                <text x="100" y="354" fill="#ffffff" fontSize="9.5" fontWeight="bold" textAnchor="middle">RK Špinut</text>
-
-                                <rect x="50" y="372" width="100" height="28" rx="4" fill="#059669" />
-                                <text x="100" y="390" fill="#ffffff" fontSize="9.5" fontWeight="bold" textAnchor="middle">KŠR Špinut</text>
-                            </g>
-
-                            {/* Južna Obala / Šetalište Bene */}
-                            <rect x="40" y="820" width="1500" height="50" rx="6" fill="#334155" />
-                            <text x="800" y="852" fill="#e2e8f0" fontSize="13" fontWeight="bold" textAnchor="middle" letterSpacing="3">
-                                JUŽNA OBALA — ŠETALIŠTE BENE (PRISTUP GATOVIMA 1–12)
-                            </text>
-
-                            {/* Gatovi 1 do 12 (Projektirani okomiti pontoni) */}
-                            {mapData?.piers
-                                .filter((p) => p.code.startsWith("G"))
-                                .map((pier, idx) => {
-                                    const px = 220 + idx * 108;
-                                    const py = 200;
-                                    const pw = 24;
-                                    const pl = 620;
-
-                                    const occupied = pier.berths.filter((b) => b.status !== "vacant").length;
-                                    const percent = Math.round((occupied / pier.totalBerths) * 100);
+                                    const occupiedCount = pier.filteredBerths.filter((b) => b.status !== "vacant").length;
+                                    const occupancyPercent = Math.round((occupiedCount / pier.totalBerths) * 100) || 0;
 
                                     return (
-                                        <g
+                                        <div
                                             key={pier.id}
-                                            onClick={() => {
-                                                setSelectedPierCode(pier.code);
-                                                setViewMode("board");
-                                            }}
-                                            className="cursor-pointer group"
+                                            className="flex flex-col shrink-0 bg-background border-2 border-slate-200 dark:border-slate-800 rounded-xl shadow-sm overflow-hidden min-w-[340px]"
                                         >
-                                            {/* Pozadinski hover efekt */}
-                                            <rect
-                                                x={px - 20}
-                                                y={py - 30}
-                                                width={pw + 40}
-                                                height={pl + 50}
-                                                rx="8"
-                                                fill="#3b82f6"
-                                                fillOpacity="0"
-                                                className="group-hover:fill-opacity-10 transition-all"
-                                            />
+                                            {/* Zaglavlje Gata */}
+                                            <div className="bg-slate-800 text-white p-3 flex flex-col gap-1.5">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center font-bold text-xs">
+                                                            {pier.code}
+                                                        </span>
+                                                        <h3 className="font-bold text-sm tracking-wide">{pier.name}</h3>
+                                                    </div>
+                                                    <Badge variant="outline" className="text-white border-slate-600 text-[11px]">
+                                                        {pier.totalBerths} vezova
+                                                    </Badge>
+                                                </div>
+                                                <div className="flex items-center justify-between text-[11px] text-slate-300">
+                                                    <span>Popunjenost: {occupiedCount} / {pier.totalBerths}</span>
+                                                    <span className="font-semibold">{occupancyPercent}%</span>
+                                                </div>
+                                                <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-blue-500 transition-all duration-300"
+                                                        style={{ width: `${occupancyPercent}%` }}
+                                                    />
+                                                </div>
+                                            </div>
 
-                                            {/* Ponton tijelo */}
-                                            <rect x={px} y={py} width={pw} height={pl} rx="4" fill="#64748b" stroke="#334155" strokeWidth="1.5" />
+                                            {/* Oznake strana */}
+                                            <div className="grid grid-cols-[145px_36px_145px] bg-muted/60 border-b text-[11px] font-semibold text-muted-foreground text-center py-1.5 px-2">
+                                                <span>Strana 1 (Zapad)</span>
+                                                <span>Br</span>
+                                                <span>Strana 2 (Istok)</span>
+                                            </div>
 
-                                            {/* Broj gata na vrhu */}
-                                            <circle cx={px + pw / 2} cy={py - 12} r="14" fill="#1e293b" stroke="#3b82f6" strokeWidth="2" />
-                                            <text x={px + pw / 2} y={py - 7} fill="#ffffff" fontSize="11" fontWeight="bold" textAnchor="middle">
-                                                {pier.code.replace("G", "")}
-                                            </text>
+                                            {/* Redovi s vezovima */}
+                                            <div className="flex flex-col divide-y p-2 gap-1 overflow-y-auto max-h-[550px]">
+                                                {berthRows.map((row) => (
+                                                    <div
+                                                        key={row.rowNumber}
+                                                        className="grid grid-cols-[145px_36px_145px] items-center gap-1 py-0.5"
+                                                    >
+                                                        {row.left ? (
+                                                            <BerthCard
+                                                                berth={row.left}
+                                                                isHighlighted={highlightedBerthId === row.left.id}
+                                                                onSelect={() => {
+                                                                    setSelectedBerth(row.left);
+                                                                    setHighlightedBerthId(row.left.id);
+                                                                }}
+                                                                cardRef={(el) => (berthRefs.current[row.left.id] = el)}
+                                                            />
+                                                        ) : (
+                                                            <div className="h-[46px] rounded-lg border border-dashed border-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                                                                —
+                                                            </div>
+                                                        )}
 
-                                            {/* Oznaka popunjenosti pri dnu gata */}
-                                            <rect x={px - 16} y={py + pl - 40} width="56" height="24" rx="4" fill="#1e293b" stroke="#475569" />
-                                            <text x={px + pw / 2} y={py + pl - 24} fill="#10b981" fontSize="9.5" fontWeight="bold" textAnchor="middle">
-                                                {occupied}/{pier.totalBerths}
-                                            </text>
-                                        </g>
+                                                        <div className="flex items-center justify-center font-mono font-bold text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800/80 rounded h-7">
+                                                            {row.rowNumber.toString().padStart(2, "0")}
+                                                        </div>
+
+                                                        {row.right ? (
+                                                            <BerthCard
+                                                                berth={row.right}
+                                                                isHighlighted={highlightedBerthId === row.right.id}
+                                                                onSelect={() => {
+                                                                    setSelectedBerth(row.right);
+                                                                    setHighlightedBerthId(row.right.id);
+                                                                }}
+                                                                cardRef={(el) => (berthRefs.current[row.right.id] = el)}
+                                                            />
+                                                        ) : (
+                                                            <div className="h-[46px] rounded-lg border border-dashed border-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                                                                —
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
                                     );
                                 })}
-                        </svg>
+                            </div>
+                        </div>
+
+                        {/* 3. JUŽNA OBALA & ŠETALIŠTE BENE (Poveznica svih gatova) */}
+                        <div className="bg-slate-800 text-slate-300 rounded-xl p-3 text-center text-xs font-semibold tracking-wider flex items-center justify-between">
+                            <span>🚶‍♂️ ŠETALIŠTE BENE — JUŽNA OBALA</span>
+                            <span className="text-slate-400 font-normal">Pristup gatovima 1 do 12 s kopna</span>
+                        </div>
                     </div>
                 </div>
             )}
 
-            {/* ─── Prikaz 3: TABLIČNI POPIS VEZOVA ─────────────────────────────── */}
+            {/* ─── Prikaz 2: TABLIČNI POPIS ────────────────────────────────────── */}
             {viewMode === "table" && (
                 <div className="flex-1 bg-card border rounded-xl shadow-sm overflow-auto p-4">
                     <table className="w-full text-xs text-left border-collapse">
@@ -743,7 +748,7 @@ export default function AdminAkvatorijMap() {
                                     Vez {selectedBerth.code}
                                 </SheetTitle>
                                 <SheetDescription className="text-xs">
-                                    Maksimalne dimenzije veza: <strong>{selectedBerth.maxLoaM}m</strong> dužina x <strong>{selectedBerth.maxBeamM}m</strong> širina x <strong>{selectedBerth.maxDraftM}m</strong> gaz
+                                    Maksimalne dimenzije: <strong>{selectedBerth.maxLoaM}m</strong> LOA x <strong>{selectedBerth.maxBeamM}m</strong> širina x <strong>{selectedBerth.maxDraftM}m</strong> gaz
                                 </SheetDescription>
                             </SheetHeader>
 
@@ -841,10 +846,18 @@ export default function AdminAkvatorijMap() {
                                     </div>
                                     <div>
                                         <h4 className="font-semibold text-sm">Vez je slobodan</h4>
-                                        <p className="text-xs text-muted-foreground">Možete dodijeliti stalno plovilo ili unijeti tranzitnog gosta</p>
+                                        <p className="text-xs text-muted-foreground">Pretražite plovilo i dodijelite ga na ovaj vez</p>
                                     </div>
-                                    <Button size="sm" onClick={() => setIsAssignModalOpen(true)} className="text-xs mt-1 bg-blue-600 hover:bg-blue-700">
-                                        <Plus className="w-4 h-4 mr-1" /> Dodijeli plovilo na vez
+                                    <Button
+                                        size="sm"
+                                        onClick={() => {
+                                            setSelectedVesselId("");
+                                            setVesselSearchQuery("");
+                                            setIsAssignModalOpen(true);
+                                        }}
+                                        className="text-xs mt-1 bg-blue-600 hover:bg-blue-700"
+                                    >
+                                        <Plus className="w-4 h-4 mr-1" /> Dodaj plovilo na vez
                                     </Button>
                                 </div>
                             )}
@@ -880,40 +893,96 @@ export default function AdminAkvatorijMap() {
                 </SheetContent>
             </Sheet>
 
-            {/* ─── Modal za dodjelu plovila ────────────────────────────────────── */}
+            {/* ─── Modal za dodjelu plovila (S PRETRAŽIVIM COMBOBOXOM) ──────────── */}
             <Dialog open={isAssignModalOpen} onOpenChange={setIsAssignModalOpen}>
-                <DialogContent className="sm:max-w-[480px]">
+                <DialogContent className="sm:max-w-[540px]">
                     <DialogHeader>
                         <DialogTitle>Dodjela plovila na vez {selectedBerth?.code}</DialogTitle>
                         <DialogDescription className="text-xs">
-                            Odaberite registrirano plovilo i člana za postavljanje na vez.
+                            Upišite registraciju, naziv broda ili ime člana za brzi pronalazak.
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="flex flex-col gap-4 py-3">
+                    <div className="flex flex-col gap-4 py-2">
+                        {/* Pretraživač plovila (Searchable Combobox) */}
                         <div className="flex flex-col gap-1.5">
-                            <label className="text-xs font-semibold">Plovilo i vlasnik:</label>
-                            <Select value={selectedVesselId} onValueChange={setSelectedVesselId}>
-                                <SelectTrigger className="text-xs">
-                                    <SelectValue placeholder="Odaberite plovilo..." />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-60">
-                                    {assignableVessels?.map((v) => (
-                                        <SelectItem key={v.vesselId} value={v.vesselId}>
-                                            {v.vesselRegistration} — {v.vesselName} ({v.ownerName || `${v.ownerFirstName} ${v.ownerLastName}`}) [{v.vesselLengthM}m]
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <label className="text-xs font-semibold flex items-center justify-between">
+                                <span>Odabir plovila:</span>
+                                <span className="text-[11px] text-muted-foreground">
+                                    Prikazano: {filteredAssignableVessels.length} plovila
+                                </span>
+                            </label>
+                            
+                            <div className="relative">
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    placeholder="Upiši reg. (ST-1234), ime broda ili vlasnika..."
+                                    value={vesselSearchQuery}
+                                    onChange={(e) => setVesselSearchQuery(e.target.value)}
+                                    className="pl-9 h-9 text-xs"
+                                    autoFocus
+                                />
+                                {vesselSearchQuery && (
+                                    <button
+                                        onClick={() => setVesselSearchQuery("")}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Lista filtriranih plovila */}
+                            <div className="border rounded-lg max-h-52 overflow-y-auto divide-y bg-muted/20 text-xs mt-1">
+                                {filteredAssignableVessels.length === 0 ? (
+                                    <div className="p-4 text-center text-muted-foreground text-xs">
+                                        Nema plovila koja odgovaraju upitu "{vesselSearchQuery}"
+                                    </div>
+                                ) : (
+                                    filteredAssignableVessels.map((v) => {
+                                        const isSelected = selectedVesselId === v.vesselId;
+                                        return (
+                                            <div
+                                                key={v.vesselId}
+                                                onClick={() => setSelectedVesselId(v.vesselId)}
+                                                className={`p-2.5 cursor-pointer flex items-center justify-between transition-colors ${
+                                                    isSelected
+                                                        ? "bg-blue-100 dark:bg-blue-950/80 border-l-4 border-blue-600 font-semibold"
+                                                        : "hover:bg-accent"
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2.5">
+                                                    <span className="font-mono font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                                                        {v.vesselRegistration || "BEZ REG"}
+                                                    </span>
+                                                    <div>
+                                                        <p className="font-bold text-foreground">
+                                                            {v.vesselName || "—"}
+                                                        </p>
+                                                        <p className="text-[11px] text-muted-foreground">
+                                                            {v.ownerName || `${v.ownerFirstName || ""} ${v.ownerLastName || ""}`} {v.ownerOib ? `(OIB: ${v.ownerOib})` : ""}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right text-[11px] text-muted-foreground">
+                                                    <span className="block font-medium">{v.vesselLengthM ? `${v.vesselLengthM} m` : ""}</span>
+                                                    <span className="capitalize">{v.vesselType || "Brod"}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
                         </div>
 
+                        {/* Broj ugovora */}
                         <div className="flex flex-col gap-1.5">
                             <label className="text-xs font-semibold">Broj ugovora o vezu:</label>
                             <Input
                                 placeholder="npr. 469/2001 ili UG-2026-0042"
                                 value={contractNumber}
                                 onChange={(e) => setContractNumber(e.target.value)}
-                                className="text-xs"
+                                className="text-xs h-9"
                             />
                         </div>
                     </div>
@@ -925,6 +994,7 @@ export default function AdminAkvatorijMap() {
                         <Button
                             size="sm"
                             disabled={!selectedVesselId || assignVesselMutation.isPending}
+                            className="bg-blue-600 hover:bg-blue-700"
                             onClick={() => {
                                 const vessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
                                 if (!vessel || !selectedBerth) return;
@@ -935,14 +1005,55 @@ export default function AdminAkvatorijMap() {
                                     userId: vessel.ownerId,
                                     contractNumber: contractNumber || undefined,
                                     assignmentType: "permanent_member",
+                                    forceRelocate: false,
                                 });
                             }}
                         >
-                            {assignVesselMutation.isPending ? "Dodjeljujem..." : "Potvrdi dodjelu"}
+                            {assignVesselMutation.isPending ? "Postavljam..." : "Postavi plovilo na vez"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* ─── Dijalog za potvrdu premještanja s drugog veza ───────────────── */}
+            <AlertDialog open={!!relocationConflict} onOpenChange={(open) => !open && setRelocationConflict(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <div className="flex items-center gap-2 text-amber-600">
+                            <AlertTriangle className="w-5 h-5" />
+                            <AlertDialogTitle>Plovilo je već dodijeljeno na vez</AlertDialogTitle>
+                        </div>
+                        <AlertDialogDescription className="text-xs pt-2">
+                            {relocationConflict?.message}
+                            <br /><br />
+                            <strong>Želite li automatski osloboditi prethodni vez i premjestiti plovilo na vez {selectedBerth?.code}?</strong>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setRelocationConflict(null)}>
+                            Odustani
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-amber-600 hover:bg-amber-700 text-white"
+                            onClick={() => {
+                                const vessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
+                                if (!vessel || !selectedBerth) return;
+
+                                assignVesselMutation.mutate({
+                                    berthId: selectedBerth.id,
+                                    vesselId: vessel.vesselId,
+                                    userId: vessel.ownerId,
+                                    contractNumber: contractNumber || undefined,
+                                    assignmentType: "permanent_member",
+                                    forceRelocate: true,
+                                });
+                            }}
+                        >
+                            <ArrowRightLeft className="w-4 h-4 mr-1.5" /> Da, premjesti plovilo
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 }
@@ -968,7 +1079,7 @@ function BerthCard({
         <div
             ref={cardRef}
             onClick={onSelect}
-            className={`h-[46px] w-[145px] rounded-lg border p-1.5 cursor-pointer flex flex-col justify-between transition-all duration-200 ${
+            className={`h-[46px] w-[145px] rounded-lg border p-1.5 cursor-pointer flex flex-col justify-between transition-all duration-200 shrink-0 ${
                 statusCfg.bg
             } ${statusCfg.border} ${
                 isHighlighted
