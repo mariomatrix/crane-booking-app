@@ -12,6 +12,9 @@ import {
     memberMemberships,
     syncRuns,
     syncConflicts,
+    piers,
+    berths,
+    berthAssignments,
 } from "../../drizzle/schema";
 import { fetchAllClan03Members } from "./mssqlQueries";
 import {
@@ -423,6 +426,8 @@ async function syncVessel(
     const lengthM = row.DUZINA_BR ? String(row.DUZINA_BR) : null;
     const beamM = row.SIRINA_BR ? String(row.SIRINA_BR) : null;
 
+    let finalVesselId: string | null = null;
+
     // ─── Razina 1: BROD_BR (registracija) — GLOBALNO JEDINSTVENA ──────
     if (brodBr) {
         const existingVessel = await db
@@ -454,24 +459,22 @@ async function syncVessel(
                 })
                 .where(eq(vessels.id, vessel.id));
             counters.vesselsUpdated++;
-            return;
+            finalVesselId = vessel.id;
+        } else {
+            // Ne postoji → INSERT
+            const [newVessel] = await db.insert(vessels).values({
+                ownerId: userId,
+                name: imeBr || brodBr,
+                type: vesselType,
+                registration: brodBr,
+                lengthM,
+                beamM,
+            }).returning({ id: vessels.id });
+            counters.vesselsCreated++;
+            finalVesselId = newVessel.id;
         }
-
-        // Ne postoji → INSERT
-        await db.insert(vessels).values({
-            ownerId: userId,
-            name: imeBr || brodBr,
-            type: vesselType,
-            registration: brodBr,
-            lengthM,
-            beamM,
-        });
-        counters.vesselsCreated++;
-        return;
-    }
-
-    // ─── Razina 2: IME_BR fallback (bez registracije) ─────────────────
-    if (imeBr) {
+    } else if (imeBr) {
+        // ─── Razina 2: IME_BR fallback (bez registracije) ─────────────────
         const existingByName = await db
             .select({ id: vessels.id })
             .from(vessels)
@@ -494,17 +497,98 @@ async function syncVessel(
                 })
                 .where(eq(vessels.id, existingByName[0].id));
             counters.vesselsUpdated++;
+            finalVesselId = existingByName[0].id;
         } else {
-            await db.insert(vessels).values({
+            const [newVessel] = await db.insert(vessels).values({
                 ownerId: userId,
                 name: imeBr,
                 type: vesselType,
                 lengthM,
                 beamM,
-            });
+            }).returning({ id: vessels.id });
             counters.vesselsCreated++;
+            finalVesselId = newVessel.id;
         }
     }
+
+    // ─── Razina 3: Automatsko mapiranje na vez u akvatoriju ────────────
+    if (finalVesselId && (row.GAT || row.VEZ_BROJ)) {
+        await syncBerthAssignment(db, row, userId, finalVesselId);
+    }
+}
+
+/**
+ * Sinkronizira dodjelu veza iz CLAN03 podataka (GAT, VEZ_BROJ, UGOVOR, DUG)
+ */
+async function syncBerthAssignment(
+    db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+    row: LegacyClan03Row,
+    userId: string,
+    vesselId: string
+): Promise<void> {
+    if (!row.GAT || !row.VEZ_BROJ) return;
+
+    const rawGat = row.GAT.trim().toUpperCase();
+    const rawVez = row.VEZ_BROJ.trim();
+    const vezNum = parseInt(rawVez, 10);
+    if (isNaN(vezNum) || vezNum <= 0) return;
+
+    let prefix = "";
+
+    if (rawGat === "L" || rawGat === "LB" || rawGat === "LUKOBRAN") {
+        prefix = "LUK-";
+    } else if (rawGat === "ZO" || rawGat === "ZAPADNA" || rawGat === "ZAPAD") {
+        prefix = "ZO-";
+    } else {
+        const gatNum = parseInt(rawGat, 10);
+        if (!isNaN(gatNum) && gatNum >= 1 && gatNum <= 12) {
+            prefix = `G${gatNum.toString().padStart(2, "0")}-`;
+        }
+    }
+
+    if (!prefix) return;
+
+    const berthCode = `${prefix}${vezNum.toString().padStart(2, "0")}`;
+
+    // 1. Pronađi vez po šifri
+    const [berth] = await db
+        .select({ id: berths.id })
+        .from(berths)
+        .where(eq(berths.code, berthCode))
+        .limit(1);
+
+    if (!berth) return;
+
+    // 2. Deaktiviraj druge aktivne dodjele za ovaj vez
+    await db
+        .update(berthAssignments)
+        .set({ isActive: false, endDate: new Date(), updatedAt: new Date() })
+        .where(and(eq(berthAssignments.berthId, berth.id), eq(berthAssignments.isActive, true)));
+
+    // 3. Kreiraj novu dodjelu
+    await db.insert(berthAssignments).values({
+        berthId: berth.id,
+        vesselId,
+        userId,
+        assignmentType: "permanent_member",
+        contractNumber: row.UGOVOR?.trim() || null,
+        startDate: new Date(),
+        isActive: true,
+        notes: row.PLAC_DO ? `Plaćeno do: ${row.PLAC_DO}` : undefined,
+    });
+
+    // 4. Postavi status veza
+    const hasDebt = row.DUG !== null && row.DUG !== undefined && row.DUG > 0;
+    const newStatus = hasDebt ? "debt_block" : "occupied";
+
+    await db
+        .update(berths)
+        .set({
+            status: newStatus,
+            notes: hasDebt ? `Dug: ${row.DUG} €` : undefined,
+            updatedAt: new Date(),
+        })
+        .where(eq(berths.id, berth.id));
 }
 
 /**

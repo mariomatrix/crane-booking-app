@@ -694,11 +694,10 @@ async function runMigration() {
                 emailVerifiedAt: new Date(),
             });
         } else {
-            console.log(`Ensuring admin role and updating password: ${admin.email}`);
+            console.log(`Ensuring admin role: ${admin.email}`);
             await db.update(users).set({
                 role: "admin",
-                passwordHash,
-                emailVerifiedAt: new Date(),
+                emailVerifiedAt: existing[0].emailVerifiedAt || new Date(),
                 updatedAt: new Date()
             }).where(eq(users.email, admin.email));
         }

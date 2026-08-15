@@ -37,7 +37,15 @@ export async function fetchAllClan03Members(): Promise<LegacyClan03Row[]> {
             CLAN,
             KLUB,
             Klub2,
-            NAPOMENA
+            NAPOMENA,
+            GAT,
+            VEZ_BROJ,
+            VEZ_TIP,
+            UGOVOR,
+            DUG,
+            PLAC_DO,
+            KOPNO,
+            KOPNOPIS
         FROM CLAN03
         WHERE VRSTA_C IN ('U','B')
           AND ISNULL(KLUB, 0) > 0

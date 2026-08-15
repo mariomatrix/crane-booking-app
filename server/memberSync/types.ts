@@ -29,6 +29,14 @@ export interface LegacyClan03Row {
     KLUB: string | null;
     Klub2: string | null;
     NAPOMENA: string | null;
+    GAT: string | null;
+    VEZ_BROJ: string | null;
+    VEZ_TIP: string | null;
+    UGOVOR: string | null;
+    DUG: number | null;
+    PLAC_DO: string | null;
+    KOPNO: string | null;
+    KOPNOPIS: string | null;
 }
 
 /** Brojači za sync_runs statistiku */
