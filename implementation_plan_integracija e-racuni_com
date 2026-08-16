@@ -1,0 +1,67 @@
+# Plan integracije s e-racuni.com (Eurofaktura API)
+
+Integracija web aplikacije PŠD Špinut s računovodstvenim servisom **e-racuni.com** za automatizirano izdavanje računa, sinkronizaciju članova/partnera po OIB-u, evidenciju uplata i dohvat službenih PDF računa.
+
+---
+
+## Status veze s API-jem
+- ✅ **Testirana i potvrđena veza:** API autentikacija (`MATRIXKIKO`) uspješno vraća `HTTP 200 OK` s podacima organizacije (`Test Imago matrix`, OIB `46372455133`).
+
+---
+
+## Predložene komponente i izmjene
+
+### 1. Baza podataka (PostgreSQL & Drizzle Schema)
+#### [MODIFY] [drizzle/schema.ts](file:///c:/Users/Administrator/GITHUB/crane-booking-app/drizzle/schema.ts)
+- **`invoices` tablica:**
+  - `id` (UUID PK)
+  - `invoiceNumber` (Službeni broj računa iz e-računa, npr. `1-POSL1-1/2026`)
+  - `documentId` (e-racuni interni ID dokumenta, npr. `34:958280`)
+  - `userId` (Poveznica na člana / kupca)
+  - `vesselId` (Poveznica na plovilo)
+  - `reservationId` (Poveznica na operaciju dizalice, ako je primjenjivo)
+  - `berthAssignmentId` (Poveznica na ugovor o vezu, ako je primjenjivo)
+  - `invoiceType` (`crane_operation`, `annual_berth_fee`, `transit_berth`, `membership_fee`, `other`)
+  - `issueDate`, `dueDate`, `dateOfSupply`
+  - `totalNetAmount`, `totalVatAmount`, `totalGrossAmount`, `currency` (`EUR`)
+  - `paymentMethod` (`bank_transfer`, `cash`, `card`, `compensation`)
+  - `paymentStatus` (`unpaid`, `partially_paid`, `paid`, `cancelled`)
+  - `paidAmount`, `paidAt`
+  - `fiscalZki`, `fiscalJir` (Fiskalni podaci)
+  - `pdfUrl` (Poveznica za preuzimanje službenog PDF-a)
+- **`invoice_items` tablica:**
+  - `id`, `invoiceId`, `productCode`, `description`, `quantity`, `unit`, `unitPrice`, `discountPercent`, `vatRate`, `netAmount`, `vatAmount`, `grossAmount`
+
+---
+
+### 2. Backend Servis & tRPC Router
+#### [NEW] [server/services/eRacuniService.ts](file:///c:/Users/Administrator/GITHUB/crane-booking-app/server/services/eRacuniService.ts)
+- **`syncPartner(user)`:** Automatski pronalazi (`PartnerFind`) ili kreira (`PartnerCreate`) partnera u e-računima po OIB-u i imenu.
+- **`createSalesInvoice(params)`:** Šalje zahtjev za izdavanje računa (`SalesInvoiceCreate`) sa stavkama, kupcem, rokom dospijeća i načinom plaćanja.
+- **`getInvoicePdf(documentId)`:** Preuzima službeni PDF račun s QR / HUB3 kodom za uplatu.
+- **`checkPaymentStatus(documentId)`:** Dohvaća status plaćanja i uplate.
+
+#### [NEW] [server/invoices.router.ts](file:///c:/Users/Administrator/GITHUB/crane-booking-app/server/invoices.router.ts)
+- `invoices.list`: Popis svih izdanih računa s filtriranjem po statusu, datumu i članu.
+- `invoices.getById`: Detalji računa sa stavkama i PDF poveznicom.
+- `invoices.createForReservation`: Jedan klik za izdavanje računa nakon završetka dizanja/spuštanja broda.
+- `invoices.createForBerth`: Izdavanje računa za godišnji ugovor o vezu.
+- `invoices.syncPayments`: Sinkronizacija uplata iz e-računa.
+
+---
+
+### 3. Frontend Sučelje (Admin ERP & Pregled računa)
+#### [NEW] [client/src/pages/admin/AdminInvoices.tsx](file:///c:/Users/Administrator/GITHUB/crane-booking-app/client/src/pages/admin/AdminInvoices.tsx)
+- Pregled svih računa, ukupni financijski promet, statusi naplate (Plaćeno / Dospjelo / Otvoreno).
+- Mogućnost filtriranja, pretraživanja i preuzimanja PDF računa.
+- Integracija gumba za automatsko izdavanje računa u kalendaru dizalice (`ReservationModal`) i u kartonu člana (`AdminUserCard`).
+
+---
+
+## Plan verifikacije
+
+### Automatizirani i integracijski testovi:
+1. **Test kreiranja partnera:** Pokretanje skripte koja provjerava i kreira testnog člana u e-računi.com.
+2. **Test izdavanja računa:** Kreiranje testnog računa za dizalicu / vez s provjerom izračuna PDV-a i ukupnog iznosa.
+3. **Test preuzimanja PDF-a:** Provjera dohvata i validnosti PDF dokumenta.
+4. **TypeScript verifikacija:** `pnpm check` (`tsc --noEmit`) s 0 grešaka.
