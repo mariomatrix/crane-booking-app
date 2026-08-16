@@ -126,6 +126,78 @@ async function runMigration() {
     try {
         await migrationClient`
             DO $$ BEGIN
+                CREATE TYPE "public"."invoice_type" AS ENUM('crane_operation', 'annual_berth_fee', 'transit_berth', 'membership_fee', 'other');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."invoice_payment_method" AS ENUM('bank_transfer', 'cash', 'card', 'compensation');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."invoice_payment_status" AS ENUM('unpaid', 'partially_paid', 'paid', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "invoices" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "invoice_number" varchar(50) NOT NULL,
+                "document_id" varchar(50),
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "vessel_id" uuid REFERENCES "vessels"("id"),
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "berth_assignment_id" uuid REFERENCES "berth_assignments"("id"),
+                "invoice_type" "public"."invoice_type" DEFAULT 'crane_operation' NOT NULL,
+                "issue_date" timestamp DEFAULT now() NOT NULL,
+                "due_date" timestamp NOT NULL,
+                "date_of_supply" timestamp DEFAULT now() NOT NULL,
+                "total_net_amount" numeric(10, 2) NOT NULL,
+                "total_vat_amount" numeric(10, 2) DEFAULT '0' NOT NULL,
+                "total_gross_amount" numeric(10, 2) NOT NULL,
+                "currency" varchar(3) DEFAULT 'EUR' NOT NULL,
+                "payment_method" "public"."invoice_payment_method" DEFAULT 'bank_transfer' NOT NULL,
+                "payment_status" "public"."invoice_payment_status" DEFAULT 'unpaid' NOT NULL,
+                "paid_amount" numeric(10, 2) DEFAULT '0' NOT NULL,
+                "paid_at" timestamp,
+                "fiscal_zki" varchar(64),
+                "fiscal_jir" varchar(64),
+                "pdf_url" text,
+                "notes" text,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "invoice_items" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "invoice_id" uuid NOT NULL REFERENCES "invoices"("id") ON DELETE CASCADE,
+                "product_code" varchar(50),
+                "description" text NOT NULL,
+                "quantity" numeric(10, 2) DEFAULT '1' NOT NULL,
+                "unit" varchar(20) DEFAULT 'kom' NOT NULL,
+                "unit_price" numeric(10, 2) NOT NULL,
+                "discount_percent" numeric(5, 2) DEFAULT '0' NOT NULL,
+                "vat_rate" numeric(5, 2) DEFAULT '25' NOT NULL,
+                "net_amount" numeric(10, 2) NOT NULL,
+                "vat_amount" numeric(10, 2) NOT NULL,
+                "gross_amount" numeric(10, 2) NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("Invoices and invoice_items tables verified.");
+    } catch (e: any) {
+        console.warn("Invoices tables verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            DO $$ BEGIN
                 CREATE TYPE "public"."work_order_status" AS ENUM('in_progress', 'completed', 'cancelled');
             EXCEPTION WHEN duplicate_object THEN null;
             END $$;

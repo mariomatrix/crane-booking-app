@@ -36,6 +36,25 @@ export const operationCategoryEnum = pgEnum("operation_category", [
     "maintenance",     // Tehničko održavanje
     "other",           // Ostale operacije
 ]);
+export const invoiceTypeEnum = pgEnum("invoice_type", [
+    "crane_operation",
+    "annual_berth_fee",
+    "transit_berth",
+    "membership_fee",
+    "other",
+]);
+export const invoicePaymentMethodEnum = pgEnum("invoice_payment_method", [
+    "bank_transfer",
+    "cash",
+    "card",
+    "compensation",
+]);
+export const invoicePaymentStatusEnum = pgEnum("invoice_payment_status", [
+    "unpaid",
+    "partially_paid",
+    "paid",
+    "cancelled",
+]);
 
 // ─── Users ───────────────────────────────────────────────────────────
 export const users = pgTable("users", {
@@ -834,4 +853,68 @@ export type Berth = SelectBerth;
 export type InsertBerthAssignment = typeof berthAssignments.$inferInsert;
 export type SelectBerthAssignment = typeof berthAssignments.$inferSelect;
 export type BerthAssignment = SelectBerthAssignment;
+
+// ─── Invoices (Računi & e-racuni.com) ──────────────────────────────────
+export const invoices = pgTable("invoices", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    invoiceNumber: varchar("invoice_number", { length: 50 }).notNull(), // Broj računa iz e-racuni (npr. 1-POSL1-1/2026)
+    documentId: varchar("document_id", { length: 50 }), // e-racuni interni ID (npr. 34:958280)
+    userId: uuid("user_id").notNull().references(() => users.id),
+    vesselId: uuid("vessel_id").references(() => vessels.id),
+    reservationId: uuid("reservation_id").references(() => reservations.id),
+    berthAssignmentId: uuid("berth_assignment_id").references(() => berthAssignments.id),
+    invoiceType: invoiceTypeEnum("invoice_type").default("crane_operation").notNull(),
+    issueDate: timestamp("issue_date").defaultNow().notNull(),
+    dueDate: timestamp("due_date").notNull(),
+    dateOfSupply: timestamp("date_of_supply").defaultNow().notNull(),
+    totalNetAmount: decimal("total_net_amount", { precision: 10, scale: 2 }).notNull(),
+    totalVatAmount: decimal("total_vat_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+    totalGrossAmount: decimal("total_gross_amount", { precision: 10, scale: 2 }).notNull(),
+    currency: varchar("currency", { length: 3 }).default("EUR").notNull(),
+    paymentMethod: invoicePaymentMethodEnum("payment_method").default("bank_transfer").notNull(),
+    paymentStatus: invoicePaymentStatusEnum("payment_status").default("unpaid").notNull(),
+    paidAmount: decimal("paid_amount", { precision: 10, scale: 2 }).default("0").notNull(),
+    paidAt: timestamp("paid_at"),
+    fiscalZki: varchar("fiscal_zki", { length: 64 }),
+    fiscalJir: varchar("fiscal_jir", { length: 64 }),
+    pdfUrl: text("pdf_url"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("invoices_user_id_idx").on(table.userId),
+        invoiceNumberIdx: index("invoices_invoice_number_idx").on(table.invoiceNumber),
+        paymentStatusIdx: index("invoices_payment_status_idx").on(table.paymentStatus),
+        reservationIdIdx: index("invoices_reservation_id_idx").on(table.reservationId),
+    };
+});
+
+export const invoiceItems = pgTable("invoice_items", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    invoiceId: uuid("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
+    productCode: varchar("product_code", { length: 50 }),
+    description: text("description").notNull(),
+    quantity: decimal("quantity", { precision: 10, scale: 2 }).default("1").notNull(),
+    unit: varchar("unit", { length: 20 }).default("kom").notNull(),
+    unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
+    discountPercent: decimal("discount_percent", { precision: 5, scale: 2 }).default("0").notNull(),
+    vatRate: decimal("vat_rate", { precision: 5, scale: 2 }).default("25").notNull(),
+    netAmount: decimal("net_amount", { precision: 10, scale: 2 }).notNull(),
+    vatAmount: decimal("vat_amount", { precision: 10, scale: 2 }).notNull(),
+    grossAmount: decimal("gross_amount", { precision: 10, scale: 2 }).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        invoiceIdIdx: index("invoice_items_invoice_id_idx").on(table.invoiceId),
+    };
+});
+
+export type InsertInvoice = typeof invoices.$inferInsert;
+export type SelectInvoice = typeof invoices.$inferSelect;
+export type Invoice = SelectInvoice;
+
+export type InsertInvoiceItem = typeof invoiceItems.$inferInsert;
+export type SelectInvoiceItem = typeof invoiceItems.$inferSelect;
+export type InvoiceItem = SelectInvoiceItem;
 

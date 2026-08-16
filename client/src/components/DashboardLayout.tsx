@@ -52,6 +52,7 @@ import {
   ChevronRight,
   SlidersHorizontal,
   Tag,
+  Receipt,
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -175,6 +176,7 @@ function DashboardLayoutContent({
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: FileText, label: lang === "hr" ? "Radni nalozi" : "Work Orders", path: "/admin/work-orders" },
+    { icon: Receipt, label: lang === "hr" ? "Računi & e-Računi" : "Invoices & e-Billing", path: "/admin/invoices" },
     { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
     { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },

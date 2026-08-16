@@ -42,6 +42,7 @@ import ReportMemberFeeAdjustments from "@/pages/admin/reports/ReportMemberFeeAdj
 import AdminWorkOrders from "@/pages/admin/AdminWorkOrders";
 import AdminPriceList from "@/pages/admin/AdminPriceList";
 import AdminAkvatorijMap from "@/pages/admin/AdminAkvatorijMap";
+import AdminInvoices from "@/pages/admin/AdminInvoices";
 
 function Router() {
   return (
@@ -120,6 +121,9 @@ function Router() {
       </Route>
       <Route path="/admin/pricelists">
         <AdminLayout><AdminPriceList /></AdminLayout>
+      </Route>
+      <Route path="/admin/invoices">
+        <AdminLayout><AdminInvoices /></AdminLayout>
       </Route>
 
       {/* Reports Routes */}

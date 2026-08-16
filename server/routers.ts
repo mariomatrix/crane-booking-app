@@ -25,6 +25,7 @@ import { userCardRouter } from "./userCard.router";
 import { priceListRouter } from "./priceList.router";
 import { memberSyncRouter } from "./memberSync/memberSync.router";
 import { berthsRouter } from "./berths.router";
+import { invoicesRouter } from "./invoices.router";
 import {
   listCranes,
   getCraneById,
@@ -290,6 +291,7 @@ export const appRouter = router({
   priceList: priceListRouter,
   memberSync: memberSyncRouter,
   berths: berthsRouter,
+  invoices: invoicesRouter,
 
   // ─── Auth ────────────────────────────────────────────────────────────
   auth: router({
