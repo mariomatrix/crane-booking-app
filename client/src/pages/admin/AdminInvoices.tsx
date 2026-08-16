@@ -1,7 +1,7 @@
 /**
  * PŠD Špinut — Upravljanje računima & e-racuni.com integracija
  * 
- * Pregled izdanih računa, automatsko izdavanje računa za dizalicu i vezove,
+ * Pregled izdanih računa, automatsko i ručno izdavanje računa za dizalicu i vezove,
  * preuzimanje PDF računa s 2D barkodom i sinkronizacija uplata iz e-racuni.com.
  */
 import React, { useState, useMemo } from "react";
@@ -101,10 +101,13 @@ export default function AdminInvoices() {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [selectedUserId, setSelectedUserId] = useState<string>("");
     const [userSearchQuery, setUserSearchQuery] = useState("");
-    const [invoiceType, setInvoiceType] = useState<string>("crane_operation");
-    const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash" | "card">("bank_transfer");
+    const [invoiceType, setInvoiceType] = useState<"crane_operation" | "annual_berth_fee" | "transit_berth" | "membership_fee" | "other">("crane_operation");
+    const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash" | "card" | "compensation">("bank_transfer");
+    
+    // Stavka računa
+    const [productCode, setProductCode] = useState("USL-DIZ");
     const [itemDescription, setItemDescription] = useState("Dizanje plovila iz mora");
-    const [itemNetPrice, setItemNetPrice] = useState("100.00");
+    const [itemNetPrice, setItemNetPrice] = useState("120.00");
     const [itemQuantity, setItemQuantity] = useState("1");
     const [invoiceNotes, setInvoiceNotes] = useState("");
 
@@ -135,10 +138,12 @@ export default function AdminInvoices() {
         onError: (err) => toast.error(`Greška pri sinkronizaciji: ${err.message}`),
     });
 
-    const createReservationInvoiceMutation = trpc.invoices.createForReservation.useMutation({
+    const createManualMutation = trpc.invoices.createManual.useMutation({
         onSuccess: (inv) => {
             toast.success(`Račun ${inv.invoiceNumber} uspješno izdan u e-racuni.com!`);
             setIsCreateModalOpen(false);
+            setSelectedUserId("");
+            setUserSearchQuery("");
             refetch();
         },
         onError: (err) => toast.error(`Greška: ${err.message}`),
@@ -147,12 +152,22 @@ export default function AdminInvoices() {
     const handleDownloadPdf = async (invoiceId: string, invoiceNumber: string) => {
         toast.info(`Preuzimanje PDF računa ${invoiceNumber}...`);
         try {
-            // Poziv PDF endpointa
             window.open(`/api/invoices/${invoiceId}/pdf`, "_blank");
         } catch {
             toast.error("Nije uspjelo preuzimanje PDF-a.");
         }
     };
+
+    // Pomoćni izračuni u formi za izdavanje
+    const parsedQty = parseFloat(itemQuantity) || 1;
+    const parsedPrice = parseFloat(itemNetPrice) || 0;
+    const calculatedNet = parsedQty * parsedPrice;
+    const calculatedVat = calculatedNet * 0.25;
+    const calculatedGross = calculatedNet + calculatedVat;
+
+    const selectedUserObj = useMemo(() => {
+        return allUsers.find((u) => u.id === selectedUserId);
+    }, [allUsers, selectedUserId]);
 
     const stats = data?.stats || {
         totalCount: 0,
@@ -160,6 +175,14 @@ export default function AdminInvoices() {
         totalPaidSum: 0,
         unpaidCount: 0,
         paidCount: 0,
+    };
+
+    // Brzi predlošci usluga
+    const setPreset = (code: string, desc: string, price: string, type: any) => {
+        setProductCode(code);
+        setItemDescription(desc);
+        setItemNetPrice(price);
+        setInvoiceType(type);
     };
 
     return (
@@ -200,7 +223,7 @@ export default function AdminInvoices() {
                         onClick={() => setIsCreateModalOpen(true)}
                         className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold"
                     >
-                        <Plus className="w-4 h-4 mr-1.5" /> Izdaj novi račun
+                        <Plus className="w-4 h-4 mr-1.5" /> + Izdaj novi račun
                     </Button>
                 </div>
             </div>
@@ -349,6 +372,13 @@ export default function AdminInvoices() {
                                         <p className="text-xs text-muted-foreground mt-1">
                                             Izdajte prvi račun klikom na gumb "+ Izdaj novi račun"
                                         </p>
+                                        <Button
+                                            size="sm"
+                                            onClick={() => setIsCreateModalOpen(true)}
+                                            className="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
+                                        >
+                                            <Plus className="w-4 h-4 mr-1.5" /> + Izdaj novi račun
+                                        </Button>
                                     </td>
                                 </tr>
                             ) : (
@@ -465,6 +495,231 @@ export default function AdminInvoices() {
                     </table>
                 </div>
             </Card>
+
+            {/* ─── MODAL ZA IZDAVANJE NOVOG RAČUNA (e-racuni.com) ──────────────── */}
+            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+                <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                            <Receipt className="w-5 h-5 text-blue-600" />
+                            Izdavanje novog računa (e-racuni.com)
+                        </DialogTitle>
+                        <DialogDescription className="text-xs">
+                            Odaberite člana/kupca i stavke. Račun će se automatski kreirati u e-racuni.com i u lokalnoj bazi.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex flex-col gap-4 py-2 text-xs">
+                        {/* 1. Odabir člana / kupca */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="font-semibold text-foreground flex items-center justify-between">
+                                <span>1. Odabir člana / kupca:</span>
+                                {selectedUserObj && (
+                                    <span className="text-blue-600 font-bold">
+                                        Odabrano: {selectedUserObj.name || `${selectedUserObj.firstName} ${selectedUserObj.lastName}`}
+                                    </span>
+                                )}
+                            </label>
+                            <div className="relative">
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    placeholder="Upišite ime, prezime ili OIB člana..."
+                                    value={userSearchQuery}
+                                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                                    className="pl-9 h-9 text-xs"
+                                />
+                            </div>
+
+                            {/* Popis pronađenih članova */}
+                            <div className="border rounded-lg max-h-36 overflow-y-auto divide-y bg-muted/20 text-xs mt-1">
+                                {allUsers.length === 0 ? (
+                                    <div className="p-3 text-center text-muted-foreground text-xs">
+                                        Nema pronađenih članova. Upišite pojam za pretragu.
+                                    </div>
+                                ) : (
+                                    allUsers.map((u: any) => {
+                                        const isSelected = selectedUserId === u.id;
+                                        return (
+                                            <div
+                                                key={u.id}
+                                                onClick={() => setSelectedUserId(u.id)}
+                                                className={`p-2 cursor-pointer flex items-center justify-between transition-colors ${
+                                                    isSelected ? "bg-blue-100 dark:bg-blue-950 font-bold border-l-4 border-blue-600" : "hover:bg-accent"
+                                                }`}
+                                            >
+                                                <div>
+                                                    <span className="font-semibold">{u.name || `${u.firstName || ""} ${u.lastName || ""}`}</span>
+                                                    {u.oib && <span className="font-mono text-muted-foreground ml-2">OIB: {u.oib}</span>}
+                                                </div>
+                                                <span className="text-[11px] text-muted-foreground">{u.city || "Split"}</span>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                        {/* 2. Brzi predlošci usluga */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="font-semibold text-foreground">2. Brzi odabir usluge:</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-DIZ", "Dizanje plovila iz mora", "120.00", "crane_operation")}
+                                >
+                                    🏗️ Dizanje (120 €)
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-DIZ", "Spuštanje plovila u more", "120.00", "crane_operation")}
+                                >
+                                    ⚓ Spuštanje (120 €)
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-PRANJE", "Pranje podvodnog dijela trupa", "40.00", "crane_operation")}
+                                >
+                                    🧼 Pranje (40 €)
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-VEZ", "Godišnja naknada za vez", "500.00", "annual_berth_fee")}
+                                >
+                                    ⛵ Godišnji vez (500 €)
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* 3. Stavka računa & Cijena */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-muted/30 rounded-lg border">
+                            <div className="sm:col-span-2 flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Opis usluge na računu:</label>
+                                <Input
+                                    value={itemDescription}
+                                    onChange={(e) => setItemDescription(e.target.value)}
+                                    className="h-8 text-xs"
+                                    placeholder="Opis usluge..."
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Šifra artikla (e-računi):</label>
+                                <Input
+                                    value={productCode}
+                                    onChange={(e) => setProductCode(e.target.value)}
+                                    className="h-8 text-xs font-mono"
+                                />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Količina:</label>
+                                <Input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    value={itemQuantity}
+                                    onChange={(e) => setItemQuantity(e.target.value)}
+                                    className="h-8 text-xs"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Cijena bez PDV-a (Neto €):</label>
+                                <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={itemNetPrice}
+                                    onChange={(e) => setItemNetPrice(e.target.value)}
+                                    className="h-8 text-xs font-mono font-bold"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Način plaćanja:</label>
+                                <Select value={paymentMethod} onValueChange={(val: any) => setPaymentMethod(val)}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="bank_transfer">Virman / Transakcijski račun</SelectItem>
+                                        <SelectItem value="cash">Gotovina</SelectItem>
+                                        <SelectItem value="card">Kartica</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        {/* 4. Rekapitulacija iznosa */}
+                        <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-950/60 rounded-lg border border-blue-200 dark:border-blue-900">
+                            <div>
+                                <span className="text-muted-foreground block text-[11px]">Osnovica (Neto): <strong>{calculatedNet.toFixed(2)} €</strong></span>
+                                <span className="text-muted-foreground block text-[11px]">PDV (25%): <strong>{calculatedVat.toFixed(2)} €</strong></span>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-[11px] text-muted-foreground block font-medium">UKUPNO S PDV-OM:</span>
+                                <span className="text-lg font-bold font-mono text-blue-600 dark:text-blue-400">
+                                    {calculatedGross.toFixed(2)} €
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setIsCreateModalOpen(false)}>
+                            Odustani
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!selectedUserId || !itemDescription.trim() || createManualMutation.isPending}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                            onClick={() => {
+                                if (!selectedUserId) {
+                                    toast.error("Molimo odaberite člana/kupca");
+                                    return;
+                                }
+
+                                createManualMutation.mutate({
+                                    userId: selectedUserId,
+                                    invoiceType,
+                                    paymentMethod,
+                                    items: [
+                                        {
+                                            productCode,
+                                            description: itemDescription,
+                                            quantity: parsedQty,
+                                            unit: "kom",
+                                            netPrice: parsedPrice,
+                                            vatRate: 25,
+                                        }
+                                    ],
+                                    notes: invoiceNotes || undefined,
+                                });
+                            }}
+                        >
+                            {createManualMutation.isPending ? (
+                                <>
+                                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                    Izdajem račun u e-računima...
+                                </>
+                            ) : (
+                                <>
+                                    <Receipt className="w-4 h-4 mr-1.5" />
+                                    Izdaj račun u e-racuni.com
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* ─── Modal za detalje računa ─────────────────────────────────────── */}
             <Dialog open={!!selectedInvoiceId} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>

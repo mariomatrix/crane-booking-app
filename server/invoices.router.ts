@@ -162,6 +162,123 @@ export const invoicesRouter = router({
         }),
 
     /**
+     * Ručno izdavanje računa (Direct Invoicing)
+     */
+    createManual: operatorProcedure
+        .input(
+            z.object({
+                userId: z.string().uuid(),
+                vesselId: z.string().uuid().optional(),
+                invoiceType: z.enum(["crane_operation", "annual_berth_fee", "transit_berth", "membership_fee", "other"]).default("crane_operation"),
+                paymentMethod: z.enum(["bank_transfer", "cash", "card", "compensation"]).default("bank_transfer"),
+                items: z.array(
+                    z.object({
+                        productCode: z.string().optional().default("USL-DIZ"),
+                        description: z.string(),
+                        quantity: z.number().default(1),
+                        unit: z.string().default("kom"),
+                        netPrice: z.number(),
+                        vatRate: z.number().default(25),
+                    })
+                ).min(1),
+                notes: z.string().optional(),
+            })
+        )
+        .mutation(async ({ input }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
+
+            const [user] = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+            if (!user) {
+                throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen" });
+            }
+
+            let vessel = null;
+            if (input.vesselId) {
+                const [v] = await db.select().from(vessels).where(eq(vessels.id, input.vesselId)).limit(1);
+                vessel = v;
+            }
+
+            const invoiceNotes = input.notes || "PŠD Špinut lučke usluge";
+
+            let eRacuniResult;
+            try {
+                eRacuniResult = await eRacuniService.createSalesInvoice({
+                    userId: user.id,
+                    userName: user.name || `${user.firstName || ""} ${user.lastName || ""}`,
+                    userFirstName: user.firstName || undefined,
+                    userLastName: user.lastName || undefined,
+                    userOib: user.oib || undefined,
+                    userEmail: user.email || undefined,
+                    userPhone: user.phone || undefined,
+                    userAddress: user.address || undefined,
+                    userCity: user.city || "Split",
+                    userPostalCode: user.postalCode || "21000",
+                    isLegalEntity: user.isLegalEntity,
+                    companyName: user.companyName || undefined,
+                    invoiceType: input.invoiceType,
+                    paymentMethod: input.paymentMethod,
+                    notes: invoiceNotes,
+                    items: input.items.map((i) => ({
+                        productCode: i.productCode,
+                        description: i.description,
+                        quantity: i.quantity,
+                        unit: i.unit,
+                        netPrice: i.netPrice,
+                        vatRate: i.vatRate,
+                    })),
+                });
+            } catch (apiErr: any) {
+                throw new TRPCError({
+                    code: "BAD_REQUEST",
+                    message: `Greška e-računi servisa: ${apiErr.message}`,
+                });
+            }
+
+            const [createdInvoice] = await db
+                .insert(invoices)
+                .values({
+                    invoiceNumber: eRacuniResult.invoiceNumber,
+                    documentId: eRacuniResult.documentId,
+                    userId: user.id,
+                    vesselId: vessel?.id || null,
+                    invoiceType: input.invoiceType,
+                    issueDate: new Date(),
+                    dueDate: new Date(eRacuniResult.dueDate),
+                    dateOfSupply: new Date(),
+                    totalNetAmount: eRacuniResult.totalNetAmount.toFixed(2),
+                    totalVatAmount: eRacuniResult.totalVatAmount.toFixed(2),
+                    totalGrossAmount: eRacuniResult.totalGrossAmount.toFixed(2),
+                    currency: "EUR",
+                    paymentMethod: input.paymentMethod,
+                    paymentStatus: "unpaid",
+                    notes: invoiceNotes,
+                })
+                .returning();
+
+            for (const item of input.items) {
+                const net = Number((item.quantity * item.netPrice).toFixed(2));
+                const vat = Number((net * (item.vatRate / 100)).toFixed(2));
+                const gross = Number((net + vat).toFixed(2));
+
+                await db.insert(invoiceItems).values({
+                    invoiceId: createdInvoice.id,
+                    productCode: item.productCode,
+                    description: item.description,
+                    quantity: item.quantity.toString(),
+                    unit: item.unit,
+                    unitPrice: item.netPrice.toFixed(2),
+                    vatRate: item.vatRate.toFixed(2),
+                    netAmount: net.toFixed(2),
+                    vatAmount: vat.toFixed(2),
+                    grossAmount: gross.toFixed(2),
+                });
+            }
+
+            return createdInvoice;
+        }),
+
+    /**
      * Izdavanje računa za operaciju dizalice (Povezano s rezervacijom i e-racuni.com)
      */
     createForReservation: operatorProcedure
