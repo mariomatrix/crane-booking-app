@@ -250,7 +250,7 @@ export class ERacuniService {
 
         // 5. Slanje na SalesInvoiceCreate
         const invoicePayload: any = {
-            salesInvoice: {
+            SalesInvoice: {
                 buyerPartnerID: partnerDocumentId,
                 date: docDate,
                 dateDue: dateDue,
@@ -259,7 +259,7 @@ export class ERacuniService {
                 paymentMethod: mappedPaymentMethod,
                 currency: params.currency || "EUR",
                 remarks: params.notes || "PŠD Špinut lučke usluge",
-                items: formattedItems,
+                Items: formattedItems,
             }
         };
 
