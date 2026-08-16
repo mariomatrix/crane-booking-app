@@ -144,7 +144,7 @@ export class ERacuniService {
         // 2. Ako ne postoji, kreiraj novog partnera
         const displayName = user.name || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.companyName || "Član PŠD Špinut";
         const partnerPayload: any = {
-            Partner: {
+            partner: {
                 firstName: user.firstName || displayName.split(" ")[0] || "Član",
                 lastName: user.lastName || displayName.split(" ").slice(1).join(" ") || "Špinut",
                 companyName: user.isLegalEntity ? (user.companyName || displayName) : undefined,
@@ -152,7 +152,7 @@ export class ERacuniService {
                 personalID: cleanOib || undefined,
                 vatRegistration: user.isLegalEntity && cleanOib ? cleanOib : undefined,
                 eMail: cleanEmail || undefined,
-                Addresses: [
+                addresses: [
                     {
                         street: user.address || "Lučica Špinut bb",
                         postalCode: user.postalCode || "21000",
@@ -238,19 +238,19 @@ export class ERacuniService {
             calculatedGross += gross;
 
             return {
+                productCode: item.productCode || item.itemCode || "USL-DIZ",
                 description: item.description,
                 quantity: item.quantity,
                 unit: item.unit || "kom",
                 netPrice: item.netPrice,
                 vatRate: vatRate,
                 discountPercent: item.discount || 0,
-                itemCode: item.itemCode || undefined,
             };
         });
 
         // 5. Slanje na SalesInvoiceCreate
         const invoicePayload: any = {
-            SalesInvoice: {
+            salesInvoice: {
                 buyerPartnerID: partnerDocumentId,
                 date: docDate,
                 dateDue: dateDue,
@@ -259,7 +259,7 @@ export class ERacuniService {
                 paymentMethod: mappedPaymentMethod,
                 currency: params.currency || "EUR",
                 remarks: params.notes || "PŠD Špinut lučke usluge",
-                Items: formattedItems,
+                items: formattedItems,
             }
         };
 
