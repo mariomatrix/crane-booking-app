@@ -6,9 +6,14 @@ async function testERacuni() {
         "https://e-racuni.com/WebServicesHR/API",
     ];
 
-    const username = process.env.ERACUNI_USERNAME || "MATRIXKIKO";
-    const secretKey = process.env.ERACUNI_MD5PASS || "c68b660b7f8cd92f154403cfb92a9569";
-    const token = process.env.ERACUNI_TOKEN || "158468358A150E00B49123A709B66C2C";
+    const username = process.env.ERACUNI_USERNAME || "";
+    const secretKey = process.env.ERACUNI_MD5PASS || "";
+    const token = process.env.ERACUNI_TOKEN || "";
+
+    if (!username || !secretKey || !token) {
+        console.error("Molimo postavite ERACUNI_USERNAME, ERACUNI_MD5PASS i ERACUNI_TOKEN u .env datoteci.");
+        return;
+    }
 
     console.log("Testing Eurofaktura / e-racuni.com API...");
     console.log(`Username: ${username}`);

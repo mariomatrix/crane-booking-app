@@ -6,6 +6,8 @@
  * 2. Automatsko izdavanje računa za dizalicu, ugovore o vezu i članarine (SalesInvoiceCreate)
  * 3. Dohvat PDF računa (SalesInvoicePdf / SalesInvoiceGet)
  * 4. Provjeru statusa plaćanja (SalesInvoiceGet)
+ * 
+ * Sigurnost: Sve vjerodajnice se učitavaju isključivo iz varijabli okruženja (.env).
  */
 
 export interface ERacuniConfig {
@@ -13,6 +15,8 @@ export interface ERacuniConfig {
     username: string;
     secretKey: string;
     token: string;
+    isSandbox?: boolean;
+    mockEnabled?: boolean;
 }
 
 export interface ERacuniItem {
@@ -57,16 +61,33 @@ export class ERacuniService {
     constructor(config?: Partial<ERacuniConfig>) {
         this.config = {
             apiUrl: config?.apiUrl || process.env.ERACUNI_API_URL || "https://eurofaktura.com/WebServicesHR/API",
-            username: config?.username || process.env.ERACUNI_USERNAME || "MATRIXKIKO",
-            secretKey: config?.secretKey || process.env.ERACUNI_MD5PASS || "c68b660b7f8cd92f154403cfb92a9569",
-            token: config?.token || process.env.ERACUNI_TOKEN || "158468358A150E00B49123A709B66C2C",
+            username: config?.username || process.env.ERACUNI_USERNAME || "",
+            secretKey: config?.secretKey || process.env.ERACUNI_MD5PASS || "",
+            token: config?.token || process.env.ERACUNI_TOKEN || "",
+            isSandbox: config?.isSandbox ?? (process.env.ERACUNI_SANDBOX_MODE === "true" || process.env.NODE_ENV !== "production"),
+            mockEnabled: config?.mockEnabled ?? (process.env.ERACUNI_MOCK_ENABLED === "true"),
         };
+    }
+
+    /**
+     * Provjera postojanja obaveznih API vjerodajnica u okruženju
+     */
+    private validateConfig() {
+        if (!this.config.mockEnabled) {
+            if (!this.config.username || !this.config.secretKey || !this.config.token) {
+                throw new Error(
+                    "e-racuni.com API vjerodajnice nisu konfigurirane. Postavite ERACUNI_USERNAME, ERACUNI_MD5PASS i ERACUNI_TOKEN u .env datoteci."
+                );
+            }
+        }
     }
 
     /**
      * Izvršavanje generičkog JSON API poziva prema e-racuni.com
      */
     async callApi<T = any>(method: string, parameters: any = {}): Promise<T> {
+        this.validateConfig();
+
         const payload = {
             username: this.config.username,
             secretKey: this.config.secretKey,
@@ -116,6 +137,13 @@ export class ERacuniService {
         isLegalEntity?: boolean | null;
         companyName?: string | null;
     }): Promise<{ partnerDocumentId: string; partnerCode?: string }> {
+        if (this.config.mockEnabled) {
+            return {
+                partnerDocumentId: `mock-partner-${user.id.slice(0, 8)}`,
+                partnerCode: "MOCK-001",
+            };
+        }
+
         // 1. Ako imamo OIB ili email, prvo provjeri postoji li već partner
         const cleanOib = user.oib?.trim() || "";
         const cleanEmail = user.email?.trim() || "";
@@ -138,7 +166,7 @@ export class ERacuniService {
                 }
             }
         } catch (e: any) {
-            console.warn("[eRacuni] Greška pri dohvatu PartnerList:", e.message);
+            console.warn("[eRacuni] Upozorenje pri dohvatu PartnerList:", e.message);
         }
 
         // 2. Ako ne postoji, kreiraj novog partnera
@@ -185,44 +213,18 @@ export class ERacuniService {
         totalGrossAmount: number;
         issueDate: string;
         dueDate: string;
-        pdfUrl?: string;
     }> {
-        // 1. Sinkroniziraj kupca / partnera
-        const { partnerDocumentId } = await this.syncPartner({
-            id: params.userId,
-            name: params.userName,
-            firstName: params.userFirstName,
-            lastName: params.userLastName,
-            oib: params.userOib,
-            email: params.userEmail,
-            phone: params.userPhone,
-            address: params.userAddress,
-            city: params.userCity,
-            postalCode: params.userPostalCode,
-            isLegalEntity: params.isLegalEntity,
-            companyName: params.companyName,
-        });
-
-        // 2. Formatiranje datuma (YYYY-MM-DD)
+        // Formatiranje datuma (YYYY-MM-DD)
         const formatDate = (d?: Date) => {
             const dateObj = d || new Date();
             return dateObj.toISOString().split("T")[0];
         };
 
         const docDate = formatDate(params.date);
-        const dateDue = formatDate(params.dateDue || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)); // 15 dana rok
+        const dateDue = formatDate(params.dateDue || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000));
         const dateSupply = formatDate(params.dateOfSupply);
 
-        // 3. Mapiranje načina plaćanja
-        const paymentMethodMap: Record<string, string> = {
-            bank_transfer: "WireTransfer",
-            cash: "Cash",
-            card: "CreditCard",
-            compensation: "Compensation",
-        };
-        const mappedPaymentMethod = paymentMethodMap[params.paymentMethod || "bank_transfer"] || "WireTransfer";
-
-        // 4. Priprema stavki računa
+        // Priprema stavki i izračuni
         let calculatedNet = 0;
         let calculatedVat = 0;
         let calculatedGross = 0;
@@ -248,7 +250,52 @@ export class ERacuniService {
             };
         });
 
-        // 5. Slanje na SalesInvoiceCreate
+        // Mock / Sandbox simulacija (ako je omogućena za lokalni razvoj)
+        if (this.config.mockEnabled) {
+            const mockDocId = `mock-inv-${Date.now()}`;
+            const mockNumber = `2026-${Math.floor(1000 + Math.random() * 9000)}`;
+            console.log(`[eRacuni MOCK] Kreiran simulirani račun br. ${mockNumber} (ID: ${mockDocId})`);
+
+            return {
+                documentId: mockDocId,
+                invoiceNumber: mockNumber,
+                totalNetAmount: calculatedNet,
+                totalVatAmount: calculatedVat,
+                totalGrossAmount: calculatedGross,
+                issueDate: docDate,
+                dueDate: dateDue,
+            };
+        }
+
+        // 1. Sinkroniziraj / dohvati partnera
+        const { partnerDocumentId } = await this.syncPartner({
+            id: params.userId,
+            name: params.userName,
+            firstName: params.userFirstName,
+            lastName: params.userLastName,
+            oib: params.userOib,
+            email: params.userEmail,
+            phone: params.userPhone,
+            address: params.userAddress,
+            city: params.userCity,
+            postalCode: params.userPostalCode,
+            isLegalEntity: params.isLegalEntity,
+            companyName: params.companyName,
+        });
+
+        // 2. Mapiranje načina plaćanja
+        const paymentMethodMap: Record<string, string> = {
+            bank_transfer: "WireTransfer",
+            cash: "Cash",
+            card: "CreditCard",
+            compensation: "Compensation",
+        };
+        const mappedPaymentMethod = paymentMethodMap[params.paymentMethod || "bank_transfer"] || "WireTransfer";
+
+        const prefix = this.config.isSandbox ? "[SANDBOX / TEST] " : "";
+        const finalRemarks = `${prefix}${params.notes || "PŠD Špinut lučke usluge"}`.trim();
+
+        // 3. Slanje na SalesInvoiceCreate
         const invoicePayload: any = {
             SalesInvoice: {
                 buyerPartnerID: partnerDocumentId,
@@ -258,7 +305,7 @@ export class ERacuniService {
                 dateOfSupplyTo: dateSupply,
                 paymentMethod: mappedPaymentMethod,
                 currency: params.currency || "EUR",
-                remarks: params.notes || "PŠD Špinut lučke usluge",
+                remarks: finalRemarks,
                 Items: formattedItems,
             }
         };
@@ -281,29 +328,30 @@ export class ERacuniService {
     }
 
     /**
-     * Dohvat detalja računa i provjera stanja plaćanja (SalesInvoiceGet)
+     * Dohvat detalja računa (SalesInvoiceGet)
      */
     async getSalesInvoice(documentId: string): Promise<any> {
+        if (this.config.mockEnabled) {
+            return {
+                documentID: documentId,
+                number: "MOCK-2026-0001",
+                paidAmount: 0,
+                status: "unpaid",
+            };
+        }
         return this.callApi("SalesInvoiceGet", { documentID: documentId });
     }
 
     /**
-     * Dohvat PDF-a računa (SalesInvoicePdf)
+     * Dohvat PDF-a izdanog računa (SalesInvoicePdf)
      */
-    async getSalesInvoicePdf(documentId: string): Promise<{ pdfUrl?: string; pdfBase64?: string }> {
-        try {
-            const res = await this.callApi<any>("SalesInvoicePdf", { documentID: documentId });
-            if (res.pdfBase64) {
-                return { pdfBase64: res.pdfBase64 };
-            }
-            if (res.url) {
-                return { pdfUrl: res.url };
-            }
-            return res;
-        } catch (e: any) {
-            console.warn(`[eRacuni] Nije uspio dohvat PDF-a za račun ${documentId}:`, e.message);
-            return {};
+    async getSalesInvoicePdf(documentId: string): Promise<{ pdfBase64?: string; url?: string }> {
+        if (this.config.mockEnabled) {
+            return {
+                url: "https://example.com/mock-invoice.pdf",
+            };
         }
+        return this.callApi("SalesInvoicePdf", { documentID: documentId });
     }
 }
 
