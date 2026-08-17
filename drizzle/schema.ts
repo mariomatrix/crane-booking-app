@@ -181,8 +181,8 @@ export const reservations = pgTable("reservations", {
     requestedTimeSlot: varchar("requested_time_slot", { length: 50 }), // jutro/poslijepodne/po dogovoru
 
     // Confirmed schedule (set by operator on approval)
-    scheduledStart: timestamp("scheduled_start"),
-    scheduledEnd: timestamp("scheduled_end"),
+    scheduledStart: timestamp("scheduled_start", { withTimezone: true }),
+    scheduledEnd: timestamp("scheduled_end", { withTimezone: true }),
     durationMin: integer("duration_min").default(60).notNull(),
 
     // Status
@@ -313,8 +313,8 @@ export const holidays = pgTable("holidays", {
 export const maintenanceBlocks = pgTable("maintenance_blocks", {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     craneId: uuid("crane_id").notNull().references(() => cranes.id),
-    startAt: timestamp("start_at").notNull(),
-    endAt: timestamp("end_at").notNull(),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    endAt: timestamp("end_at", { withTimezone: true }).notNull(),
     reason: text("reason"),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
