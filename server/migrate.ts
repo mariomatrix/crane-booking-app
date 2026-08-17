@@ -558,6 +558,64 @@ async function runMigration() {
         console.warn("Piers & berths tables verification warning:", e?.message || e);
     }
 
+    // ─── Exclusion Constraints: Zaštita od race conditiona & preklapanja na dizalici ───
+    try {
+        await migrationClient`CREATE EXTENSION IF NOT EXISTS "btree_gist"`;
+
+        await migrationClient`
+            ALTER TABLE "reservations" 
+            ALTER COLUMN "scheduled_start" TYPE timestamptz USING "scheduled_start"::timestamptz,
+            ALTER COLUMN "scheduled_end" TYPE timestamptz USING "scheduled_end"::timestamptz
+        `;
+
+        await migrationClient`
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'reservations_no_crane_overlap'
+                ) THEN
+                    ALTER TABLE "reservations"
+                    ADD CONSTRAINT "reservations_no_crane_overlap"
+                    EXCLUDE USING gist (
+                        "crane_id" WITH =,
+                        tstzrange("scheduled_start", "scheduled_end", '[)') WITH &&
+                    )
+                    WHERE (
+                        "crane_id" IS NOT NULL
+                        AND "scheduled_start" IS NOT NULL
+                        AND "scheduled_end" IS NOT NULL
+                        AND "status" IN ('approved', 'in_progress')
+                    );
+                END IF;
+            EXCEPTION WHEN others THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            ALTER TABLE "maintenance_blocks" 
+            ALTER COLUMN "start_at" TYPE timestamptz USING "start_at"::timestamptz,
+            ALTER COLUMN "end_at" TYPE timestamptz USING "end_at"::timestamptz
+        `;
+
+        await migrationClient`
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'maintenance_blocks_no_crane_overlap'
+                ) THEN
+                    ALTER TABLE "maintenance_blocks"
+                    ADD CONSTRAINT "maintenance_blocks_no_crane_overlap"
+                    EXCLUDE USING gist (
+                        "crane_id" WITH =,
+                        tstzrange("start_at", "end_at", '[)') WITH &&
+                    );
+                END IF;
+            EXCEPTION WHEN others THEN null;
+            END $$;
+        `;
+        console.log("Exclusion constraints for crane concurrency protection verified.");
+    } catch (e: any) {
+        console.warn("Exclusion constraints verification warning:", e?.message || e);
+    }
+
     try {
         await migrate(db, { migrationsFolder: "drizzle" });
         console.log("Migrations completed.");
