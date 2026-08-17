@@ -3452,21 +3452,7 @@ export const appRouter = router({
       .query(async ({ input }) => {
         const { page, pageSize } = input;
         const offset = (page - 1) * pageSize;
-        const { data: items, total } = await listAllWaiting(pageSize, offset);
-        const data = await Promise.all(
-          items.map(async w => {
-            const user = await getUserById(w.userId);
-            const crane = w.craneId ? await getCraneById(w.craneId) : null;
-            return {
-              ...w,
-              user: user
-                ? { name: user.name, email: user.email, phone: user.phone }
-                : null,
-              crane: crane ? { name: crane.name } : null,
-            };
-          })
-        );
-        return { data, total };
+        return listAllWaiting(pageSize, offset);
       }),
 
     update: adminProcedure

@@ -91,6 +91,7 @@ export const users = pgTable("users", {
         createdAtIdx: index("users_created_at_idx").on(table.createdAt),
         emailVerifiedAtIdx: index("users_email_verified_at_idx").on(table.emailVerifiedAt),
         anonymizedAtIdx: index("users_anonymized_at_idx").on(table.anonymizedAt),
+        pinCodeStatusIdx: index("users_pin_code_status_idx").on(table.pinCode, table.userStatus),
     };
 });
 
@@ -105,6 +106,12 @@ export const serviceTypes = pgTable("service_types", {
     sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        isActiveIdx: index("service_types_is_active_idx").on(table.isActive),
+        operationCategoryIdx: index("service_types_operation_category_idx").on(table.operationCategory),
+        sortOrderIdx: index("service_types_sort_order_idx").on(table.sortOrder),
+    };
 });
 
 // ─── Cranes ───────────────────────────────────────────────────────────
@@ -120,6 +127,10 @@ export const cranes = pgTable("cranes", {
     notes: text("notes"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        craneStatusIdx: index("cranes_status_idx").on(table.craneStatus),
+    };
 });
 
 // ─── Operator Cranes (dodjela dizalica operaterima) ────────────────────
@@ -221,6 +232,11 @@ export const reservations = pgTable("reservations", {
         craneIdIdx: index("res_crane_id_idx").on(table.craneId),
         requestedDateIdx: index("res_requested_date_idx").on(table.requestedDate),
         isMaintenanceIdx: index("res_is_maintenance_idx").on(table.isMaintenance),
+        landZoneIdIdx: index("res_land_zone_id_idx").on(table.landZoneId),
+        vesselIdIdx: index("res_vessel_id_idx").on(table.vesselId),
+        serviceTypeIdIdx: index("res_service_type_id_idx").on(table.serviceTypeId),
+        approvedByIdx: index("res_approved_by_idx").on(table.approvedBy),
+        overlapCheckIdx: index("res_overlap_check_idx").on(table.craneId, table.status, table.scheduledStart, table.scheduledEnd),
     };
 });
 
@@ -260,6 +276,7 @@ export const messages = pgTable("messages", {
         reservationIdIdx: index("messages_reservation_id_idx").on(table.reservationId),
         senderIdIdx: index("messages_sender_id_idx").on(table.senderId),
         resIsReadIdx: index("messages_res_is_read_idx").on(table.reservationId, table.isRead),
+        isReadIdx: index("messages_is_read_idx").on(table.isRead),
     };
 });
 
@@ -272,6 +289,10 @@ export const seasons = pgTable("seasons", {
     workingHours: jsonb("working_hours").notNull(), // { mon: {from: "08:00", to: "17:00"}, ... }
     isActive: boolean("is_active").default(true).notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        activeDatesIdx: index("seasons_active_dates_idx").on(table.isActive, table.startDate, table.endDate),
+    };
 });
 
 // ─── Holidays (praznici i neradni dani) ───────────────────────────────
@@ -281,6 +302,11 @@ export const holidays = pgTable("holidays", {
     name: varchar("name", { length: 255 }).notNull(),
     isRecurring: boolean("is_recurring").default(true).notNull(), // yearly recurring
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        dateIdx: index("holidays_date_idx").on(table.date),
+        isRecurringIdx: index("holidays_is_recurring_idx").on(table.isRecurring),
+    };
 });
 
 // ─── Maintenance Blocks (blokada dizalice) ────────────────────────────
@@ -292,6 +318,10 @@ export const maintenanceBlocks = pgTable("maintenance_blocks", {
     reason: text("reason"),
     createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        craneStartIdx: index("maint_blocks_crane_start_idx").on(table.craneId, table.startAt),
+    };
 });
 
 // ─── System Settings ──────────────────────────────────────────────────
@@ -424,6 +454,8 @@ export const landOccupancies = pgTable("land_occupancies", {
         zoneIdIdx: index("land_occ_zone_id_idx").on(table.zoneId),
         returnedAtIdx: index("land_occ_returned_at_idx").on(table.returnedAt),
         liftedAtIdx: index("land_occ_lifted_at_idx").on(table.liftedAt),
+        zoneReturnedIdx: index("land_occ_zone_returned_idx").on(table.zoneId, table.returnedAt),
+        vesselReturnedIdx: index("land_occ_vessel_returned_idx").on(table.vesselId, table.returnedAt),
     };
 });
 
@@ -458,6 +490,7 @@ export const landWaitingList = pgTable("land_waiting_list", {
         preferredZoneIdIdx: index("land_wl_preferred_zone_idx").on(table.preferredZoneId),
         statusIdx: index("land_wl_status_idx").on(table.status),
         positionIdx: index("land_wl_position_idx").on(table.position),
+        zoneStatusIdx: index("land_wl_zone_status_idx").on(table.preferredZoneId, table.status),
     };
 });
 
@@ -477,6 +510,7 @@ export const craneOperationLog = pgTable("crane_operation_log", {
         craneIdIdx: index("crane_op_log_crane_id_idx").on(table.craneId),
         operatorIdIdx: index("crane_op_log_operator_id_idx").on(table.operatorId),
         startTimeIdx: index("crane_op_log_start_time_idx").on(table.startTime),
+        reservationIdIdx: index("crane_op_log_reservation_id_idx").on(table.reservationId),
     };
 });
 
@@ -550,6 +584,8 @@ export const workOrders = pgTable("work_orders", {
         craneIdIdx: index("work_orders_crane_id_idx").on(table.craneId),
         statusIdx: index("work_orders_status_idx").on(table.status),
         startedAtIdx: index("work_orders_started_at_idx").on(table.startedAt),
+        reservationIdIdx: index("work_orders_reservation_id_idx").on(table.reservationId),
+        vesselIdIdx: index("work_orders_vessel_id_idx").on(table.vesselId),
     };
 });
 
@@ -571,6 +607,7 @@ export const userCardEntries = pgTable("user_card_entries", {
     return {
         userCardUserIdIdx: index("user_card_user_id_idx").on(table.userId),
         userCardEventDateIdx: index("user_card_event_date_idx").on(table.eventDate),
+        entryTypeEventDateIdx: index("user_card_entry_type_event_date_idx").on(table.entryType, table.eventDate),
     };
 });
 
@@ -834,6 +871,8 @@ export const berthAssignments = pgTable("berth_assignments", {
         vesselIdIdx: index("berth_assignments_vessel_id_idx").on(table.vesselId),
         userIdIdx: index("berth_assignments_user_id_idx").on(table.userId),
         isActiveIdx: index("berth_assignments_is_active_idx").on(table.isActive),
+        berthIsActiveIdx: index("berth_assign_berth_is_active_idx").on(table.berthId, table.isActive),
+        vesselIsActiveIdx: index("berth_assign_vessel_is_active_idx").on(table.vesselId, table.isActive),
     };
 });
 
@@ -887,6 +926,7 @@ export const invoices = pgTable("invoices", {
         invoiceNumberIdx: index("invoices_invoice_number_idx").on(table.invoiceNumber),
         paymentStatusIdx: index("invoices_payment_status_idx").on(table.paymentStatus),
         reservationIdIdx: index("invoices_reservation_id_idx").on(table.reservationId),
+        issueDateIdx: index("invoices_issue_date_idx").on(table.issueDate),
     };
 });
 

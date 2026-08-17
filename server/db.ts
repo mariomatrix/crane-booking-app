@@ -45,7 +45,13 @@ import {
 let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
-    _db = drizzle(postgres(process.env.DATABASE_URL));
+    _db = drizzle(
+      postgres(process.env.DATABASE_URL, {
+        max: 20,
+        idle_timeout: 30,
+        connect_timeout: 10,
+      })
+    );
   }
   return _db;
 }
@@ -443,9 +449,32 @@ export async function listAllWaiting(limit = 50, offset = 0) {
   if (!db) return { data: [], total: 0 };
 
   const [countRes] = await db.select({ count: sql<number>`count(*)` }).from(waitingList);
-  const data = await db.select().from(waitingList).orderBy(desc(waitingList.createdAt)).limit(limit).offset(offset);
+  const data = await db
+    .select({
+      waiting: waitingList,
+      user: {
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      crane: {
+        name: cranes.name,
+      },
+    })
+    .from(waitingList)
+    .leftJoin(users, eq(waitingList.userId, users.id))
+    .leftJoin(cranes, eq(waitingList.craneId, cranes.id))
+    .orderBy(desc(waitingList.createdAt))
+    .limit(limit)
+    .offset(offset);
 
-  return { data, total: Number(countRes.count) };
+  const formattedData = data.map(row => ({
+    ...row.waiting,
+    user: row.user?.name || row.user?.email ? row.user : null,
+    crane: row.crane?.name ? row.crane : null,
+  }));
+
+  return { data: formattedData, total: Number(countRes?.count ?? 0) };
 }
 
 export async function getWaitingListById(id: string) {
