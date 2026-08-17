@@ -558,6 +558,42 @@ async function runMigration() {
         console.warn("Piers & berths tables verification warning:", e?.message || e);
     }
 
+    // ─── Additional Performance Indexes ──────────────────────────────
+    try {
+        await migrationClient`CREATE INDEX IF NOT EXISTS "users_pin_code_status_idx" ON "users" ("pin_code", "user_status")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "service_types_is_active_idx" ON "service_types" ("is_active")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "service_types_operation_category_idx" ON "service_types" ("operation_category")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "service_types_sort_order_idx" ON "service_types" ("sort_order")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "cranes_status_idx" ON "cranes" ("crane_status")`;
+
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_land_zone_id_idx" ON "reservations" ("land_zone_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_vessel_id_idx" ON "reservations" ("vessel_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_service_type_id_idx" ON "reservations" ("service_type_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_approved_by_idx" ON "reservations" ("approved_by")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_overlap_check_idx" ON "reservations" ("crane_id", "status", "scheduled_start", "scheduled_end")`;
+
+        await migrationClient`CREATE INDEX IF NOT EXISTS "messages_is_read_idx" ON "messages" ("is_read")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "seasons_active_dates_idx" ON "seasons" ("is_active", "start_date", "end_date")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "holidays_date_idx" ON "holidays" ("date")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "holidays_is_recurring_idx" ON "holidays" ("is_recurring")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "maint_blocks_crane_start_idx" ON "maintenance_blocks" ("crane_id", "start_at")`;
+
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_occ_zone_returned_idx" ON "land_occupancies" ("zone_id", "returned_at")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_occ_vessel_returned_idx" ON "land_occupancies" ("vessel_id", "returned_at")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_wl_zone_status_idx" ON "land_waiting_list" ("preferred_zone_id", "status")`;
+
+        await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_reservation_id_idx" ON "crane_operation_log" ("reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_orders_reservation_id_idx" ON "work_orders" ("reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_orders_vessel_id_idx" ON "work_orders" ("vessel_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "user_card_entry_type_event_date_idx" ON "user_card_entries" ("entry_type", "event_date")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "invoices_issue_date_idx" ON "invoices" ("issue_date")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assign_berth_is_active_idx" ON "berth_assignments" ("berth_id", "is_active")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assign_vessel_is_active_idx" ON "berth_assignments" ("vessel_id", "is_active")`;
+        console.log("Performance indexes verified.");
+    } catch (e: any) {
+        console.warn("Performance indexes verification warning:", e?.message || e);
+    }
+
     try {
         await migrate(db, { migrationsFolder: "drizzle" });
         console.log("Migrations completed.");
