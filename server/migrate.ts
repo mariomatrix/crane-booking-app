@@ -141,7 +141,9 @@ async function runMigration() {
                 CREATE TYPE "public"."invoice_payment_status" AS ENUM('unpaid', 'partially_paid', 'paid', 'cancelled');
             EXCEPTION WHEN duplicate_object THEN null;
             END $$;
+        `;
 
+        await migrationClient`
             DO $$ BEGIN
                 CREATE TYPE "public"."document_type" AS ENUM('invoice', 'proforma');
             EXCEPTION WHEN duplicate_object THEN null;
