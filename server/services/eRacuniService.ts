@@ -449,6 +449,10 @@ export class ERacuniService {
         const orderPayload: any = {
             SalesOrder: {
                 buyerPartnerID: partnerDocumentId,
+                buyerName: params.isLegalEntity ? (params.companyName || params.userName) : params.userName,
+                buyerAddress: params.userAddress || "Lučica Špinut bb",
+                buyerCity: params.userCity || "Split",
+                buyerPostalCode: params.userPostalCode || "21000",
                 date: docDate,
                 dateDue: dateDue,
                 paymentMethod: mappedPaymentMethod,
