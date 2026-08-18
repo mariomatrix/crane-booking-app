@@ -7,7 +7,10 @@ async function testSalesOrder() {
     try {
         const payload = {
             SalesOrder: {
-                buyerPartnerID: "34:958279",
+                buyerName: "Test Kupac d.o.o.",
+                buyerAddress: "Zagrebačka 1",
+                buyerPostalCode: "10000",
+                buyerCity: "Zagreb",
                 date: "2026-08-16",
                 dateDue: "2026-08-31",
                 currency: "EUR",

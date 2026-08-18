@@ -141,6 +141,11 @@ async function runMigration() {
                 CREATE TYPE "public"."invoice_payment_status" AS ENUM('unpaid', 'partially_paid', 'paid', 'cancelled');
             EXCEPTION WHEN duplicate_object THEN null;
             END $$;
+
+            DO $$ BEGIN
+                CREATE TYPE "public"."document_type" AS ENUM('invoice', 'proforma');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
         `;
 
         await migrationClient`
@@ -152,6 +157,7 @@ async function runMigration() {
                 "vessel_id" uuid REFERENCES "vessels"("id"),
                 "reservation_id" uuid REFERENCES "reservations"("id"),
                 "berth_assignment_id" uuid REFERENCES "berth_assignments"("id"),
+                "document_type" "public"."document_type" DEFAULT 'invoice' NOT NULL,
                 "invoice_type" "public"."invoice_type" DEFAULT 'crane_operation' NOT NULL,
                 "issue_date" timestamp DEFAULT now() NOT NULL,
                 "due_date" timestamp NOT NULL,
@@ -190,6 +196,9 @@ async function runMigration() {
                 "created_at" timestamp DEFAULT now() NOT NULL
             )
         `;
+        
+        await migrationClient`ALTER TABLE "invoices" ADD COLUMN IF NOT EXISTS "document_type" "public"."document_type" DEFAULT 'invoice' NOT NULL`;
+
         console.log("Invoices and invoice_items tables verified.");
     } catch (e: any) {
         console.warn("Invoices tables verification warning:", e?.message || e);

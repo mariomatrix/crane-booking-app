@@ -43,6 +43,10 @@ export const invoiceTypeEnum = pgEnum("invoice_type", [
     "membership_fee",
     "other",
 ]);
+export const documentTypeEnum = pgEnum("document_type", [
+    "invoice",
+    "proforma",
+]);
 export const invoicePaymentMethodEnum = pgEnum("invoice_payment_method", [
     "bank_transfer",
     "cash",
@@ -902,6 +906,7 @@ export const invoices = pgTable("invoices", {
     vesselId: uuid("vessel_id").references(() => vessels.id),
     reservationId: uuid("reservation_id").references(() => reservations.id),
     berthAssignmentId: uuid("berth_assignment_id").references(() => berthAssignments.id),
+    documentType: documentTypeEnum("document_type").default("invoice").notNull(),
     invoiceType: invoiceTypeEnum("invoice_type").default("crane_operation").notNull(),
     issueDate: timestamp("issue_date").defaultNow().notNull(),
     dueDate: timestamp("due_date").notNull(),

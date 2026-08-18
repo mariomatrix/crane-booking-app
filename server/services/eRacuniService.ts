@@ -353,6 +353,154 @@ export class ERacuniService {
         }
         return this.callApi("SalesInvoicePdf", { documentID: documentId });
     }
+
+    /**
+     * Izdavanje ponude / prodajne narudžbe (SalesOrderCreate)
+     */
+    async createSalesOrder(params: CreateInvoiceParams): Promise<{
+        documentId: string;
+        invoiceNumber: string;
+        totalNetAmount: number;
+        totalVatAmount: number;
+        totalGrossAmount: number;
+        issueDate: string;
+        dueDate: string;
+    }> {
+        // Formatiranje datuma (YYYY-MM-DD)
+        const formatDate = (d?: Date) => {
+            const dateObj = d || new Date();
+            return dateObj.toISOString().split("T")[0];
+        };
+
+        const docDate = formatDate(params.date);
+        const dateDue = formatDate(params.dateDue || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000));
+        
+        // Priprema stavki i izračuni
+        let calculatedNet = 0;
+        let calculatedVat = 0;
+        let calculatedGross = 0;
+
+        const formattedItems = params.items.map((item) => {
+            const vatRate = item.vatRate !== undefined ? item.vatRate : 25;
+            const net = Number((item.quantity * item.netPrice * (1 - (item.discount || 0) / 100)).toFixed(2));
+            const vat = Number((net * (vatRate / 100)).toFixed(2));
+            const gross = Number((net + vat).toFixed(2));
+
+            calculatedNet += net;
+            calculatedVat += vat;
+            calculatedGross += gross;
+
+            return {
+                productCode: item.productCode || item.itemCode || "USL-DIZ",
+                description: item.description,
+                quantity: item.quantity,
+                unit: item.unit || "kom",
+                netPrice: item.netPrice,
+                vatRate: vatRate,
+                discountPercent: item.discount || 0,
+            };
+        });
+
+        if (this.config.mockEnabled) {
+            const mockDocId = `mock-ord-${Date.now()}`;
+            const mockNumber = `2026-PON-${Math.floor(1000 + Math.random() * 9000)}`;
+            console.log(`[eRacuni MOCK] Kreirana simulirana ponuda br. ${mockNumber} (ID: ${mockDocId})`);
+
+            return {
+                documentId: mockDocId,
+                invoiceNumber: mockNumber,
+                totalNetAmount: calculatedNet,
+                totalVatAmount: calculatedVat,
+                totalGrossAmount: calculatedGross,
+                issueDate: docDate,
+                dueDate: dateDue,
+            };
+        }
+
+        // 1. Sinkroniziraj / dohvati partnera
+        const { partnerDocumentId } = await this.syncPartner({
+            id: params.userId,
+            name: params.userName,
+            firstName: params.userFirstName,
+            lastName: params.userLastName,
+            oib: params.userOib,
+            email: params.userEmail,
+            phone: params.userPhone,
+            address: params.userAddress,
+            city: params.userCity,
+            postalCode: params.userPostalCode,
+            isLegalEntity: params.isLegalEntity,
+            companyName: params.companyName,
+        });
+
+        // 2. Mapiranje načina plaćanja
+        const paymentMethodMap: Record<string, string> = {
+            bank_transfer: "BankTransfer",
+            cash: "Cash",
+            card: "CreditCard",
+            compensation: "Compensation",
+        };
+        const mappedPaymentMethod = paymentMethodMap[params.paymentMethod || "bank_transfer"] || "BankTransfer";
+
+        const prefix = this.config.isSandbox ? "[SANDBOX / TEST] " : "";
+        const finalRemarks = `${prefix}${params.notes || "PŠD Špinut lučke usluge"}`.trim();
+
+        // 3. Slanje na SalesOrderCreate
+        const orderPayload: any = {
+            SalesOrder: {
+                buyerPartnerID: partnerDocumentId,
+                date: docDate,
+                dateDue: dateDue,
+                paymentMethod: mappedPaymentMethod,
+                currency: params.currency || "EUR",
+                remarks: finalRemarks,
+                Items: formattedItems,
+            }
+        };
+
+        const res = await this.callApi<{ documentID: string; number?: string }>("SalesOrderCreate", orderPayload);
+        const documentId = res.documentID;
+        const invoiceNumber = res.number || `PON-${documentId}`;
+
+        console.log(`[eRacuni] Uspješno kreirana ponuda br. ${invoiceNumber} (ID: ${documentId})`);
+
+        return {
+            documentId,
+            invoiceNumber,
+            totalNetAmount: calculatedNet,
+            totalVatAmount: calculatedVat,
+            totalGrossAmount: calculatedGross,
+            issueDate: docDate,
+            dueDate: dateDue,
+        };
+    }
+
+    /**
+     * Dohvat detalja ponude (SalesOrderGet)
+     */
+    async getSalesOrder(documentId: string): Promise<any> {
+        if (this.config.mockEnabled) {
+            return {
+                documentID: documentId,
+                number: "MOCK-PON-0001",
+                paidAmount: 0,
+                status: "Opened",
+            };
+        }
+        return this.callApi("SalesOrderGet", { documentID: documentId });
+    }
+
+    /**
+     * Dohvat PDF-a ponude (SalesOrderPdf)
+     */
+    async getSalesOrderPdf(documentId: string): Promise<{ pdfBase64?: string; url?: string }> {
+        if (this.config.mockEnabled) {
+            return {
+                url: "https://example.com/mock-order.pdf",
+            };
+        }
+        return this.callApi("SalesOrderPdf", { documentID: documentId });
+    }
 }
 
 // Singleton instanca servisa

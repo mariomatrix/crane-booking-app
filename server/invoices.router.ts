@@ -202,8 +202,13 @@ export const invoicesRouter = router({
             const invoiceNotes = input.notes || "PŠD Špinut lučke usluge";
 
             let eRacuniResult;
+            const documentType = process.env.ERACUNI_DOCUMENT_TYPE === "proforma" ? "proforma" : "invoice";
             try {
-                eRacuniResult = await eRacuniService.createSalesInvoice({
+                const createMethod = documentType === "proforma" 
+                    ? eRacuniService.createSalesOrder.bind(eRacuniService) 
+                    : eRacuniService.createSalesInvoice.bind(eRacuniService);
+
+                eRacuniResult = await createMethod({
                     userId: user.id,
                     userName: user.name || `${user.firstName || ""} ${user.lastName || ""}`,
                     userFirstName: user.firstName || undefined,
@@ -240,6 +245,7 @@ export const invoicesRouter = router({
                 .values({
                     invoiceNumber: eRacuniResult.invoiceNumber,
                     documentId: eRacuniResult.documentId,
+                    documentType: documentType,
                     userId: user.id,
                     vesselId: vessel?.id || null,
                     invoiceType: input.invoiceType,
@@ -338,8 +344,13 @@ export const invoicesRouter = router({
             const invoiceNotes = input.notes || `Operacija dizalice PŠD Špinut — Plovilo: ${vessel?.name || ""} (${vessel?.registration || ""})`;
             
             let eRacuniResult;
+            const documentType = process.env.ERACUNI_DOCUMENT_TYPE === "proforma" ? "proforma" : "invoice";
             try {
-                eRacuniResult = await eRacuniService.createSalesInvoice({
+                const createMethod = documentType === "proforma" 
+                    ? eRacuniService.createSalesOrder.bind(eRacuniService) 
+                    : eRacuniService.createSalesInvoice.bind(eRacuniService);
+
+                eRacuniResult = await createMethod({
                     userId: user.id,
                     userName: user.name || `${user.firstName || ""} ${user.lastName || ""}`,
                     userFirstName: user.firstName || undefined,
@@ -377,6 +388,7 @@ export const invoicesRouter = router({
                 .values({
                     invoiceNumber: eRacuniResult.invoiceNumber,
                     documentId: eRacuniResult.documentId,
+                    documentType: documentType,
                     userId: user.id,
                     vesselId: vessel?.id || null,
                     reservationId: res.id,
@@ -462,8 +474,13 @@ export const invoicesRouter = router({
 
             // 3. Pošalji na e-racuni.com
             let eRacuniResult;
+            const documentType = process.env.ERACUNI_DOCUMENT_TYPE === "proforma" ? "proforma" : "invoice";
             try {
-                eRacuniResult = await eRacuniService.createSalesInvoice({
+                const createMethod = documentType === "proforma" 
+                    ? eRacuniService.createSalesOrder.bind(eRacuniService) 
+                    : eRacuniService.createSalesInvoice.bind(eRacuniService);
+
+                eRacuniResult = await createMethod({
                     userId: user.id,
                     userName: user.name || `${user.firstName || ""} ${user.lastName || ""}`,
                     userFirstName: user.firstName || undefined,
@@ -503,6 +520,7 @@ export const invoicesRouter = router({
                 .values({
                     invoiceNumber: eRacuniResult.invoiceNumber,
                     documentId: eRacuniResult.documentId,
+                    documentType: documentType,
                     userId: user.id,
                     vesselId: vessel?.id || null,
                     berthAssignmentId: assignment.id,
@@ -564,7 +582,9 @@ export const invoicesRouter = router({
                 throw new TRPCError({ code: "BAD_REQUEST", message: "Račun nema povezani ID u e-računima" });
             }
 
-            const pdfData = await eRacuniService.getSalesInvoicePdf(invoice.documentId);
+            const pdfData = invoice.documentType === "proforma"
+                ? await eRacuniService.getSalesOrderPdf(invoice.documentId)
+                : await eRacuniService.getSalesInvoicePdf(invoice.documentId);
             return pdfData;
         }),
 
@@ -587,7 +607,9 @@ export const invoicesRouter = router({
                 throw new TRPCError({ code: "NOT_FOUND", message: "Račun nije pronađen" });
             }
 
-            const details = await eRacuniService.getSalesInvoice(invoice.documentId);
+            const details = invoice.documentType === "proforma"
+                ? await eRacuniService.getSalesOrder(invoice.documentId)
+                : await eRacuniService.getSalesInvoice(invoice.documentId);
 
             // Ažuriraj status plaćanja na temelju podataka iz e-računa
             let newStatus: "unpaid" | "partially_paid" | "paid" | "cancelled" = "unpaid";
