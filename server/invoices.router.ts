@@ -202,7 +202,7 @@ export const invoicesRouter = router({
             const invoiceNotes = input.notes || "PŠD Špinut lučke usluge";
 
             let eRacuniResult;
-            const documentType = process.env.ERACUNI_DOCUMENT_TYPE === "proforma" ? "proforma" : "invoice";
+            const documentType = process.env.ERACUNI_DOCUMENT_TYPE?.trim() === "proforma" ? "proforma" : "invoice";
             try {
                 const createMethod = documentType === "proforma" 
                     ? eRacuniService.createSalesOrder.bind(eRacuniService) 
@@ -344,7 +344,7 @@ export const invoicesRouter = router({
             const invoiceNotes = input.notes || `Operacija dizalice PŠD Špinut — Plovilo: ${vessel?.name || ""} (${vessel?.registration || ""})`;
             
             let eRacuniResult;
-            const documentType = process.env.ERACUNI_DOCUMENT_TYPE === "proforma" ? "proforma" : "invoice";
+            const documentType = process.env.ERACUNI_DOCUMENT_TYPE?.trim() === "proforma" ? "proforma" : "invoice";
             try {
                 const createMethod = documentType === "proforma" 
                     ? eRacuniService.createSalesOrder.bind(eRacuniService) 
@@ -474,7 +474,7 @@ export const invoicesRouter = router({
 
             // 3. Pošalji na e-racuni.com
             let eRacuniResult;
-            const documentType = process.env.ERACUNI_DOCUMENT_TYPE === "proforma" ? "proforma" : "invoice";
+            const documentType = process.env.ERACUNI_DOCUMENT_TYPE?.trim() === "proforma" ? "proforma" : "invoice";
             try {
                 const createMethod = documentType === "proforma" 
                     ? eRacuniService.createSalesOrder.bind(eRacuniService) 
