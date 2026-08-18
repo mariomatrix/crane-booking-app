@@ -13,8 +13,11 @@ import { PDFDownloadLink, PDFViewer } from "@react-pdf/renderer";
 import { WorkOrderPdf } from "@/components/WorkOrderPdfTemplate";
 import { Link } from "wouter";
 import * as XLSX from "xlsx";
+import { formatAppDate } from "@/lib/date-utils";
+import { useLang } from "@/contexts/LangContext";
 
 export default function AdminWorkOrders() {
+    const { lang } = useLang();
     const [clientTypeFilter, setClientTypeFilter] = useState<string>("all");
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [search, setSearch] = useState<string>("");
@@ -47,7 +50,7 @@ export default function AdminWorkOrders() {
     const handleExportExcel = () => {
         const rows = filteredOrders.map((o: any) => ({
             "Broj radnog naloga": o.orderNumber,
-            "Datum": o.startedAt ? new Date(o.startedAt).toLocaleDateString("hr-HR") : "",
+            "Datum": formatAppDate(o.startedAt, lang),
             "Korisnik": o.userName,
             "OIB": o.userOib,
             "Tip korisnika": o.clientType === "member" ? "Član PŠD" : "Vanjski",
@@ -206,7 +209,7 @@ export default function AdminWorkOrders() {
                                             {o.orderNumber}
                                         </TableCell>
                                         <TableCell className="text-xs">
-                                            <div>{o.startedAt ? new Date(o.startedAt).toLocaleDateString("hr-HR") : "—"}</div>
+                                            <div>{formatAppDate(o.startedAt, lang)}</div>
                                             <div className="text-muted-foreground">{o.startedAt ? new Date(o.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""} h</div>
                                         </TableCell>
                                         <TableCell>

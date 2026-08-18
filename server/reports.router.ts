@@ -533,11 +533,14 @@ export const reportsRouter = router({
             }> = [];
 
             for (const log of opLogs) {
+                const sTime = log.startTime ? new Date(log.startTime) : new Date();
+                const eTime = log.endTime ? new Date(log.endTime) : new Date(sTime.getTime() + 60000);
+                const diffMin = Math.max(1, Math.round((eTime.getTime() - sTime.getTime()) / 60000));
                 formattedEntries.push({
                     id: log.id,
-                    startTime: log.startTime,
-                    endTime: log.endTime,
-                    durationMinutes: log.durationMinutes || Math.max(1, Math.round((log.endTime.getTime() - log.startTime.getTime()) / 60000)),
+                    startTime: sTime,
+                    endTime: eTime,
+                    durationMinutes: log.durationMinutes || diffMin,
                     operationType: log.serviceTypeName || (log.operationType === "lift" ? "Dizanje iz mora" : log.operationType === "lower" ? "Spuštanje u more" : log.operationType === "move" ? "Premještanje" : "Održavanje"),
                     vesselName: log.vesselName || "—",
                     vesselRegistration: log.vesselRegistration || "—",
@@ -578,10 +581,10 @@ export const reportsRouter = router({
             const totalDurationMinutes = formattedEntries.reduce((acc, curr) => acc + (curr.durationMinutes || 0), 0);
             const totalHours = Number((totalDurationMinutes / 60).toFixed(1));
 
-            const liftsCount = formattedEntries.filter(e => e.operationType.toLowerCase().includes("dizanje") || e.operationType.toLowerCase().includes("vađenje") || e.operationCategory === "lift_from_sea").length;
-            const lowersCount = formattedEntries.filter(e => e.operationType.toLowerCase().includes("spuštanje") || e.operationCategory === "lower_to_sea").length;
-            const movesCount = formattedEntries.filter(e => e.operationType.toLowerCase().includes("premještanje") || e.operationCategory === "move").length;
-            const maintenanceCount = formattedEntries.filter(e => e.isMaintenance || e.operationType.toLowerCase().includes("održavanje") || e.operationCategory === "maintenance").length;
+            const liftsCount = formattedEntries.filter(e => (e.operationType || "").toLowerCase().includes("dizanje") || (e.operationType || "").toLowerCase().includes("vađenje") || e.operationCategory === "lift_from_sea").length;
+            const lowersCount = formattedEntries.filter(e => (e.operationType || "").toLowerCase().includes("spuštanje") || e.operationCategory === "lower_to_sea").length;
+            const movesCount = formattedEntries.filter(e => (e.operationType || "").toLowerCase().includes("premještanje") || e.operationCategory === "move").length;
+            const maintenanceCount = formattedEntries.filter(e => e.isMaintenance || (e.operationType || "").toLowerCase().includes("održavanje") || e.operationCategory === "maintenance").length;
 
             return {
                 craneInfo,

@@ -7,8 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { ShieldAlert, Download, FileSpreadsheet, Printer, Users, RefreshCw } from "lucide-react";
 import * as XLSX from "xlsx";
+import { formatAppDate } from "@/lib/date-utils";
+import { useLang } from "@/contexts/LangContext";
 
 export default function ReportMemberFeeAdjustments() {
+    const { lang } = useLang();
     const currentYear = new Date().getFullYear();
     const [selectedYear, setSelectedYear] = useState<number>(currentYear);
 
@@ -29,7 +32,7 @@ export default function ReportMemberFeeAdjustments() {
             "Naziv zadužene usluge": e.serviceItemName,
             "Plovilo": e.vesselName,
             "Registracija": e.vesselRegistration,
-            "Datum operacije": e.eventDate ? new Date(e.eventDate).toLocaleDateString("hr-HR") : "",
+            "Datum operacije": formatAppDate(e.eventDate, lang),
             "Napomena": e.note,
             "Status knjiženja u ERP-u": e.erpStatus === "processed_in_membership_renewal" ? "Proknjiženo" : "Čeka obnovu članarine",
         }));
@@ -155,7 +158,7 @@ export default function ReportMemberFeeAdjustments() {
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-xs">
-                                            {e.eventDate ? new Date(e.eventDate).toLocaleDateString("hr-HR") : "—"}
+                                            {formatAppDate(e.eventDate, lang)}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {e.erpStatus === "processed_in_membership_renewal" ? (
