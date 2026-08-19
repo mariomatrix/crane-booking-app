@@ -1,0 +1,3142 @@
+// ============================================================================
+// BATCH 6/9: Admin Panel 1: Akvatorij & Mapa vezova, Računi & e-Računi, Radni nalozi, Karton člana
+// ============================================================================
+
+client/src/pages/admin/AdminLayout.tsx
+import { useAuth } from "@/_core/hooks/useAuth";
+import DashboardLayout from "@/components/DashboardLayout";
+import { useLocation } from "wouter";
+import { useEffect } from "react";
+
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const [location, setLocation] = useLocation();
+
+  const adminOnlyRoutes = [
+    "/admin/settings",
+    "/admin/staff",
+    "/admin/cranes",
+    "/admin/service-types",
+    "/admin/seasons",
+    "/admin/holidays",
+    "/admin/audit-log",
+    "/admin/users",
+  ];
+
+  const isAdminOnly = adminOnlyRoutes.some(route => location.startsWith(route));
+
+  useEffect(() => {
+    if (!loading && user) {
+      if (user.role !== "admin" && user.role !== "operator") {
+        setLocation("/");
+      } else if (user.role === "operator" && isAdminOnly) {
+        setLocation("/admin/calendar");
+      }
+    }
+  }, [loading, user, location, isAdminOnly, setLocation]);
+
+  if (loading) return null;
+  if (!user || (user.role !== "admin" && user.role !== "operator")) return null;
+  if (user.role === "operator" && isAdminOnly) return null;
+
+  return <DashboardLayout>{children}</DashboardLayout>;
+}
+
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/admin/AdminDashboard.tsx
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { trpc } from "@/lib/trpc";
+import { Button } from "@/components/ui/button";
+import { BarChart3, Clock, CheckCircle, XCircle, Users, Plus } from "lucide-react";
+import { useLang } from "@/contexts/LangContext";
+import { useMemo, useState } from "react";
+import { useLocation } from "wouter";
+import { formatAppDate } from "@/lib/date-utils";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
+
+export default function AdminDashboard() {
+  const { t, lang } = useLang();
+  const isHr = lang === "hr";
+  const [, setLocation] = useLocation();
+  const utils = trpc.useUtils();
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const reservationsQuery = trpc.reservation.listAll.useQuery({ pageSize: 100 });
+  const allReservations = reservationsQuery.data?.data || [];
+  const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
+  const usersQuery = trpc.user.list.useQuery({ pageSize: 100 });
+  const totalUsers = usersQuery.data?.total || 0;
+  const totalReservations = reservationsQuery.data?.total || 0;
+
+  const stats = useMemo(() => {
+    const pending = allReservations.filter((r: any) => r.status === "pending").length;
+    const approved = allReservations.filter((r: any) => r.status === "approved").length;
+    const rejected = allReservations.filter((r: any) => r.status === "rejected").length;
+    const activeCranes = cranesList.filter((c: any) => c.isActive).length;
+    return { pending, approved, rejected, activeCranes, total: totalReservations };
+  }, [allReservations, cranesList]);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-semibold">{isHr ? "Nadzorna ploča" : "Dashboard"}</h2>
+          <p className="text-sm text-muted-foreground">{isHr ? "Pregled sustava rezervacija dizalica." : "Overview of crane reservation system."}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setShowCreateDialog(true)} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+            <Plus className="h-4 w-4" />
+            <span>{isHr ? "Nova rezervacija" : "New Reservation"}</span>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setLocation("/admin/analytics")} className="gap-2">
+            <BarChart3 className="h-4 w-4" />
+            {isHr ? "Detaljna analitika" : "Detailed analytics"}
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Nova rezervacija</DialogTitle>
+            <DialogDescription>
+              Kreirajte novu rezervaciju za postojećeg ili novog korisnika.
+            </DialogDescription>
+          </DialogHeader>
+          <AdminReservationForm
+            onSuccess={() => {
+              setShowCreateDialog(false);
+              utils.reservation.listAll.invalidate();
+            }}
+            onCancel={() => setShowCreateDialog(false)}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setLocation("/admin/reservations?status=pending")}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {isHr ? "Zahtjevi na čekanju" : "Pending Requests"}
+            </CardTitle>
+            <Clock className="h-4 w-4 text-amber-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.pending}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {isHr ? "Čeka pregled operatera" : "Awaiting review"}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setLocation("/admin/reservations?status=approved")}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {isHr ? "Odobreni zahtjevi" : "Approved"}
+            </CardTitle>
+            <CheckCircle className="h-4 w-4 text-green-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.approved}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {isHr ? "Aktivne rezervacije" : "Active reservations"}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setLocation("/admin/reservations?status=rejected")}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {isHr ? "Odbijeni zahtjevi" : "Rejected"}
+            </CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.rejected}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {isHr ? "Odbijeni zahtjevi" : "Declined requests"}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:bg-accent/50 transition-colors" onClick={() => setLocation("/admin/users")}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {t.admin.users}
+            </CardTitle>
+            <Users className="h-4 w-4 text-primary" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalUsers}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              {isHr ? "Registrirani korisnici" : "Registered accounts"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Recent pending reservations */}
+      {stats.pending > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              {isHr ? "Nedavni zahtjevi na čekanju" : "Recent Pending Requests"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {allReservations
+                .filter((r) => r.status === "pending")
+                .slice(0, 5)
+                .map((r: any) => {
+                  const title = r.serviceType?.name ?? (r.vesselRegistration ? `Plovilo ${r.vesselRegistration}` : (r.crane?.name ? `Dizalica: ${r.crane.name}` : (r.reservationNumber ? `Rezervacija ${r.reservationNumber}` : (isHr ? "Zahtjev za rezervaciju" : "Reservation Request"))));
+                  const userName = r.user?.name ?? (isHr ? "Nepoznat korisnik" : "Unknown user");
+                  const dateText = r.scheduledStart 
+                    ? formatAppDate(r.scheduledStart, lang as any, true) 
+                    : (r.requestedDate ? formatAppDate(r.requestedDate, lang as any) : "");
+                  const craneText = r.crane?.name 
+                    ? ` (${r.crane.name})` 
+                    : (isHr ? " (Dizalica nije dodijeljena)" : " (No crane assigned)");
+
+                  return (
+                    <div key={r.id} className="flex items-center justify-between py-2 border-b last:border-0">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {title}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {userName} — {dateText}{craneText}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-amber-600 font-medium bg-amber-50 dark:bg-amber-950/40 px-2 py-1 rounded border border-amber-200 dark:border-amber-900/50">
+                        <Clock className="h-3 w-3" />
+                        {isHr ? "Na čekanju" : "Pending"}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/admin/AdminAkvatorijMap.tsx
+/**
+ * PŠD Špinut — Autentična i napredna operativna shema privezišta & akvatorija
+ * 
+ * Izgrađeno prema uzoru na Screenshot_30.png s naprednim poboljšanjima:
+ * - Visokorazlučiva pontonska rešetka (Tight High-Density Pontoon Grid)
+ * - Puna podrška za DRAG & DROP premještanje i zamjenu vezova (Swap)
+ * - Vertikalni pontoni (G1-G12, ZO, L) sa središnjom betonskom kralježnicom (walkway spine)
+ * - Fiksne kompaktne ćelije vezova (135x40px) s registracijom, imenom vlasnika i statusnim bojama
+ * - 2D fluidno pomicanje (horizontalno i vertikalno)
+ * - Pametna tražilica sa zlatnim spotlight fokusom i automatskim centriranjem
+ * - Pretraživi Combobox za dodjelu plovila sa zaštitom od višestrukih vezova i potvrdom premještanja
+ */
+import React, { useState, useMemo, useRef } from "react";
+import { trpc } from "@/lib/trpc";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    Sheet,
+    SheetContent,
+    SheetHeader,
+    SheetTitle,
+    SheetDescription,
+} from "@/components/ui/sheet";
+import {
+    Anchor,
+    Search,
+    Ship,
+    AlertTriangle,
+    CheckCircle2,
+    X,
+    ExternalLink,
+    Plus,
+    Compass,
+    SlidersHorizontal,
+    Table,
+    ArrowRightLeft,
+    ArrowUp,
+    Move,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useLocation } from "wouter";
+
+// Statusi vezova prema Screenshot_30 uzorku
+const STATUS_STYLES: Record<
+    string,
+    { label: string; bg: string; text: string; subText: string; border: string; dot: string; isVacant?: boolean }
+> = {
+    vacant: {
+        label: "Slobodan vez",
+        bg: "bg-[#10b981] hover:bg-[#059669]",
+        text: "text-white font-bold",
+        subText: "text-emerald-100",
+        border: "border-emerald-600",
+        dot: "bg-white",
+        isVacant: true,
+    },
+    occupied: {
+        label: "Zauzet (Član)",
+        bg: "bg-[#e2e8f0] hover:bg-[#cbd5e1] dark:bg-[#1e293b] dark:hover:bg-[#334155]",
+        text: "text-slate-900 dark:text-white font-bold",
+        subText: "text-slate-600 dark:text-slate-300",
+        border: "border-slate-300 dark:border-slate-700",
+        dot: "bg-blue-600",
+    },
+    transit: {
+        label: "Tranzitni gost",
+        bg: "bg-[#fef08a] hover:bg-[#fde047] dark:bg-[#713f12] dark:hover:bg-[#854d0e]",
+        text: "text-amber-950 dark:text-amber-100 font-bold",
+        subText: "text-amber-800 dark:text-amber-200",
+        border: "border-amber-400 dark:border-amber-700",
+        dot: "bg-amber-600",
+    },
+    debt_block: {
+        label: "Dugovanje / Blokada",
+        bg: "bg-[#fee2e2] hover:bg-[#fecaca] dark:bg-[#7f1d1d] dark:hover:bg-[#991b1b]",
+        text: "text-rose-950 dark:text-rose-100 font-bold",
+        subText: "text-rose-800 dark:text-rose-200",
+        border: "border-rose-400 dark:border-rose-700",
+        dot: "bg-rose-600",
+    },
+    maintenance: {
+        label: "Servis / Kvar",
+        bg: "bg-[#64748b] hover:bg-[#475569]",
+        text: "text-white font-bold",
+        subText: "text-slate-200",
+        border: "border-slate-600",
+        dot: "bg-slate-400",
+    },
+    reserved: {
+        label: "Rezervirano",
+        bg: "bg-[#e9d5ff] hover:bg-[#d8b4fe] dark:bg-[#581c87]",
+        text: "text-purple-950 dark:text-purple-100 font-bold",
+        subText: "text-purple-800 dark:text-purple-200",
+        border: "border-purple-400 dark:border-purple-700",
+        dot: "bg-purple-600",
+    },
+};
+
+export default function AdminAkvatorijMap() {
+    const [, setLocation] = useLocation();
+
+    // tRPC Queryji
+    const { data: mapData, isLoading, refetch } = trpc.berths.getAkvatorijMapData.useQuery();
+    const { data: assignableVessels } = trpc.berths.listAssignableVessels.useQuery();
+
+    // Mutacije
+    const updateStatusMutation = trpc.berths.updateStatus.useMutation({
+        onSuccess: () => {
+            toast.success("Status veza uspješno ažuriran");
+            refetch();
+            if (selectedBerth) {
+                setSelectedBerth((prev: any) => ({ ...prev, status: pendingStatus }));
+            }
+        },
+        onError: (err) => toast.error(`Greška: ${err.message}`),
+    });
+
+    const assignVesselMutation = trpc.berths.assignVessel.useMutation({
+        onSuccess: () => {
+            toast.success("Plovilo uspješno postavljeno na vez");
+            setIsAssignModalOpen(false);
+            setRelocationConflict(null);
+            refetch();
+            setSelectedBerth(null);
+        },
+        onError: (err) => {
+            if (err.message.includes("se već nalazi na vezu")) {
+                const targetVessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
+                setRelocationConflict({
+                    vesselName: targetVessel?.vesselName || targetVessel?.vesselRegistration || "Odabrano plovilo",
+                    vesselRegistration: targetVessel?.vesselRegistration || "",
+                    message: err.message,
+                });
+            } else {
+                toast.error(`Greška: ${err.message}`);
+            }
+        },
+    });
+
+    const swapBerthsMutation = trpc.berths.swapBerths.useMutation({
+        onSuccess: () => {
+            toast.success("Vezovi su uspješno zamijenjeni (Swap)");
+            setSwapModalData(null);
+            refetch();
+        },
+        onError: (err) => toast.error(`Greška pri zamjeni: ${err.message}`),
+    });
+
+    const unassignVesselMutation = trpc.berths.unassignVessel.useMutation({
+        onSuccess: () => {
+            toast.success("Vez je uspješno oslobođen");
+            refetch();
+            setSelectedBerth(null);
+        },
+        onError: (err) => toast.error(`Greška: ${err.message}`),
+    });
+
+    // Stanja UI-ja
+    const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+    const [selectedPierFilter, setSelectedPierFilter] = useState<string>("ALL");
+    const [statusFilter, setStatusFilter] = useState<string>("ALL");
+    const [searchQuery, setSearchQuery] = useState<string>("");
+    const [highlightedBerthId, setHighlightedBerthId] = useState<string | null>(null);
+    const [zoomLevel, setZoomLevel] = useState<"compact" | "normal" | "large">("normal");
+
+    const [selectedBerth, setSelectedBerth] = useState<any | null>(null);
+    const [pendingStatus, setPendingStatus] = useState<string>("");
+
+    // Drag & Drop stanja
+    const [draggedBerth, setDraggedBerth] = useState<any | null>(null);
+    const [dragOverBerthId, setDragOverBerthId] = useState<string | null>(null);
+    const [swapModalData, setSwapModalData] = useState<{
+        sourceBerth: any;
+        targetBerth: any;
+    } | null>(null);
+
+    // Modal za dodjelu plovila & Combobox
+    const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+    const [vesselSearchQuery, setVesselSearchQuery] = useState("");
+    const [selectedVesselId, setSelectedVesselId] = useState<string>("");
+    const [contractNumber, setContractNumber] = useState<string>("");
+    const [relocationConflict, setRelocationConflict] = useState<{
+        vesselName: string;
+        vesselRegistration: string;
+        message: string;
+    } | null>(null);
+
+    // Refovi za skrolanje
+    const berthRefs = useRef<Record<string, HTMLDivElement | null>>({});
+    const containerRef = useRef<HTMLDivElement | null>(null);
+
+    // Obrada Drag & Drop spuštanja
+    const handleBerthDrop = (targetBerth: any) => {
+        if (!draggedBerth || draggedBerth.id === targetBerth.id) {
+            setDraggedBerth(null);
+            setDragOverBerthId(null);
+            return;
+        }
+
+        if (targetBerth.status === "vacant") {
+            // Drop na slobodan vez -> instant premještanje
+            assignVesselMutation.mutate({
+                berthId: targetBerth.id,
+                vesselId: draggedBerth.vesselId,
+                userId: draggedBerth.userId,
+                forceRelocate: true,
+            });
+            toast.success(
+                `Plovilo ${draggedBerth.vesselRegistration || draggedBerth.vesselName} premješteno s veza ${draggedBerth.code} na vez ${targetBerth.code}`
+            );
+        } else {
+            // Drop na zauzet vez -> ponudi Swap ili zamjenu
+            setSwapModalData({
+                sourceBerth: draggedBerth,
+                targetBerth,
+            });
+        }
+
+        setDraggedBerth(null);
+        setDragOverBerthId(null);
+    };
+
+    // Pametna tražilica s auto-fokusom
+    const searchResults = useMemo(() => {
+        if (!searchQuery.trim() || !mapData?.piers) return [];
+        const q = searchQuery.toLowerCase().trim();
+        const matches: any[] = [];
+
+        for (const pier of mapData.piers) {
+            for (const b of pier.berths) {
+                if (
+                    b.code.toLowerCase().includes(q) ||
+                    b.vesselName?.toLowerCase().includes(q) ||
+                    b.vesselRegistration?.toLowerCase().includes(q) ||
+                    b.userName?.toLowerCase().includes(q) ||
+                    b.userOib?.includes(q)
+                ) {
+                    matches.push({ ...b, pierName: pier.name, pierCode: pier.code });
+                }
+            }
+        }
+        return matches;
+    }, [searchQuery, mapData]);
+
+    const handleSelectSearchResult = (berth: any) => {
+        setHighlightedBerthId(berth.id);
+        setSelectedBerth(berth);
+
+        setTimeout(() => {
+            const el = berthRefs.current[berth.id];
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+            }
+        }, 80);
+    };
+
+    // Pretraživač za Combobox u modalu
+    const filteredAssignableVessels = useMemo(() => {
+        if (!assignableVessels) return [];
+        if (!vesselSearchQuery.trim()) return assignableVessels;
+        const q = vesselSearchQuery.toLowerCase().trim();
+
+        return assignableVessels.filter((v) => {
+            const reg = v.vesselRegistration?.toLowerCase() || "";
+            const name = v.vesselName?.toLowerCase() || "";
+            const owner = (v.ownerName || `${v.ownerFirstName} ${v.ownerLastName}`).toLowerCase();
+            const oib = v.ownerOib || "";
+            return reg.includes(q) || name.includes(q) || owner.includes(q) || oib.includes(q);
+        });
+    }, [assignableVessels, vesselSearchQuery]);
+
+    // Filtrirani podaci po gatovima
+    const displayedPiers = useMemo(() => {
+        if (!mapData?.piers) return [];
+        let piers = mapData.piers;
+
+        if (selectedPierFilter !== "ALL") {
+            piers = piers.filter((p) => p.code === selectedPierFilter);
+        }
+
+        return piers.map((pier) => {
+            let berths = pier.berths;
+            if (statusFilter !== "ALL") {
+                berths = berths.filter((b) => b.status === statusFilter);
+            }
+            return {
+                ...pier,
+                filteredBerths: berths,
+            };
+        });
+    }, [mapData, selectedPierFilter, statusFilter]);
+
+    // Odvajanje pontona: Gatovi 1-12, Lukobran L, Zapadna Obala ZO
+    const verticalPiers = useMemo(
+        () => displayedPiers.filter((p) => p.code.startsWith("G") || p.code === "ZO" || p.code === "L"),
+        [displayedPiers]
+    );
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[600px] gap-4 bg-[#0e1726]">
+                <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-slate-300 font-medium tracking-wide">Učitavanje akvatorija i pontona PŠD Špinut...</p>
+            </div>
+        );
+    }
+
+    const stats = mapData?.stats || {
+        totalBerths: 811,
+        vacant: 0,
+        occupied: 0,
+        transit: 0,
+        debtBlock: 0,
+        maintenance: 0,
+        reserved: 0,
+    };
+
+    // Dimenzije ćelije ovisno o zoomLevelu
+    const cardWidth = zoomLevel === "compact" ? "w-[120px]" : zoomLevel === "large" ? "w-[155px]" : "w-[136px]";
+    const cardHeight = zoomLevel === "compact" ? "h-[36px]" : zoomLevel === "large" ? "h-[46px]" : "h-[40px]";
+    const fontSizeTitle = zoomLevel === "compact" ? "text-[11px]" : zoomLevel === "large" ? "text-[13px]" : "text-[12px]";
+    const fontSizeSub = zoomLevel === "compact" ? "text-[9px]" : zoomLevel === "large" ? "text-[11px]" : "text-[10px]";
+
+    return (
+        <div className="flex flex-col h-[calc(100vh-4rem)] bg-[#0b1320] text-slate-100 overflow-hidden font-sans select-none">
+            {/* ─── 1. GORNJA KONTROLNA TRAKA (Screenshot_30 stil) ────────────────── */}
+            <div className="bg-[#111c2e] border-b border-[#1e2f4a] p-3 flex flex-col gap-2.5 shrink-0 shadow-md">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    {/* Naziv i statistika */}
+                    <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow">
+                            <Anchor className="w-5 h-5" />
+                        </div>
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-base font-bold tracking-wide text-white uppercase">
+                                    PŠD ŠPINUT — UPRAVLJANJE AKVATORIJEM & DRAG & DROP VEZOVA
+                                </h1>
+                                <span className="px-2 py-0.5 rounded bg-blue-900/60 text-blue-300 font-mono text-xs border border-blue-700">
+                                    811 vezova
+                                </span>
+                            </div>
+                            <p className="text-[11px] text-slate-400">
+                                Povucite (Drag & Drop) bilo koji brod za premještanje ili zamjenu veza
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Pretraga i filtri */}
+                    <div className="flex items-center gap-2">
+                        {/* Tražilica */}
+                        <div className="relative w-72">
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <Input
+                                placeholder="Traži reg. (ST-1234), brod, člana, OIB..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9 h-8 text-xs bg-[#0c1524] border-[#1e2f4a] text-white placeholder:text-slate-500 focus:border-blue-500"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery("")}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+
+                            {/* Dropdown s rezultatima pretrage */}
+                            {searchResults.length > 0 && searchQuery.trim().length >= 2 && (
+                                <div className="absolute top-9 left-0 right-0 z-50 bg-[#162338] border border-[#233857] rounded-lg shadow-2xl max-h-72 overflow-y-auto p-1 text-xs">
+                                    <div className="px-2 py-1 text-[10px] font-semibold text-slate-400 uppercase border-b border-[#233857]">
+                                        Pronađeno ({searchResults.length} vezova)
+                                    </div>
+                                    {searchResults.slice(0, 8).map((res) => (
+                                        <div
+                                            key={res.id}
+                                            onClick={() => handleSelectSearchResult(res)}
+                                            className="p-2 hover:bg-[#1e3250] rounded cursor-pointer flex items-center justify-between transition-colors"
+                                        >
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-mono font-bold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-800">
+                                                    {res.code}
+                                                </span>
+                                                <div>
+                                                    <p className="font-bold text-white">
+                                                        {res.vesselRegistration || res.vesselName || "Slobodan vez"}
+                                                    </p>
+                                                    <p className="text-[11px] text-slate-300">
+                                                        {res.userName || res.pierName}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <Badge variant="outline" className={`text-[10px] ${STATUS_STYLES[res.status]?.bg} ${STATUS_STYLES[res.status]?.text}`}>
+                                                {STATUS_STYLES[res.status]?.label}
+                                            </Badge>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Odabir gata */}
+                        <Select value={selectedPierFilter} onValueChange={setSelectedPierFilter}>
+                            <SelectTrigger className="w-36 h-8 text-xs bg-[#0c1524] border-[#1e2f4a] text-white">
+                                <SelectValue placeholder="Gat" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#162338] border-[#233857] text-white">
+                                <SelectItem value="ALL">Svi gatovi (1–12, L, ZO)</SelectItem>
+                                {mapData?.piers.map((p) => (
+                                    <SelectItem key={p.id} value={p.code}>
+                                        {p.name} ({p.totalBerths})
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        {/* Status filter */}
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-32 h-8 text-xs bg-[#0c1524] border-[#1e2f4a] text-white">
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#162338] border-[#233857] text-white">
+                                <SelectItem value="ALL">Svi statusi</SelectItem>
+                                <SelectItem value="occupied">Zauzet (Član)</SelectItem>
+                                <SelectItem value="vacant">Slobodan</SelectItem>
+                                <SelectItem value="transit">Tranzit</SelectItem>
+                                <SelectItem value="debt_block">Dugovanje</SelectItem>
+                                <SelectItem value="maintenance">Servis</SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        {/* Zoom kontrole */}
+                        <div className="flex border border-[#1e2f4a] rounded overflow-hidden bg-[#0c1524]">
+                            <Button
+                                size="sm"
+                                variant={zoomLevel === "compact" ? "default" : "ghost"}
+                                onClick={() => setZoomLevel("compact")}
+                                className="h-8 px-2 text-[11px] rounded-none"
+                                title="Kompaktan prikaz"
+                            >
+                                S
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant={zoomLevel === "normal" ? "default" : "ghost"}
+                                onClick={() => setZoomLevel("normal")}
+                                className="h-8 px-2 text-[11px] rounded-none"
+                                title="Standardni prikaz"
+                            >
+                                M
+                            </Button>
+                            <Button
+                                size="sm"
+                                variant={zoomLevel === "large" ? "default" : "ghost"}
+                                onClick={() => setZoomLevel("large")}
+                                className="h-8 px-2 text-[11px] rounded-none"
+                                title="Uvećani prikaz"
+                            >
+                                L
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Semafor traka u boji */}
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[#1e2f4a] text-[11px]">
+                    <span className="font-semibold text-slate-400 mr-1">Statusi:</span>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#e2e8f0] text-slate-900 font-bold border border-slate-300">
+                        <span className="w-2 h-2 rounded-full bg-blue-600" />
+                        <span>Zauzet (Član):</span>
+                        <strong>{stats.occupied}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#10b981] text-white font-bold border border-emerald-600">
+                        <ArrowUp className="w-3 h-3 text-white" />
+                        <span>Slobodno:</span>
+                        <strong>{stats.vacant}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#fef08a] text-amber-950 font-bold border border-amber-400">
+                        <span className="w-2 h-2 rounded-full bg-amber-600" />
+                        <span>Tranzit:</span>
+                        <strong>{stats.transit}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#fee2e2] text-rose-950 font-bold border border-rose-400">
+                        <span className="w-2 h-2 rounded-full bg-rose-600" />
+                        <span>Dugovanje:</span>
+                        <strong>{stats.debtBlock}</strong>
+                    </div>
+                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#64748b] text-white font-bold border border-slate-600">
+                        <span className="w-2 h-2 rounded-full bg-slate-400" />
+                        <span>Servis:</span>
+                        <strong>{stats.maintenance}</strong>
+                    </div>
+                </div>
+            </div>
+
+            {/* ─── 2. SREDIŠNJA 2D PONTONSKA REŠETKA S DRAG & DROP PODRŠKOM ───────── */}
+            <div
+                ref={containerRef}
+                className="flex-1 overflow-x-auto overflow-y-auto p-4 flex gap-5 bg-[#0b1320]"
+                style={{
+                    backgroundImage: "radial-gradient(#152438 1px, transparent 1px)",
+                    backgroundSize: "20px 20px",
+                }}
+            >
+                {verticalPiers.map((pier) => {
+                    const totalRows = Math.ceil(pier.totalBerths / 2);
+                    const berthRows: { rowNumber: number; left?: any; right?: any }[] = [];
+
+                    for (let r = 1; r <= totalRows; r++) {
+                        const leftNum = (r - 1) * 2 + 1;
+                        const rightNum = (r - 1) * 2 + 2;
+
+                        const leftBerth = pier.filteredBerths.find((b) => b.berthNumber === leftNum);
+                        const rightBerth = pier.filteredBerths.find((b) => b.berthNumber === rightNum);
+
+                        berthRows.push({
+                            rowNumber: r,
+                            left: leftBerth,
+                            right: rightBerth,
+                        });
+                    }
+
+                    const occupiedCount = pier.filteredBerths.filter((b) => b.status !== "vacant").length;
+                    const freeCount = pier.totalBerths - occupiedCount;
+                    const occupancyPercent = Math.round((occupiedCount / pier.totalBerths) * 100) || 0;
+
+                    return (
+                        <div
+                            key={pier.id}
+                            className="flex flex-col shrink-0 bg-[#131f33] border-2 border-[#203350] rounded-xl shadow-xl overflow-hidden h-fit"
+                        >
+                            {/* Zaglavlje Pontona (Ponton X) */}
+                            <div className="bg-[#1b2b44] border-b border-[#284065] p-2.5 flex flex-col gap-1">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="w-5 h-5 rounded bg-blue-600 text-white flex items-center justify-center font-mono font-bold text-xs">
+                                            {pier.code}
+                                        </span>
+                                        <h3 className="font-bold text-sm text-white tracking-wide uppercase">
+                                            {pier.name}
+                                        </h3>
+                                    </div>
+                                    <span className="text-[11px] font-mono text-slate-300">
+                                        {pier.totalBerths} vezova
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-slate-300">
+                                    <span>Zauzeto: <strong className="text-white">{occupiedCount}</strong> | Slobodno: <strong className="text-emerald-400">{freeCount}</strong></span>
+                                    <span className="font-bold text-blue-400">{occupancyPercent}%</span>
+                                </div>
+                                <div className="w-full h-1 bg-[#0b1320] rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-blue-500 transition-all duration-300"
+                                        style={{ width: `${occupancyPercent}%` }}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Oznake strana (Strana 1 | Br. | Strana 2) */}
+                            <div className="grid grid-cols-[1fr_32px_1fr] bg-[#0e1726] border-b border-[#203350] text-[10px] font-bold text-slate-400 text-center py-1">
+                                <span>Strana 1</span>
+                                <span className="text-slate-500 font-mono">#</span>
+                                <span>Strana 2</span>
+                            </div>
+
+                            {/* Kompaktna rešetka vezova (bez rupa) */}
+                            <div className="flex flex-col divide-y divide-[#203350] bg-[#0c1524]">
+                                {berthRows.map((row) => (
+                                    <div
+                                        key={row.rowNumber}
+                                        className="grid grid-cols-[auto_32px_auto] items-center"
+                                    >
+                                        {/* Lijeva ćelija (Strana 1) */}
+                                        {row.left ? (
+                                            <BerthCell
+                                                berth={row.left}
+                                                widthClass={cardWidth}
+                                                heightClass={cardHeight}
+                                                titleSizeClass={fontSizeTitle}
+                                                subSizeClass={fontSizeSub}
+                                                isHighlighted={highlightedBerthId === row.left.id}
+                                                isDragOver={dragOverBerthId === row.left.id}
+                                                isBeingDragged={draggedBerth?.id === row.left.id}
+                                                onDragStart={() => setDraggedBerth(row.left)}
+                                                onDragEnd={() => { setDraggedBerth(null); setDragOverBerthId(null); }}
+                                                onDragOver={() => { if (dragOverBerthId !== row.left.id) setDragOverBerthId(row.left.id); }}
+                                                onDragLeave={() => { if (dragOverBerthId === row.left.id) setDragOverBerthId(null); }}
+                                                onDrop={() => handleBerthDrop(row.left)}
+                                                onSelect={() => {
+                                                    setSelectedBerth(row.left);
+                                                    setHighlightedBerthId(row.left.id);
+                                                }}
+                                                cellRef={(el) => (berthRefs.current[row.left.id] = el)}
+                                            />
+                                        ) : (
+                                            <div className={`${cardWidth} ${cardHeight} bg-[#0b1320] flex items-center justify-center text-[10px] text-slate-700`}>
+                                                —
+                                            </div>
+                                        )}
+
+                                        {/* Središnja betonska kralježnica s brojem */}
+                                        <div className={`${cardHeight} w-[32px] bg-[#1a273e] text-slate-200 border-x border-[#284065] flex items-center justify-center font-mono font-bold text-[11px]`}>
+                                            {row.rowNumber.toString().padStart(2, "0")}
+                                        </div>
+
+                                        {/* Desna ćelija (Strana 2) */}
+                                        {row.right ? (
+                                            <BerthCell
+                                                berth={row.right}
+                                                widthClass={cardWidth}
+                                                heightClass={cardHeight}
+                                                titleSizeClass={fontSizeTitle}
+                                                subSizeClass={fontSizeSub}
+                                                isHighlighted={highlightedBerthId === row.right.id}
+                                                isDragOver={dragOverBerthId === row.right.id}
+                                                isBeingDragged={draggedBerth?.id === row.right.id}
+                                                onDragStart={() => setDraggedBerth(row.right)}
+                                                onDragEnd={() => { setDraggedBerth(null); setDragOverBerthId(null); }}
+                                                onDragOver={() => { if (dragOverBerthId !== row.right.id) setDragOverBerthId(row.right.id); }}
+                                                onDragLeave={() => { if (dragOverBerthId === row.right.id) setDragOverBerthId(null); }}
+                                                onDrop={() => handleBerthDrop(row.right)}
+                                                onSelect={() => {
+                                                    setSelectedBerth(row.right);
+                                                    setHighlightedBerthId(row.right.id);
+                                                }}
+                                                cellRef={(el) => (berthRefs.current[row.right.id] = el)}
+                                            />
+                                        ) : (
+                                            <div className={`${cardWidth} ${cardHeight} bg-[#0b1320] flex items-center justify-center text-[10px] text-slate-700`}>
+                                                —
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* ─── 3. BOČNI DRAWER ZA DETALJE I UPRAVLJANJE VEZOM ─────────────── */}
+            <Sheet open={!!selectedBerth} onOpenChange={(open) => !open && setSelectedBerth(null)}>
+                <SheetContent className="w-[420px] sm:w-[480px] overflow-y-auto p-6 bg-[#111c2e] text-slate-100 border-l border-[#1e2f4a]">
+                    {selectedBerth && (
+                        <div className="flex flex-col gap-5">
+                            <SheetHeader className="p-0 border-b border-[#1e2f4a] pb-3 text-left">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <Badge className="text-base px-3 py-1 font-mono bg-blue-600 text-white font-bold">
+                                            {selectedBerth.code}
+                                        </Badge>
+                                        <Badge variant="outline" className="text-xs text-slate-300 border-[#284065]">
+                                            {selectedBerth.side === "left" ? "Strana 1 (Zapad)" : "Strana 2 (Istok)"}
+                                        </Badge>
+                                    </div>
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-bold ${STATUS_STYLES[selectedBerth.status]?.bg} ${STATUS_STYLES[selectedBerth.status]?.text}`}>
+                                        {STATUS_STYLES[selectedBerth.status]?.label}
+                                    </span>
+                                </div>
+                                <SheetTitle className="text-base font-bold text-white mt-2">
+                                    Vez {selectedBerth.code} ({selectedBerth.pierName || "Gat"})
+                                </SheetTitle>
+                                <SheetDescription className="text-xs text-slate-400">
+                                    Maksimalne dimenzije: <strong>{selectedBerth.maxLoaM}m</strong> LOA x <strong>{selectedBerth.maxBeamM}m</strong> širina x <strong>{selectedBerth.maxDraftM}m</strong> gaz
+                                </SheetDescription>
+                            </SheetHeader>
+
+                            {/* Podaci o plovilu i članu */}
+                            {selectedBerth.vesselId || selectedBerth.vesselRegistration ? (
+                                <div className="flex flex-col gap-3.5 p-4 border border-[#233857] rounded-xl bg-[#16243a] shadow">
+                                    <div className="flex items-center justify-between border-b border-[#233857] pb-3">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="w-9 h-9 rounded-lg bg-blue-950 flex items-center justify-center text-blue-400 border border-blue-800">
+                                                <Ship className="w-5 h-5" />
+                                            </div>
+                                            <div>
+                                                <h3 className="font-bold text-sm text-white">{selectedBerth.vesselName || "Plovilo na vezu"}</h3>
+                                                <p className="font-mono text-xs text-blue-400 font-bold">{selectedBerth.vesselRegistration}</p>
+                                            </div>
+                                        </div>
+                                        <Badge variant="secondary" className="capitalize text-xs bg-slate-800 text-slate-200">
+                                            {selectedBerth.vesselType || "Brod"}
+                                        </Badge>
+                                    </div>
+
+                                    {/* Dimenzije */}
+                                    <div className="grid grid-cols-3 gap-2 text-xs text-center p-2 bg-[#0d1726] rounded-lg border border-[#1e2f4a]">
+                                        <div>
+                                            <span className="text-slate-400 block text-[10px]">Dužina</span>
+                                            <strong className="text-white">{selectedBerth.vesselLengthM ? `${selectedBerth.vesselLengthM} m` : "—"}</strong>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-400 block text-[10px]">Širina</span>
+                                            <strong className="text-white">{selectedBerth.vesselBeamM ? `${selectedBerth.vesselBeamM} m` : "—"}</strong>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-400 block text-[10px]">Gaz</span>
+                                            <strong className="text-white">{selectedBerth.vesselDraftM ? `${selectedBerth.vesselDraftM} m` : "—"}</strong>
+                                        </div>
+                                    </div>
+
+                                    {/* Vlasnik */}
+                                    <div className="flex flex-col gap-2 pt-2 border-t border-[#233857] text-xs">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-slate-400">Vlasnik (Član):</span>
+                                            <strong className="text-white">{selectedBerth.userName || `${selectedBerth.userFirstName || ""} ${selectedBerth.userLastName || ""}`}</strong>
+                                        </div>
+                                        {selectedBerth.userOib && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-slate-400">OIB:</span>
+                                                <span className="font-mono font-semibold text-slate-200">{selectedBerth.userOib}</span>
+                                            </div>
+                                        )}
+                                        {selectedBerth.userPhone && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-slate-400">Telefon:</span>
+                                                <span className="text-slate-200">{selectedBerth.userPhone}</span>
+                                            </div>
+                                        )}
+                                        {selectedBerth.contractNumber && (
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-slate-400">Broj ugovora:</span>
+                                                <span className="font-mono text-blue-400 font-semibold">{selectedBerth.contractNumber}</span>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Gumbi akcija */}
+                                    <div className="flex items-center gap-2 pt-3 border-t border-[#233857]">
+                                        {selectedBerth.userId && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="flex-1 text-xs border-[#284065] text-slate-200 hover:bg-[#1f3352]"
+                                                onClick={() => setLocation(`/admin/users/${selectedBerth.userId}/card`)}
+                                            >
+                                                <ExternalLink className="w-3.5 h-3.5 mr-1.5" /> Karton člana
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size="sm"
+                                            variant="destructive"
+                                            className="text-xs bg-rose-700 hover:bg-rose-800"
+                                            onClick={() => {
+                                                if (confirm(`Sigurno želite osloboditi vez ${selectedBerth.code}?`)) {
+                                                    unassignVesselMutation.mutate({ berthId: selectedBerth.id });
+                                                }
+                                            }}
+                                        >
+                                            Oslobodi vez
+                                        </Button>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* Vez je slobodan */
+                                <div className="p-6 border border-dashed border-[#284065] rounded-xl flex flex-col items-center justify-center gap-3 text-center bg-[#0e192a]">
+                                    <div className="w-10 h-10 rounded-full bg-emerald-950 flex items-center justify-center text-emerald-400 border border-emerald-800">
+                                        <CheckCircle2 className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                        <h4 className="font-semibold text-sm text-white">Vez je slobodan</h4>
+                                        <p className="text-xs text-slate-400">Pretražite plovilo i postavite ga na ovaj vez (ili povucite brod mišem)</p>
+                                    </div>
+                                    <Button
+                                        size="sm"
+                                        onClick={() => {
+                                            setSelectedVesselId("");
+                                            setVesselSearchQuery("");
+                                            setIsAssignModalOpen(true);
+                                        }}
+                                        className="text-xs mt-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                                    >
+                                        <Plus className="w-4 h-4 mr-1" /> + Dodajte plovilo na vez
+                                    </Button>
+                                </div>
+                            )}
+
+                            {/* Promjena statusa */}
+                            <div className="flex flex-col gap-2 pt-4 border-t border-[#1e2f4a]">
+                                <label className="text-xs font-semibold text-slate-300">Operativni status veza:</label>
+                                <Select
+                                    value={pendingStatus || selectedBerth.status}
+                                    onValueChange={(val) => {
+                                        setPendingStatus(val);
+                                        updateStatusMutation.mutate({
+                                            berthId: selectedBerth.id,
+                                            status: val as any,
+                                        });
+                                    }}
+                                >
+                                    <SelectTrigger className="text-xs h-9 bg-[#0c1524] border-[#203350] text-white">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent className="bg-[#162338] border-[#233857] text-white">
+                                        <SelectItem value="occupied">Zauzet (Član)</SelectItem>
+                                        <SelectItem value="vacant">Slobodan vez</SelectItem>
+                                        <SelectItem value="transit">Tranzitni gost</SelectItem>
+                                        <SelectItem value="debt_block">Dugovanje / Blokada</SelectItem>
+                                        <SelectItem value="maintenance">Servis / Kvar muringa</SelectItem>
+                                        <SelectItem value="reserved">Rezervirano</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                    )}
+                </SheetContent>
+            </Sheet>
+
+            {/* ─── 4. MODAL ZA PRETRAŽIVU DODJELU PLOVILA (COMBOBOX) ─────────────── */}
+            <Dialog open={isAssignModalOpen} onOpenChange={setIsAssignModalOpen}>
+                <DialogContent className="sm:max-w-[540px] bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
+                    <DialogHeader>
+                        <DialogTitle className="text-white">Dodjela plovila na vez {selectedBerth?.code}</DialogTitle>
+                        <DialogDescription className="text-xs text-slate-400">
+                            Upišite registraciju, ime broda ili člana za brzi pronalazak.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex flex-col gap-4 py-2">
+                        {/* Searchable Combobox */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                                <span>Odabir plovila:</span>
+                                <span className="text-[11px] text-slate-400">
+                                    Prikazano: {filteredAssignableVessels.length} plovila
+                                </span>
+                            </label>
+
+                            <div className="relative">
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                <Input
+                                    placeholder="Upiši reg. (ST-1234), ime broda ili vlasnika..."
+                                    value={vesselSearchQuery}
+                                    onChange={(e) => setVesselSearchQuery(e.target.value)}
+                                    className="pl-9 h-9 text-xs bg-[#0c1524] border-[#203350] text-white placeholder:text-slate-500"
+                                    autoFocus
+                                />
+                                {vesselSearchQuery && (
+                                    <button
+                                        onClick={() => setVesselSearchQuery("")}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Lista filtriranih plovila */}
+                            <div className="border border-[#203350] rounded-lg max-h-52 overflow-y-auto divide-y divide-[#1e2f4a] bg-[#0c1524] text-xs mt-1">
+                                {filteredAssignableVessels.length === 0 ? (
+                                    <div className="p-4 text-center text-slate-400 text-xs">
+                                        Nema plovila koja odgovaraju upitu "{vesselSearchQuery}"
+                                    </div>
+                                ) : (
+                                    filteredAssignableVessels.map((v) => {
+                                        const isSelected = selectedVesselId === v.vesselId;
+                                        return (
+                                            <div
+                                                key={v.vesselId}
+                                                onClick={() => setSelectedVesselId(v.vesselId)}
+                                                className={`p-2.5 cursor-pointer flex items-center justify-between transition-colors ${
+                                                    isSelected
+                                                        ? "bg-blue-900/80 border-l-4 border-blue-400 text-white font-bold"
+                                                        : "hover:bg-[#162338]"
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-2.5">
+                                                    <span className="font-mono font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
+                                                        {v.vesselRegistration || "BEZ REG"}
+                                                    </span>
+                                                    <div>
+                                                        <p className="font-bold text-white">
+                                                            {v.vesselName || "—"}
+                                                        </p>
+                                                        <p className="text-[11px] text-slate-400">
+                                                            {v.ownerName || `${v.ownerFirstName || ""} ${v.ownerLastName || ""}`} {v.ownerOib ? `(${v.ownerOib})` : ""}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right text-[11px] text-slate-400">
+                                                    <span className="block font-medium text-white">{v.vesselLengthM ? `${v.vesselLengthM} m` : ""}</span>
+                                                    <span className="capitalize">{v.vesselType || "Brod"}</span>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Broj ugovora */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-semibold text-slate-300">Broj ugovora o vezu:</label>
+                            <Input
+                                placeholder="npr. 469/2001 ili UG-2026-0042"
+                                value={contractNumber}
+                                onChange={(e) => setContractNumber(e.target.value)}
+                                className="text-xs h-9 bg-[#0c1524] border-[#203350] text-white"
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setIsAssignModalOpen(false)} className="border-[#284065] text-slate-300">
+                            Odustani
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!selectedVesselId || assignVesselMutation.isPending}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
+                            onClick={() => {
+                                const vessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
+                                if (!vessel || !selectedBerth) return;
+
+                                assignVesselMutation.mutate({
+                                    berthId: selectedBerth.id,
+                                    vesselId: vessel.vesselId,
+                                    userId: vessel.ownerId,
+                                    contractNumber: contractNumber || undefined,
+                                    assignmentType: "permanent_member",
+                                    forceRelocate: false,
+                                });
+                            }}
+                        >
+                            {assignVesselMutation.isPending ? "Postavljam..." : "Postavi plovilo na vez"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ─── 5. DIJALOG ZA POTVRDU PREMJEŠTANJA (RELOCATION) ─────────────── */}
+            <AlertDialog open={!!relocationConflict} onOpenChange={(open) => !open && setRelocationConflict(null)}>
+                <AlertDialogContent className="bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
+                    <AlertDialogHeader>
+                        <div className="flex items-center gap-2 text-amber-400">
+                            <AlertTriangle className="w-5 h-5" />
+                            <AlertDialogTitle className="text-white">Plovilo je već dodijeljeno na vez</AlertDialogTitle>
+                        </div>
+                        <AlertDialogDescription className="text-xs text-slate-300 pt-2">
+                            {relocationConflict?.message}
+                            <br /><br />
+                            <strong>Želite li automatski osloboditi prethodni vez i premjestiti plovilo na vez {selectedBerth?.code}?</strong>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => setRelocationConflict(null)} className="border-[#284065] text-slate-300">
+                            Odustani
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-bold"
+                            onClick={() => {
+                                const vessel = assignableVessels?.find((v) => v.vesselId === selectedVesselId);
+                                if (!vessel || !selectedBerth) return;
+
+                                assignVesselMutation.mutate({
+                                    berthId: selectedBerth.id,
+                                    vesselId: vessel.vesselId,
+                                    userId: vessel.ownerId,
+                                    contractNumber: contractNumber || undefined,
+                                    assignmentType: "permanent_member",
+                                    forceRelocate: true,
+                                });
+                            }}
+                        >
+                            <ArrowRightLeft className="w-4 h-4 mr-1.5" /> Da, premjesti plovilo
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* ─── 6. DIJALOG ZA ZAMJENU VEZOVA DRAG & DROP (SWAP MODAL) ────────── */}
+            <AlertDialog open={!!swapModalData} onOpenChange={(open) => !open && setSwapModalData(null)}>
+                <AlertDialogContent className="bg-[#111c2e] text-slate-100 border-[#1e2f4a]">
+                    <AlertDialogHeader>
+                        <div className="flex items-center gap-2 text-blue-400">
+                            <ArrowRightLeft className="w-5 h-5" />
+                            <AlertDialogTitle className="text-white">Drag & Drop: Zamjena ili premještanje veza</AlertDialogTitle>
+                        </div>
+                        <AlertDialogDescription className="text-xs text-slate-300 pt-2 flex flex-col gap-3">
+                            <div className="p-3 bg-[#0d1726] rounded-lg border border-[#203350] flex flex-col gap-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Izvorni vez:</span>
+                                    <strong className="text-blue-400 font-mono">{swapModalData?.sourceBerth?.code}</strong>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Plovilo A:</span>
+                                    <span className="text-white font-bold">{swapModalData?.sourceBerth?.vesselRegistration || swapModalData?.sourceBerth?.vesselName}</span>
+                                </div>
+                                <div className="border-t border-[#1e2f4a] pt-2 flex items-center justify-between">
+                                    <span className="text-slate-400">Ciljani vez:</span>
+                                    <strong className="text-emerald-400 font-mono">{swapModalData?.targetBerth?.code}</strong>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className="text-slate-400">Plovilo B:</span>
+                                    <span className="text-white font-bold">{swapModalData?.targetBerth?.vesselRegistration || swapModalData?.targetBerth?.vesselName}</span>
+                                </div>
+                            </div>
+                            <p className="text-slate-300">
+                                Odaberite želite li <strong>zamijeniti mjesta (Swap)</strong> između ova dva plovila ili premjestiti plovilo A na ciljani vez.
+                            </p>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter className="gap-2 sm:gap-0">
+                        <AlertDialogCancel onClick={() => setSwapModalData(null)} className="border-[#284065] text-slate-300">
+                            Odustani
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                            onClick={() => {
+                                if (!swapModalData) return;
+                                swapBerthsMutation.mutate({
+                                    berthIdA: swapModalData.sourceBerth.id,
+                                    berthIdB: swapModalData.targetBerth.id,
+                                });
+                            }}
+                        >
+                            <ArrowRightLeft className="w-4 h-4 mr-1.5" /> Zamijeni mjesta (Swap)
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+        </div>
+    );
+}
+
+/**
+ * Pojedinačna kompaktna ćelija veza (s Drag & Drop podrškom)
+ */
+function BerthCell({
+    berth,
+    widthClass,
+    heightClass,
+    titleSizeClass,
+    subSizeClass,
+    isHighlighted,
+    isDragOver,
+    isBeingDragged,
+    onDragStart,
+    onDragEnd,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+    onSelect,
+    cellRef,
+}: {
+    berth: any;
+    widthClass: string;
+    heightClass: string;
+    titleSizeClass: string;
+    subSizeClass: string;
+    isHighlighted: boolean;
+    isDragOver?: boolean;
+    isBeingDragged?: boolean;
+    onDragStart?: () => void;
+    onDragEnd?: () => void;
+    onDragOver?: () => void;
+    onDragLeave?: () => void;
+    onDrop?: () => void;
+    onSelect: () => void;
+    cellRef: (el: HTMLDivElement | null) => void;
+}) {
+    const isVacant = berth.status === "vacant";
+    const style = STATUS_STYLES[berth.status] || STATUS_STYLES.vacant;
+
+    return (
+        <div
+            ref={cellRef}
+            onClick={onSelect}
+            draggable={!isVacant}
+            onDragStart={(e) => {
+                if (isVacant) return;
+                e.dataTransfer.setData("application/json", JSON.stringify(berth));
+                e.dataTransfer.effectAllowed = "move";
+                onDragStart?.();
+            }}
+            onDragEnd={onDragEnd}
+            onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                onDragOver?.();
+            }}
+            onDragLeave={onDragLeave}
+            onDrop={(e) => {
+                e.preventDefault();
+                onDrop?.();
+            }}
+            className={`${widthClass} ${heightClass} ${style.bg} ${style.border} border p-1 cursor-pointer flex flex-col justify-center transition-all duration-150 relative ${
+                isBeingDragged ? "opacity-40 border-dashed" : ""
+            } ${
+                isDragOver
+                    ? "ring-4 ring-cyan-400 z-40 scale-105 shadow-2xl brightness-125"
+                    : isHighlighted
+                    ? "ring-4 ring-amber-400 z-30 scale-105 shadow-2xl"
+                    : "hover:brightness-110"
+            }`}
+            title={
+                isVacant
+                    ? `Vez ${berth.code} — Slobodan (max ${berth.maxLoaM || 10}m)`
+                    : `Vez ${berth.code} — ${berth.vesselRegistration || berth.vesselName} (${berth.userName || "Član"}) — Povucite za premještanje`
+            }
+        >
+            {isVacant ? (
+                /* Slobodan vez - Zeleni blok sa strelicom */
+                <div className="flex items-center justify-center gap-1 text-white font-bold text-[11px]">
+                    <ArrowUp className="w-3.5 h-3.5 shrink-0" />
+                    <span className="tracking-wide">SLOBODNO</span>
+                </div>
+            ) : (
+                /* Zauzet vez - Registracija + Ime člana (povlačivo) */
+                <div className="flex flex-col justify-between h-full overflow-hidden leading-none cursor-grab active:cursor-grabbing">
+                    <div className="flex items-center justify-between">
+                        <span className={`font-mono font-bold ${titleSizeClass} ${style.text} truncate tracking-tight`}>
+                            {berth.vesselRegistration || berth.vesselName || "ZAUZETO"}
+                        </span>
+                        <Move className="w-2.5 h-2.5 text-slate-400 opacity-60 shrink-0" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <span className={`truncate font-medium ${subSizeClass} ${style.subText}`}>
+                            {berth.userName || `${berth.userFirstName || ""} ${berth.userLastName || ""}`.trim() || "Član"}
+                        </span>
+                        {berth.status === "debt_block" && (
+                            <span className="text-rose-700 font-extrabold text-[9px] ml-1">DUG!</span>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/admin/AdminInvoices.tsx
+/**
+ * PŠD Špinut — Upravljanje računima & e-racuni.com integracija
+ * 
+ * Pregled izdanih računa, automatsko i ručno izdavanje računa za dizalicu i vezove,
+ * preuzimanje PDF računa s 2D barkodom i sinkronizacija uplata iz e-racuni.com.
+ */
+import React, { useState, useMemo } from "react";
+import { trpc } from "@/lib/trpc";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+} from "@/components/ui/dialog";
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
+    Search,
+    Receipt,
+    FileText,
+    Download,
+    RefreshCw,
+    Plus,
+    CheckCircle2,
+    Clock,
+    AlertCircle,
+    X,
+    ExternalLink,
+    Building2,
+    Ship,
+    User,
+    CreditCard,
+    DollarSign,
+    QrCode,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useLocation } from "wouter";
+
+// Statusi plaćanja
+const PAYMENT_STATUS_CONFIG: Record<
+    string,
+    { label: string; bg: string; text: string; dot: string }
+> = {
+    paid: {
+        label: "Plaćeno",
+        bg: "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800",
+        text: "text-emerald-700",
+        dot: "bg-emerald-500",
+    },
+    unpaid: {
+        label: "Nenaplaćeno",
+        bg: "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800",
+        text: "text-amber-700",
+        dot: "bg-amber-500",
+    },
+    partially_paid: {
+        label: "Djelomično plaćeno",
+        bg: "bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800",
+        text: "text-blue-700",
+        dot: "bg-blue-500",
+    },
+    cancelled: {
+        label: "Stornirano",
+        bg: "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700",
+        text: "text-slate-600",
+        dot: "bg-slate-500",
+    },
+};
+
+const INVOICE_TYPE_LABELS: Record<string, string> = {
+    crane_operation: "Dizalica (Operacija)",
+    annual_berth_fee: "Godišnji vez",
+    transit_berth: "Tranzitni vez",
+    membership_fee: "Članarina",
+    other: "Ostale usluge",
+};
+
+export default function AdminInvoices() {
+    const [, setLocation] = useLocation();
+
+    // Filtri i pretraga
+    const [searchQuery, setSearchQuery] = useState("");
+    const [statusFilter, setStatusFilter] = useState<string>("ALL");
+    const [typeFilter, setTypeFilter] = useState<string>("ALL");
+
+    // Odabrani račun za modal detalja
+    const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
+
+    // Modal za izdavanje novog računa
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [selectedUserId, setSelectedUserId] = useState<string>("");
+    const [userSearchQuery, setUserSearchQuery] = useState("");
+    const [invoiceType, setInvoiceType] = useState<"crane_operation" | "annual_berth_fee" | "transit_berth" | "membership_fee" | "other">("crane_operation");
+    const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash" | "card" | "compensation">("bank_transfer");
+    
+    // Stavka računa
+    const [productCode, setProductCode] = useState("USL-DIZ");
+    const [itemDescription, setItemDescription] = useState("Dizanje plovila iz mora");
+    const [itemNetPrice, setItemNetPrice] = useState("120.00");
+    const [itemQuantity, setItemQuantity] = useState("1");
+    const [invoiceNotes, setInvoiceNotes] = useState("");
+
+    // tRPC Queryji
+    const { data, isLoading, refetch } = trpc.invoices.list.useQuery({
+        paymentStatus: statusFilter as any,
+        invoiceType: typeFilter as any,
+        searchQuery: searchQuery || undefined,
+    });
+
+    const { data: invoiceDetails } = trpc.invoices.getById.useQuery(
+        { invoiceId: selectedInvoiceId! },
+        { enabled: !!selectedInvoiceId }
+    );
+
+    const { data: usersData } = trpc.user.list.useQuery(
+        { search: userSearchQuery || undefined, page: 1, pageSize: 50 },
+        { enabled: isCreateModalOpen }
+    );
+    const allUsers = usersData?.data || [];
+
+    // tRPC Mutacije
+    const syncPaymentMutation = trpc.invoices.syncPaymentStatus.useMutation({
+        onSuccess: () => {
+            toast.success("Status uplate uspješno osvježen iz e-računa");
+            refetch();
+        },
+        onError: (err) => toast.error(`Greška pri sinkronizaciji: ${err.message}`),
+    });
+
+    const createManualMutation = trpc.invoices.createManual.useMutation({
+        onSuccess: (inv) => {
+            toast.success(`Račun ${inv.invoiceNumber} uspješno izdan u e-racuni.com!`);
+            setIsCreateModalOpen(false);
+            setSelectedUserId("");
+            setUserSearchQuery("");
+            refetch();
+        },
+        onError: (err) => toast.error(`Greška: ${err.message}`),
+    });
+
+    const handleDownloadPdf = async (invoiceId: string, invoiceNumber: string) => {
+        toast.info(`Preuzimanje PDF računa ${invoiceNumber}...`);
+        try {
+            window.open(`/api/invoices/${invoiceId}/pdf`, "_blank");
+        } catch {
+            toast.error("Nije uspjelo preuzimanje PDF-a.");
+        }
+    };
+
+    // Pomoćni izračuni u formi za izdavanje
+    const parsedQty = parseFloat(itemQuantity) || 1;
+    const parsedPrice = parseFloat(itemNetPrice) || 0;
+    const calculatedNet = parsedQty * parsedPrice;
+    const calculatedVat = calculatedNet * 0.25;
+    const calculatedGross = calculatedNet + calculatedVat;
+
+    const selectedUserObj = useMemo(() => {
+        return allUsers.find((u) => u.id === selectedUserId);
+    }, [allUsers, selectedUserId]);
+
+    const stats = data?.stats || {
+        totalCount: 0,
+        totalGrossSum: 0,
+        totalPaidSum: 0,
+        unpaidCount: 0,
+        paidCount: 0,
+    };
+
+    // Brzi predlošci usluga
+    const setPreset = (code: string, desc: string, price: string, type: any) => {
+        setProductCode(code);
+        setItemDescription(desc);
+        setItemNetPrice(price);
+        setInvoiceType(type);
+    };
+
+    return (
+        <div className="flex flex-col gap-5 p-6 max-w-[1600px] mx-auto">
+            {/* ─── Zaglavlje & Status integracije ──────────────────────────────── */}
+            <div className="flex flex-wrap items-center justify-between gap-4 pb-2 border-b">
+                <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md">
+                        <Receipt className="w-6 h-6" />
+                    </div>
+                    <div>
+                        <div className="flex items-center gap-2.5">
+                            <h1 className="text-2xl font-bold tracking-tight text-foreground">
+                                Računi & e-Računi (Eurofaktura)
+                            </h1>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                                e-racuni.com API Aktivan
+                            </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                            Automatizirano izdavanje računa za dizalicu, ugovore o vezu, članarine i fiskalizacija
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetch()}
+                        className="text-xs"
+                    >
+                        <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Osvježi
+                    </Button>
+                    <Button
+                        size="sm"
+                        onClick={() => setIsCreateModalOpen(true)}
+                        className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                    >
+                        <Plus className="w-4 h-4 mr-1.5" /> + Izdaj novi račun
+                    </Button>
+                </div>
+            </div>
+
+            {/* ─── KPI Kartice s financijskim pokazateljima ────────────────────── */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="shadow-sm border-l-4 border-l-blue-600">
+                    <CardHeader className="p-4 pb-1">
+                        <CardDescription className="text-xs font-semibold">Ukupno fakturirano (Bruto)</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-foreground">
+                            {stats.totalGrossSum.toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-1 text-xs text-muted-foreground">
+                        Iz {stats.totalCount} izdanih računa
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm border-l-4 border-l-emerald-600">
+                    <CardHeader className="p-4 pb-1">
+                        <CardDescription className="text-xs font-semibold">Naplaćeno</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-emerald-600">
+                            {stats.totalPaidSum.toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-1 text-xs text-muted-foreground flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                        <span>{stats.paidCount} plaćenih računa</span>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm border-l-4 border-l-amber-500">
+                    <CardHeader className="p-4 pb-1">
+                        <CardDescription className="text-xs font-semibold">Nenaplaćeno / Dospjelo</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-amber-600">
+                            {(stats.totalGrossSum - stats.totalPaidSum).toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-1 text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-amber-500" />
+                        <span>{stats.unpaidCount} otvorenih računa</span>
+                    </CardContent>
+                </Card>
+
+                <Card className="shadow-sm border-l-4 border-l-slate-600">
+                    <CardHeader className="p-4 pb-1">
+                        <CardDescription className="text-xs font-semibold">Povezana organizacija</CardDescription>
+                        <CardTitle className="text-base font-bold text-foreground truncate">
+                            Test Imago matrix
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 pt-1 text-xs text-muted-foreground">
+                        OIB: <strong>46372455133</strong> (e-racuni.com)
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* ─── Kontrolna traka za pretraživanje i filtriranje ──────────────── */}
+            <Card className="shadow-sm">
+                <CardContent className="p-3.5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-3 flex-1">
+                        {/* Tražilica */}
+                        <div className="relative w-72">
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                placeholder="Traži br. računa, člana, OIB, reg..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9 h-9 text-xs"
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery("")}
+                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Status plaćanja */}
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-44 h-9 text-xs">
+                                <SelectValue placeholder="Status plaćanja" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">Svi statusi plaćanja</SelectItem>
+                                <SelectItem value="paid">🟩 Plaćeno</SelectItem>
+                                <SelectItem value="unpaid">🟨 Nenaplaćeno</SelectItem>
+                                <SelectItem value="partially_paid">🟦 Djelomično plaćeno</SelectItem>
+                                <SelectItem value="cancelled">⬛ Stornirano</SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        {/* Tip računa */}
+                        <Select value={typeFilter} onValueChange={setTypeFilter}>
+                            <SelectTrigger className="w-48 h-9 text-xs">
+                                <SelectValue placeholder="Tip usluge" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="ALL">Sve usluge</SelectItem>
+                                <SelectItem value="crane_operation">🏗️ Dizalica (Operacije)</SelectItem>
+                                <SelectItem value="annual_berth_fee">⚓ Godišnji vez</SelectItem>
+                                <SelectItem value="transit_berth">⛵ Tranzitni vez</SelectItem>
+                                <SelectItem value="membership_fee">🎫 Članarina</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="text-xs text-muted-foreground font-medium">
+                        Prikazano: <strong>{data?.invoices.length || 0}</strong> računa
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* ─── Glavna tablica računa ───────────────────────────────────────── */}
+            <Card className="shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left border-collapse">
+                        <thead>
+                            <tr className="border-b bg-muted/60 text-muted-foreground font-semibold">
+                                <th className="p-3.5">Broj računa</th>
+                                <th className="p-3.5">Datum / Dospijeće</th>
+                                <th className="p-3.5">Kupac / Član</th>
+                                <th className="p-3.5">Plovilo</th>
+                                <th className="p-3.5">Tip usluge</th>
+                                <th className="p-3.5">Plaćanje</th>
+                                <th className="p-3.5 text-right">Iznos (Bruto)</th>
+                                <th className="p-3.5 text-center">Status</th>
+                                <th className="p-3.5 text-right">Akcije</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                            {isLoading ? (
+                                <tr>
+                                    <td colSpan={9} className="p-8 text-center text-muted-foreground">
+                                        <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
+                                        Učitavanje računa...
+                                    </td>
+                                </tr>
+                            ) : !data?.invoices || data.invoices.length === 0 ? (
+                                <tr>
+                                    <td colSpan={9} className="p-12 text-center text-muted-foreground">
+                                        <Receipt className="w-10 h-10 mx-auto mb-2 text-muted-foreground/50" />
+                                        <p className="font-semibold text-sm">Nema izdanih računa</p>
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Izdajte prvi račun klikom na gumb "+ Izdaj novi račun"
+                                        </p>
+                                        <Button
+                                            size="sm"
+                                            onClick={() => setIsCreateModalOpen(true)}
+                                            className="mt-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs"
+                                        >
+                                            <Plus className="w-4 h-4 mr-1.5" /> + Izdaj novi račun
+                                        </Button>
+                                    </td>
+                                </tr>
+                            ) : (
+                                data.invoices.map((inv) => {
+                                    const statusCfg = PAYMENT_STATUS_CONFIG[inv.paymentStatus] || PAYMENT_STATUS_CONFIG.unpaid;
+                                    return (
+                                        <tr key={inv.id} className="hover:bg-muted/40 transition-colors">
+                                            {/* Broj računa */}
+                                            <td className="p-3.5">
+                                                <div className="flex flex-col">
+                                                    <span className="font-mono font-bold text-blue-600 dark:text-blue-400">
+                                                        {inv.invoiceNumber}
+                                                    </span>
+                                                    {inv.documentId && (
+                                                        <span className="text-[10px] text-muted-foreground font-mono">
+                                                            ID: {inv.documentId}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+
+                                            {/* Datum / Dospijeće */}
+                                            <td className="p-3.5">
+                                                <div className="flex flex-col">
+                                                    <span className="font-medium">
+                                                        {new Date(inv.issueDate).toLocaleDateString("hr-HR")}
+                                                    </span>
+                                                    <span className="text-[10px] text-muted-foreground">
+                                                        Dosp: {new Date(inv.dueDate).toLocaleDateString("hr-HR")}
+                                                    </span>
+                                                </div>
+                                            </td>
+
+                                            {/* Kupac / Član */}
+                                            <td className="p-3.5">
+                                                <div className="flex flex-col">
+                                                    <strong className="text-foreground">
+                                                        {inv.userName || `${inv.userFirstName || ""} ${inv.userLastName || ""}`}
+                                                    </strong>
+                                                    {inv.userOib && (
+                                                        <span className="text-[10px] text-muted-foreground font-mono">
+                                                            OIB: {inv.userOib}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </td>
+
+                                            {/* Plovilo */}
+                                            <td className="p-3.5">
+                                                {inv.vesselRegistration || inv.vesselName ? (
+                                                    <div className="flex items-center gap-1.5">
+                                                        <Ship className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                                                        <span className="font-mono font-semibold text-xs">
+                                                            {inv.vesselRegistration || inv.vesselName}
+                                                        </span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-muted-foreground">—</span>
+                                                )}
+                                            </td>
+
+                                            {/* Tip usluge */}
+                                            <td className="p-3.5">
+                                                <Badge variant="outline" className="text-[11px] font-normal">
+                                                    {INVOICE_TYPE_LABELS[inv.invoiceType] || inv.invoiceType}
+                                                </Badge>
+                                            </td>
+
+                                            {/* Način plaćanja */}
+                                            <td className="p-3.5 capitalize text-muted-foreground">
+                                                {inv.paymentMethod === "bank_transfer" ? "Virman / IBAN" : inv.paymentMethod}
+                                            </td>
+
+                                            {/* Iznos */}
+                                            <td className="p-3.5 text-right font-mono font-bold text-sm text-foreground">
+                                                {Number(inv.totalGrossAmount).toFixed(2)} €
+                                            </td>
+
+                                            {/* Status */}
+                                            <td className="p-3.5 text-center">
+                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${statusCfg.bg}`}>
+                                                    <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dot}`} />
+                                                    {statusCfg.label}
+                                                </span>
+                                            </td>
+
+                                            {/* Akcije */}
+                                            <td className="p-3.5 text-right">
+                                                <div className="flex items-center justify-end gap-1.5">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        className="h-7 px-2 text-xs"
+                                                        onClick={() => setSelectedInvoiceId(inv.id)}
+                                                    >
+                                                        Detalji
+                                                    </Button>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-7 px-2 text-xs border-blue-300 dark:border-blue-900 text-blue-600 dark:text-blue-400 hover:bg-blue-50"
+                                                        onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
+                                                        title="Preuzmi PDF račun"
+                                                    >
+                                                        <Download className="w-3 h-3 mr-1" /> PDF
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </Card>
+
+            {/* ─── MODAL ZA IZDAVANJE NOVOG RAČUNA (e-racuni.com) ──────────────── */}
+            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+                <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                            <Receipt className="w-5 h-5 text-blue-600" />
+                            Izdavanje novog računa (e-racuni.com)
+                        </DialogTitle>
+                        <DialogDescription className="text-xs">
+                            Odaberite člana/kupca i stavke. Račun će se automatski kreirati u e-racuni.com i u lokalnoj bazi.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="flex flex-col gap-4 py-2 text-xs">
+                        {/* 1. Odabir člana / kupca */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="font-semibold text-foreground flex items-center justify-between">
+                                <span>1. Odabir člana / kupca:</span>
+                                {selectedUserObj && (
+                                    <span className="text-blue-600 font-bold">
+                                        Odabrano: {selectedUserObj.name || `${selectedUserObj.firstName} ${selectedUserObj.lastName}`}
+                                    </span>
+                                )}
+                            </label>
+                            <div className="relative">
+                                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    placeholder="Upišite ime, prezime ili OIB člana..."
+                                    value={userSearchQuery}
+                                    onChange={(e) => setUserSearchQuery(e.target.value)}
+                                    className="pl-9 h-9 text-xs"
+                                />
+                            </div>
+
+                            {/* Popis pronađenih članova */}
+                            <div className="border rounded-lg max-h-36 overflow-y-auto divide-y bg-muted/20 text-xs mt-1">
+                                {allUsers.length === 0 ? (
+                                    <div className="p-3 text-center text-muted-foreground text-xs">
+                                        Nema pronađenih članova. Upišite pojam za pretragu.
+                                    </div>
+                                ) : (
+                                    allUsers.map((u: any) => {
+                                        const isSelected = selectedUserId === u.id;
+                                        return (
+                                            <div
+                                                key={u.id}
+                                                onClick={() => setSelectedUserId(u.id)}
+                                                className={`p-2 cursor-pointer flex items-center justify-between transition-colors ${
+                                                    isSelected ? "bg-blue-100 dark:bg-blue-950 font-bold border-l-4 border-blue-600" : "hover:bg-accent"
+                                                }`}
+                                            >
+                                                <div>
+                                                    <span className="font-semibold">{u.name || `${u.firstName || ""} ${u.lastName || ""}`}</span>
+                                                    {u.oib && <span className="font-mono text-muted-foreground ml-2">OIB: {u.oib}</span>}
+                                                </div>
+                                                <span className="text-[11px] text-muted-foreground">{u.city || "Split"}</span>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                        {/* 2. Brzi predlošci usluga */}
+                        <div className="flex flex-col gap-1.5">
+                            <label className="font-semibold text-foreground">2. Brzi odabir usluge:</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-DIZ", "Dizanje plovila iz mora", "120.00", "crane_operation")}
+                                >
+                                    🏗️ Dizanje (120 €)
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-DIZ", "Spuštanje plovila u more", "120.00", "crane_operation")}
+                                >
+                                    ⚓ Spuštanje (120 €)
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-PRANJE", "Pranje podvodnog dijela trupa", "40.00", "crane_operation")}
+                                >
+                                    🧼 Pranje (40 €)
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="text-[11px] h-8 justify-start"
+                                    onClick={() => setPreset("USL-VEZ", "Godišnja naknada za vez", "500.00", "annual_berth_fee")}
+                                >
+                                    ⛵ Godišnji vez (500 €)
+                                </Button>
+                            </div>
+                        </div>
+
+                        {/* 3. Stavka računa & Cijena */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-muted/30 rounded-lg border">
+                            <div className="sm:col-span-2 flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Opis usluge na računu:</label>
+                                <Input
+                                    value={itemDescription}
+                                    onChange={(e) => setItemDescription(e.target.value)}
+                                    className="h-8 text-xs"
+                                    placeholder="Opis usluge..."
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Šifra artikla (e-računi):</label>
+                                <Input
+                                    value={productCode}
+                                    onChange={(e) => setProductCode(e.target.value)}
+                                    className="h-8 text-xs font-mono"
+                                />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Količina:</label>
+                                <Input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    value={itemQuantity}
+                                    onChange={(e) => setItemQuantity(e.target.value)}
+                                    className="h-8 text-xs"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Cijena bez PDV-a (Neto €):</label>
+                                <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={itemNetPrice}
+                                    onChange={(e) => setItemNetPrice(e.target.value)}
+                                    className="h-8 text-xs font-mono font-bold"
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="font-semibold text-[11px]">Način plaćanja:</label>
+                                <Select value={paymentMethod} onValueChange={(val: any) => setPaymentMethod(val)}>
+                                    <SelectTrigger className="h-8 text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="bank_transfer">Virman / Transakcijski račun</SelectItem>
+                                        <SelectItem value="cash">Gotovina</SelectItem>
+                                        <SelectItem value="card">Kartica</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        {/* 4. Rekapitulacija iznosa */}
+                        <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-950/60 rounded-lg border border-blue-200 dark:border-blue-900">
+                            <div>
+                                <span className="text-muted-foreground block text-[11px]">Osnovica (Neto): <strong>{calculatedNet.toFixed(2)} €</strong></span>
+                                <span className="text-muted-foreground block text-[11px]">PDV (25%): <strong>{calculatedVat.toFixed(2)} €</strong></span>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-[11px] text-muted-foreground block font-medium">UKUPNO S PDV-OM:</span>
+                                <span className="text-lg font-bold font-mono text-blue-600 dark:text-blue-400">
+                                    {calculatedGross.toFixed(2)} €
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button variant="outline" size="sm" onClick={() => setIsCreateModalOpen(false)}>
+                            Odustani
+                        </Button>
+                        <Button
+                            size="sm"
+                            disabled={!selectedUserId || !itemDescription.trim() || createManualMutation.isPending}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold"
+                            onClick={() => {
+                                if (!selectedUserId) {
+                                    toast.error("Molimo odaberite člana/kupca");
+                                    return;
+                                }
+
+                                createManualMutation.mutate({
+                                    userId: selectedUserId,
+                                    invoiceType,
+                                    paymentMethod,
+                                    items: [
+                                        {
+                                            productCode,
+                                            description: itemDescription,
+                                            quantity: parsedQty,
+                                            unit: "kom",
+                                            netPrice: parsedPrice,
+                                            vatRate: 25,
+                                        }
+                                    ],
+                                    notes: invoiceNotes || undefined,
+                                });
+                            }}
+                        >
+                            {createManualMutation.isPending ? (
+                                <>
+                                    <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                                    Izdajem račun u e-računima...
+                                </>
+                            ) : (
+                                <>
+                                    <Receipt className="w-4 h-4 mr-1.5" />
+                                    Izdaj račun u e-racuni.com
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* ─── Modal za detalje računa ─────────────────────────────────────── */}
+            <Dialog open={!!selectedInvoiceId} onOpenChange={(open) => !open && setSelectedInvoiceId(null)}>
+                <DialogContent className="sm:max-w-[620px]">
+                    <DialogHeader>
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <div>
+                                <DialogTitle className="text-lg font-bold">
+                                    Račun {invoiceDetails?.invoice.invoiceNumber}
+                                </DialogTitle>
+                                <DialogDescription className="text-xs">
+                                    Interni e-racuni ID: <strong>{invoiceDetails?.invoice.documentId || "—"}</strong>
+                                </DialogDescription>
+                            </div>
+                            {invoiceDetails && (
+                                <Badge className="text-xs">
+                                    {PAYMENT_STATUS_CONFIG[invoiceDetails.invoice.paymentStatus]?.label}
+                                </Badge>
+                            )}
+                        </div>
+                    </DialogHeader>
+
+                    {invoiceDetails && (
+                        <div className="flex flex-col gap-4 py-2 text-xs">
+                            {/* Kupac & Plovilo */}
+                            <div className="grid grid-cols-2 gap-4 p-3 bg-muted/30 rounded-lg border">
+                                <div>
+                                    <span className="text-muted-foreground block text-[11px]">Kupac (Član):</span>
+                                    <strong className="text-sm">{invoiceDetails.user?.name || `${invoiceDetails.user?.firstName} ${invoiceDetails.user?.lastName}`}</strong>
+                                    {invoiceDetails.user?.oib && (
+                                        <p className="font-mono text-muted-foreground">OIB: {invoiceDetails.user.oib}</p>
+                                    )}
+                                    <p className="text-muted-foreground">{invoiceDetails.user?.address}, {invoiceDetails.user?.city}</p>
+                                </div>
+                                <div>
+                                    <span className="text-muted-foreground block text-[11px]">Plovilo:</span>
+                                    <strong>{invoiceDetails.vessel?.name || "—"}</strong>
+                                    {invoiceDetails.vessel?.registration && (
+                                        <p className="font-mono text-blue-600 font-bold">{invoiceDetails.vessel.registration}</p>
+                                    )}
+                                    <p className="text-muted-foreground">
+                                        LOA: {invoiceDetails.vessel?.lengthM ? `${invoiceDetails.vessel.lengthM}m` : "—"}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Stavke računa */}
+                            <div className="flex flex-col gap-1.5">
+                                <label className="font-semibold">Stavke računa:</label>
+                                <div className="border rounded-lg overflow-hidden">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr className="bg-muted/60 text-muted-foreground font-semibold border-b">
+                                                <th className="p-2">Opis</th>
+                                                <th className="p-2 text-center">Kol.</th>
+                                                <th className="p-2 text-right">Cijena (Neto)</th>
+                                                <th className="p-2 text-center">PDV</th>
+                                                <th className="p-2 text-right">Ukupno</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {invoiceDetails.items.map((item) => (
+                                                <tr key={item.id}>
+                                                    <td className="p-2 font-medium">{item.description}</td>
+                                                    <td className="p-2 text-center">{item.quantity} {item.unit}</td>
+                                                    <td className="p-2 text-right font-mono">{Number(item.unitPrice).toFixed(2)} €</td>
+                                                    <td className="p-2 text-center">{item.vatRate}%</td>
+                                                    <td className="p-2 text-right font-mono font-bold">{Number(item.grossAmount).toFixed(2)} €</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            {/* Rekapitulacija */}
+                            <div className="flex justify-end pt-2 border-t">
+                                <div className="w-64 flex flex-col gap-1 text-xs">
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Osnovica (Neto):</span>
+                                        <span className="font-mono">{Number(invoiceDetails.invoice.totalNetAmount).toFixed(2)} €</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">PDV (25%):</span>
+                                        <span className="font-mono">{Number(invoiceDetails.invoice.totalVatAmount).toFixed(2)} €</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm font-bold border-t pt-1">
+                                        <span>UKUPNO ZA UPLATU:</span>
+                                        <span className="text-blue-600 font-mono">{Number(invoiceDetails.invoice.totalGrossAmount).toFixed(2)} €</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <DialogFooter className="gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                if (selectedInvoiceId) {
+                                    syncPaymentMutation.mutate({ invoiceId: selectedInvoiceId });
+                                }
+                            }}
+                            disabled={syncPaymentMutation.isPending}
+                        >
+                            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${syncPaymentMutation.isPending ? "animate-spin" : ""}`} />
+                            Osvježi uplatu iz e-računa
+                        </Button>
+                        <Button
+                            size="sm"
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={() => {
+                                if (selectedInvoiceId && invoiceDetails) {
+                                    handleDownloadPdf(selectedInvoiceId, invoiceDetails.invoice.invoiceNumber);
+                                }
+                            }}
+                        >
+                            <Download className="w-3.5 h-3.5 mr-1.5" /> Preuzmi PDF
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/admin/AdminWorkOrders.tsx
+import { useState } from "react";
+import { trpc } from "@/lib/trpc";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FileText, Download, Play, CheckCircle2, XCircle, Clock, Search, Filter, ShieldCheck, AlertCircle, Eye, Printer } from "lucide-react";
+import { PDFDownloadLink, PDFViewer } from "@react-pdf/renderer";
+import { WorkOrderPdf } from "@/components/WorkOrderPdfTemplate";
+import { Link } from "wouter";
+import * as XLSX from "xlsx";
+
+export default function AdminWorkOrders() {
+    const [clientTypeFilter, setClientTypeFilter] = useState<string>("all");
+    const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [search, setSearch] = useState<string>("");
+    const [selectedOrderForPdf, setSelectedOrderForPdf] = useState<any | null>(null);
+
+    const { data: orders = [], isLoading } = trpc.workOrders.list.useQuery({
+        clientType: clientTypeFilter === "all" ? undefined : (clientTypeFilter as any),
+        status: statusFilter === "all" ? undefined : (statusFilter as any),
+    });
+
+    const filteredOrders = orders.filter((o: any) => {
+        if (!search) return true;
+        const q = search.toLowerCase();
+        return (
+            o.orderNumber?.toLowerCase().includes(q) ||
+            o.userName?.toLowerCase().includes(q) ||
+            o.userOib?.includes(q) ||
+            o.vesselName?.toLowerCase().includes(q) ||
+            o.vesselRegistration?.toLowerCase().includes(q)
+        );
+    });
+
+    // Metrics
+    const totalCount = filteredOrders.length;
+    const completedCount = filteredOrders.filter((o: any) => o.status === "completed").length;
+    const statutoryCoveredCount = filteredOrders.filter((o: any) => o.isStatutoryCovered).length;
+    const memberAdjustmentsCount = filteredOrders.filter((o: any) => o.chargeItemCode !== null).length;
+    const externalCommercialCount = filteredOrders.filter((o: any) => o.clientType === "external").length;
+
+    const handleExportExcel = () => {
+        const rows = filteredOrders.map((o: any) => ({
+            "Broj radnog naloga": o.orderNumber,
+            "Datum": o.startedAt ? new Date(o.startedAt).toLocaleDateString("hr-HR") : "",
+            "Korisnik": o.userName,
+            "OIB": o.userOib,
+            "Tip korisnika": o.clientType === "member" ? "Član PŠD" : "Vanjski",
+            "Plovilo": o.vesselName,
+            "Registracija": o.vesselRegistration,
+            "Duljina (m)": o.vesselLengthM,
+            "Dizalica": o.craneName,
+            "Status naloga": o.status,
+            "Statutarno pokriveno": o.isStatutoryCovered ? "DA (0,00 €)" : "NE",
+            "Zaduženje u kartonu (ERP)": o.chargeItemCode || "",
+            "Komercijalni iznos (EUR)": o.commercialTotal || "",
+            "Trajanje (min)": o.actualDurationMin || "",
+            "ERP status": o.erpSyncStatus,
+        }));
+
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Radni nalozi");
+        XLSX.writeFile(wb, `Radni_Nalozi_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+
+    return (
+        <div className="container mx-auto p-4 md:p-6 space-y-6">
+            {/* Header */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl md:text-3xl font-bold tracking-tight flex items-center gap-2">
+                        <FileText className="h-7 w-7 text-primary" />
+                        Dnevnik Radnih Naloga
+                    </h1>
+                    <p className="text-sm text-muted-foreground mt-1">
+                        Službena evidencija aktiviranih, završenih i obračunatih radnih naloga dizalica (RN-YYYY-XXXXX).
+                    </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={handleExportExcel} className="gap-1.5">
+                        <Download className="h-4 w-4" />
+                        Izvoz u Excel (ERP)
+                    </Button>
+                </div>
+            </div>
+
+            {/* Metrics cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <Card className="bg-card/50 shadow-sm border-l-4 border-l-primary">
+                    <CardHeader className="p-3 pb-1">
+                        <CardDescription className="text-xs">Ukupno naloga</CardDescription>
+                        <CardTitle className="text-2xl font-bold">{totalCount}</CardTitle>
+                    </CardHeader>
+                </Card>
+
+                <Card className="bg-card/50 shadow-sm border-l-4 border-l-emerald-500">
+                    <CardHeader className="p-3 pb-1">
+                        <CardDescription className="text-xs">U članskoj kvoti</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{statutoryCoveredCount}</CardTitle>
+                    </CardHeader>
+                </Card>
+
+                <Card className="bg-card/50 shadow-sm border-l-4 border-l-amber-500">
+                    <CardHeader className="p-3 pb-1">
+                        <CardDescription className="text-xs">Zaduženje za sljedeću godinu</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-amber-600 dark:text-amber-400">{memberAdjustmentsCount}</CardTitle>
+                    </CardHeader>
+                </Card>
+
+                <Card className="bg-card/50 shadow-sm border-l-4 border-l-blue-500">
+                    <CardHeader className="p-3 pb-1">
+                        <CardDescription className="text-xs">Vanjski komercijalni</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-blue-600 dark:text-blue-400">{externalCommercialCount}</CardTitle>
+                    </CardHeader>
+                </Card>
+
+                <Card className="bg-card/50 shadow-sm border-l-4 border-l-green-600">
+                    <CardHeader className="p-3 pb-1">
+                        <CardDescription className="text-xs">Zaključeno</CardDescription>
+                        <CardTitle className="text-2xl font-bold text-green-700 dark:text-green-300">{completedCount}</CardTitle>
+                    </CardHeader>
+                </Card>
+            </div>
+
+            {/* Filter bar */}
+            <Card>
+                <CardContent className="p-4">
+                    <div className="flex flex-col md:flex-row gap-3 items-center">
+                        <div className="relative flex-1 w-full">
+                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Pretraži po broju naloga, imenu člana, OIB-u ili nazivu plovila..."
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                className="pl-9"
+                            />
+                        </div>
+
+                        <div className="flex items-center gap-2 w-full md:w-auto">
+                            <Select value={clientTypeFilter} onValueChange={setClientTypeFilter}>
+                                <SelectTrigger className="w-[160px]">
+                                    <SelectValue placeholder="Tip korisnika" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Svi korisnici</SelectItem>
+                                    <SelectItem value="member">Samo članovi PŠD</SelectItem>
+                                    <SelectItem value="external">Samo vanjski</SelectItem>
+                                </SelectContent>
+                            </Select>
+
+                            <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                <SelectTrigger className="w-[150px]">
+                                    <SelectValue placeholder="Status" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Svi statusi</SelectItem>
+                                    <SelectItem value="in_progress">U tijeku</SelectItem>
+                                    <SelectItem value="completed">Zaključeno</SelectItem>
+                                    <SelectItem value="cancelled">Stornirano</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Table */}
+            <Card>
+                <CardContent className="p-0">
+                    <Table>
+                        <TableHeader>
+                            <TableRow className="bg-muted/50">
+                                <TableHead className="w-[130px]">Broj naloga</TableHead>
+                                <TableHead>Datum & Vrijeme</TableHead>
+                                <TableHead>Korisnik / OIB</TableHead>
+                                <TableHead>Plovilo</TableHead>
+                                <TableHead>Dizalica</TableHead>
+                                <TableHead>Status & Obračun</TableHead>
+                                <TableHead className="text-right">Radnje</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {isLoading ? (
+                                <TableRow>
+                                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                                        Učitavanje radnih naloga...
+                                    </TableCell>
+                                </TableRow>
+                            ) : filteredOrders.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                                        Nema pronađenih radnih naloga za zadane filtere.
+                                    </TableCell>
+                                </TableRow>
+                            ) : (
+                                filteredOrders.map((o: any) => (
+                                    <TableRow key={o.id} className="hover:bg-muted/30">
+                                        <TableCell className="font-mono font-bold text-sm">
+                                            {o.orderNumber}
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                            <div>{o.startedAt ? new Date(o.startedAt).toLocaleDateString("hr-HR") : "—"}</div>
+                                            <div className="text-muted-foreground">{o.startedAt ? new Date(o.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ""} h</div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="font-medium text-sm">{o.userName || "Korisnik"}</div>
+                                            <div className="text-xs text-muted-foreground">
+                                                OIB: {o.userOib || "—"} • {o.clientType === "member" ? (
+                                                    <span className="text-emerald-600 font-semibold">Član</span>
+                                                ) : (
+                                                    <span className="text-blue-600 font-semibold">Vanjski</span>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                            <div className="font-medium">{o.vesselName || "Plovilo"}</div>
+                                            <div className="text-muted-foreground">{o.vesselRegistration || "—"} ({o.vesselLengthM ? `${o.vesselLengthM} m` : "—"})</div>
+                                        </TableCell>
+                                        <TableCell className="text-xs font-medium">
+                                            {o.craneName || "Dizalica"}
+                                        </TableCell>
+                                        <TableCell>
+                                            {o.isStatutoryCovered ? (
+                                                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 text-xs">
+                                                    <ShieldCheck className="h-3 w-3 mr-1" /> Članarina (0 €)
+                                                </Badge>
+                                            ) : o.clientType === "member" ? (
+                                                <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/30 text-xs">
+                                                    <AlertCircle className="h-3 w-3 mr-1" /> Doplata {o.chargeItemCode}
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/30 text-xs">
+                                                    {o.commercialTotal ? `${o.commercialTotal} €` : "Po metru"}
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <Link href={`/admin/users/${o.userId}`}>
+                                                    <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-primary hover:bg-primary/10">
+                                                        Karton
+                                                    </Button>
+                                                </Link>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-8 px-2 text-xs gap-1"
+                                                    onClick={() => setSelectedOrderForPdf(o)}
+                                                >
+                                                    <Printer className="h-3.5 w-3.5" />
+                                                    Ispis A4
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ))
+                            )}
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+
+            {/* PDF Viewer Dialog */}
+            {selectedOrderForPdf && (
+                <Dialog open={!!selectedOrderForPdf} onOpenChange={() => setSelectedOrderForPdf(null)}>
+                    <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-4">
+                        <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b">
+                            <DialogTitle className="text-lg font-bold">
+                                Radni nalog {selectedOrderForPdf.orderNumber} (A4 Memorandum)
+                            </DialogTitle>
+                            <PDFDownloadLink
+                                document={<WorkOrderPdf order={selectedOrderForPdf} />}
+                                fileName={`${selectedOrderForPdf.orderNumber}.pdf`}
+                            >
+                                {({ loading }) => (
+                                    <Button size="sm" className="gap-1.5" disabled={loading}>
+                                        <Download className="h-4 w-4" />
+                                        Preuzmi PDF
+                                    </Button>
+                                )}
+                            </PDFDownloadLink>
+                        </DialogHeader>
+                        <div className="flex-1 w-full h-full pt-2">
+                            <PDFViewer width="100%" height="100%" className="rounded border">
+                                <WorkOrderPdf order={selectedOrderForPdf} />
+                            </PDFViewer>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+            )}
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/admin/AdminUserCard.tsx
+import { trpc } from "@/lib/trpc";
+import { useParams, useLocation } from "wouter";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/StatusBadge";
+import {
+    Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+    Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { toast } from "sonner";
+import { ReservationChat } from "@/components/ReservationChat";
+import {
+    Loader2, ArrowLeft, CalendarDays, Mail, Phone, Shield, Clock,
+    CheckCircle2, XCircle, Hourglass, Ban, Anchor, MessageSquare, Ship,
+    Plus, Trash2, Edit2, AlertCircle,
+} from "lucide-react";
+import { useState } from "react";
+import { useLang } from "@/contexts/LangContext";
+import { formatAppDate } from "@/lib/date-utils";
+
+const STAT_CARDS = [
+    { key: "total", label: "Ukupno", icon: CalendarDays, color: "text-foreground" },
+    { key: "pending", label: "Na čekanju", icon: Hourglass, color: "text-amber-500" },
+    { key: "approved", label: "Odobreno", icon: CheckCircle2, color: "text-blue-500" },
+    { key: "completed", label: "Izvršeno", icon: CheckCircle2, color: "text-green-600" },
+    { key: "rejected", label: "Odbijeno", icon: XCircle, color: "text-red-500" },
+    { key: "cancelled", label: "Otkazano", icon: Ban, color: "text-gray-500" },
+];
+
+export default function AdminUserCard() {
+    const { id } = useParams<{ id: string }>();
+    const [, setLocation] = useLocation();
+    const { lang } = useLang();
+    const [chatResId, setChatResId] = useState<string | null>(null);
+    const [statusFilter, setStatusFilter] = useState("all");
+
+    const { data, isLoading } = trpc.user.getCard.useQuery(
+        { userId: id },
+        { enabled: !!id }
+    );
+
+    const { data: userCardData } = trpc.userCard.getCard.useQuery(
+        { userId: id },
+        { enabled: !!id }
+    );
+
+    const utils = trpc.useUtils();
+
+    const completeMutation = trpc.reservation.complete.useMutation({
+        onSuccess: () => {
+            utils.user.getCard.invalidate();
+        },
+    });
+
+    const [showVesselDialog, setShowVesselDialog] = useState(false);
+    const [editingVessel, setEditingVessel] = useState<any>(null);
+    const [vesselForm, setVesselForm] = useState({
+        name: "",
+        type: "jedrilica" as "jedrilica" | "motorni" | "katamaran" | "ostalo",
+        registration: "",
+        lengthM: "",
+        beamM: "",
+        draftM: "",
+        weightTons: "",
+    });
+
+    const createVesselMutation = trpc.vessel.create.useMutation({
+        onSuccess: () => {
+            toast.success("Plovilo je uspješno dodano.");
+            setShowVesselDialog(false);
+            utils.user.getCard.invalidate();
+        },
+        onError: (err) => {
+            toast.error(err.message || "Greška pri spremanju plovila.");
+        }
+    });
+
+    const updateVesselMutation = trpc.vessel.update.useMutation({
+        onSuccess: () => {
+            toast.success("Plovilo je uspješno ažurirano.");
+            setShowVesselDialog(false);
+            utils.user.getCard.invalidate();
+        },
+        onError: (err) => {
+            toast.error(err.message || "Greška pri ažuriranju plovila.");
+        }
+    });
+
+    const deleteVesselMutation = trpc.vessel.delete.useMutation({
+        onSuccess: () => {
+            toast.success("Plovilo je uspješno obrisano.");
+            utils.user.getCard.invalidate();
+        },
+        onError: (err) => {
+            toast.error(err.message || "Greška pri brisanju plovila.");
+        }
+    });
+
+    const openAddVessel = () => {
+        setEditingVessel(null);
+        setVesselForm({
+            name: "",
+            type: "jedrilica",
+            registration: "",
+            lengthM: "",
+            beamM: "",
+            draftM: "",
+            weightTons: "",
+        });
+        setShowVesselDialog(true);
+    };
+
+    const openEditVessel = (vessel: any) => {
+        setEditingVessel(vessel);
+        setVesselForm({
+            name: vessel.name || "",
+            type: (vessel.type || "ostalo") as any,
+            registration: vessel.registration || "",
+            lengthM: vessel.lengthM ? String(vessel.lengthM) : "",
+            beamM: vessel.beamM ? String(vessel.beamM) : "",
+            draftM: vessel.draftM ? String(vessel.draftM) : "",
+            weightTons: vessel.weightTons ? String(vessel.weightTons) : "",
+        });
+        setShowVesselDialog(true);
+    };
+
+    const handleSaveVessel = () => {
+        if (!vesselForm.name.trim()) {
+            toast.error("Naziv plovila je obavezan.");
+            return;
+        }
+
+        const payload = {
+            name: vesselForm.name.trim(),
+            type: vesselForm.type,
+            registration: vesselForm.registration.trim() || undefined,
+            lengthM: vesselForm.lengthM ? Number(vesselForm.lengthM) : undefined,
+            beamM: vesselForm.beamM ? Number(vesselForm.beamM) : undefined,
+            draftM: vesselForm.draftM ? Number(vesselForm.draftM) : undefined,
+            weightTons: vesselForm.weightTons ? Number(vesselForm.weightTons) : undefined,
+        };
+
+        if (editingVessel) {
+            updateVesselMutation.mutate({
+                id: editingVessel.id,
+                ...payload,
+            });
+        } else {
+            createVesselMutation.mutate({
+                ownerId: id,
+                ...payload,
+            });
+        }
+    };
+
+    const handleDeleteVessel = (vesselId: string) => {
+        if (confirm("Jeste li sigurni da želite obrisati ovo plovilo?")) {
+            deleteVesselMutation.mutate({ id: vesselId });
+        }
+    };
+
+    if (isLoading || !data) {
+        return (
+            <div className="flex justify-center p-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
+    }
+
+    const { user, stats, reservations, vessels } = data;
+    const filteredReservations = statusFilter === "all"
+        ? reservations
+        : reservations.filter((r: any) => r.status === statusFilter);
+
+    return (
+        <div className="space-y-6">
+            {/* Back button + Header */}
+            <div className="flex items-start gap-4">
+                <Button variant="ghost" size="icon" onClick={() => setLocation("/admin/users")}>
+                    <ArrowLeft className="h-5 w-5" />
+                </Button>
+                <div className="flex-1">
+                    <h2 className="text-2xl font-bold">{user.name || `${user.firstName} ${user.lastName}`}</h2>
+                    <div className="flex flex-wrap items-center gap-4 mt-1 text-sm text-muted-foreground">
+                        <span className="flex items-center gap-1.5">
+                            <Mail className="h-3.5 w-3.5" />{user.email}
+                        </span>
+                        {user.phone && (
+                            <span className="flex items-center gap-1.5">
+                                <Phone className="h-3.5 w-3.5" />{user.phone}
+                            </span>
+                        )}
+                        <span className="flex items-center gap-1.5">
+                            <Shield className="h-3.5 w-3.5" />
+                            <Badge variant="secondary">{user.role}</Badge>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                            <Clock className="h-3.5 w-3.5" />
+                            Registriran: {user.createdAt ? new Date(user.createdAt).toLocaleDateString("hr-HR") : "—"}
+                        </span>
+                    </div>
+                </div>
+                <Button variant="outline" onClick={() => setLocation(`/admin/calendar?userId=${user.id}`)}>
+                    <CalendarDays className="h-4 w-4 mr-2" />Kalendar
+                </Button>
+            </div>
+
+            {/* Statutarni Semafor Prava (za članove) */}
+            {(userCardData?.user?.role || user.role) === "user" && !userCardData?.user?.isLegalEntity && userCardData?.rights && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
+                        <CardHeader className="p-4 pb-2">
+                            <CardDescription className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                Statutarno pravo: Vađenje iz mora
+                            </CardDescription>
+                            <CardTitle className="text-lg font-bold flex items-center justify-between">
+                                {userCardData.rights.liftAvailable ? (
+                                    <span className="text-emerald-600 flex items-center gap-1.5 text-base">
+                                        <CheckCircle2 className="h-5 w-5" /> Raspoloživo (1/1)
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm">Iskorišteno</span>
+                                )}
+                                <span className="text-xs font-normal text-muted-foreground">
+                                    Vrijedi do {new Date(userCardData.rights.liftExpiresAt).toLocaleDateString("hr-HR")}
+                                </span>
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+
+                    <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
+                        <CardHeader className="p-4 pb-2">
+                            <CardDescription className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                                Statutarno pravo: Spuštanje u more
+                            </CardDescription>
+                            <CardTitle className="text-lg font-bold flex items-center justify-between">
+                                {userCardData.rights.lowerAvailable ? (
+                                    <span className="text-emerald-600 flex items-center gap-1.5 text-base">
+                                        <CheckCircle2 className="h-5 w-5" /> Raspoloživo (1/1)
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm">Iskorišteno</span>
+                                )}
+                                <span className="text-xs font-normal text-muted-foreground">
+                                    Vrijedi do {new Date(userCardData.rights.lowerExpiresAt).toLocaleDateString("hr-HR")}
+                                </span>
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+
+                    <Card className={`border-l-4 ${userCardData.rights.pendingFeeAdjustmentsCount > 0 ? 'border-l-amber-500 bg-amber-500/5' : 'border-l-muted'}`}>
+                        <CardHeader className="p-4 pb-2">
+                            <CardDescription className="text-xs font-semibold">
+                                Zaduženje za sljedeću godinu
+                            </CardDescription>
+                            <CardTitle className="text-lg font-bold flex items-center justify-between">
+                                {userCardData.rights.pendingFeeAdjustmentsCount > 0 ? (
+                                    <span className="text-amber-600 flex items-center gap-1.5 text-base">
+                                        <AlertCircle className="h-5 w-5" /> {userCardData.rights.pendingFeeAdjustmentsCount} stavka zaduženja
+                                    </span>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm">Nema zaduženja (0)</span>
+                                )}
+                            </CardTitle>
+                        </CardHeader>
+                    </Card>
+                </div>
+            )}
+
+            {/* Kronološki Karton Radnji i Zaduženja */}
+            {userCardData?.entries && userCardData.entries.length > 0 && (
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <Anchor className="h-4 w-4 text-primary" />
+                            Karton radnji i zaduženja korisnika ({userCardData.entries.length})
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        <Table>
+                            <TableHeader>
+                                <TableRow className="bg-muted/30">
+                                    <TableHead>Datum radnje</TableHead>
+                                    <TableHead>Vrsta evidencije</TableHead>
+                                    <TableHead>Naziv operacije / Stavka cjenika</TableHead>
+                                    <TableHead>Plovilo</TableHead>
+                                    <TableHead>Napomena / Status</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {userCardData.entries.map((entry: any) => (
+                                    <TableRow key={entry.id}>
+                                        <TableCell className="text-xs font-medium">
+                                            {new Date(entry.eventDate).toLocaleDateString("hr-HR")}
+                                        </TableCell>
+                                        <TableCell>
+                                            {entry.entryType === "statutory_quota_used" ? (
+                                                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 border-emerald-500/30 text-xs">
+                                                    Statutarna kvota (0 €)
+                                                </Badge>
+                                            ) : entry.entryType === "fee_adjustment_charge" ? (
+                                                <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-500/30 text-xs">
+                                                    Doplata članarine ({entry.serviceItemCode})
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="outline" className="bg-blue-500/10 text-blue-700 border-blue-500/30 text-xs">
+                                                    Komercijalni račun
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell className="font-semibold text-xs">
+                                            {entry.serviceItemName}
+                                        </TableCell>
+                                        <TableCell className="text-xs">
+                                            {entry.vesselName || "—"} ({entry.vesselRegistration || ""})
+                                        </TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">
+                                            {entry.note || "—"}
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {STAT_CARDS.map(({ key, label, icon: Icon, color }) => (
+                    <Card
+                        key={key}
+                        className={`cursor-pointer transition hover:shadow-md ${statusFilter === key ? "ring-2 ring-primary" : ""}`}
+                        onClick={() => setStatusFilter(statusFilter === key ? "all" : key)}
+                    >
+                        <CardContent className="p-4 flex items-center gap-3">
+                            <Icon className={`h-5 w-5 ${color}`} />
+                            <div>
+                                <p className="text-2xl font-bold">{(stats as any)[key]}</p>
+                                <p className="text-xs text-muted-foreground">{label}</p>
+                            </div>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+
+            {/* Reservations Table */}
+            <Card>
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4" />
+                        Rezervacije ({filteredReservations.length})
+                        {statusFilter !== "all" && (
+                            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setStatusFilter("all")}>
+                                Prikaži sve
+                            </Button>
+                        )}
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {filteredReservations.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8">Nema rezervacija.</p>
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Br.</TableHead>
+                                    <TableHead>Datum</TableHead>
+                                    <TableHead>Plovilo</TableHead>
+                                    <TableHead>Dizalica</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Akcije</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredReservations.map((r: any) => (
+                                    <TableRow key={r.id}>
+                                        <TableCell className="font-mono text-xs">{r.reservationNumber || "—"}</TableCell>
+                                        <TableCell>
+                                            {r.scheduledStart
+                                                ? formatAppDate(r.scheduledStart, lang as any, true)
+                                                : r.requestedDate
+                                                    ? formatAppDate(r.requestedDate, lang as any)
+                                                    : "—"}
+                                        </TableCell>
+                                        <TableCell>{r.vesselRegistration || "—"}</TableCell>
+                                        <TableCell>{r.craneName || "—"}</TableCell>
+                                        <TableCell><StatusBadge status={r.status} /></TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-1">
+                                                {r.status === "approved" && (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="text-green-700 border-green-300 hover:bg-green-50 h-7 text-xs"
+                                                        onClick={() => completeMutation.mutate({ id: r.id })}
+                                                        disabled={completeMutation.isPending}
+                                                    >
+                                                        <CheckCircle2 className="h-3 w-3 mr-1" />Završi
+                                                    </Button>
+                                                )}
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 text-xs"
+                                                    onClick={() => setChatResId(r.id)}
+                                                >
+                                                    <MessageSquare className="h-3 w-3 mr-1" />Poruke
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Vessels */}
+            <Card>
+                <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <Ship className="h-4 w-4" />Plovila ({vessels.length})
+                    </CardTitle>
+                    <Button variant="outline" size="sm" onClick={openAddVessel} className="flex items-center gap-1.5 h-8">
+                        <Plus className="h-4 w-4" />Dodaj plovilo
+                    </Button>
+                </CardHeader>
+                <CardContent className={vessels.length === 0 ? "p-6 text-center text-muted-foreground text-sm" : "p-0"}>
+                    {vessels.length === 0 ? (
+                        "Korisnik nema prijavljenih plovila."
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Naziv</TableHead>
+                                    <TableHead>Tip</TableHead>
+                                    <TableHead>Težina</TableHead>
+                                    <TableHead>Registracija</TableHead>
+                                    <TableHead className="text-right">Akcije</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {(vessels as any[]).map((v: any) => (
+                                    <TableRow key={v.id}>
+                                        <TableCell className="font-medium">{v.name}</TableCell>
+                                        <TableCell>{v.type}</TableCell>
+                                        <TableCell>{v.weightTons ? `${Number(v.weightTons).toFixed(1)} t` : v.weightKg ? `${(v.weightKg / 1000).toFixed(1)} t` : "—"}</TableCell>
+                                        <TableCell>{v.registration || "—"}</TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-1">
+                                                <Button size="sm" variant="ghost" onClick={() => openEditVessel(v)} className="h-7 w-7 p-0">
+                                                    <Edit2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 h-7 w-7 p-0" onClick={() => handleDeleteVessel(v.id)}>
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Chat Modal */}
+            <Dialog open={!!chatResId} onOpenChange={(open) => !open && setChatResId(null)}>
+                <DialogContent className="max-w-lg p-0">
+                    <DialogHeader className="p-4 pb-0">
+                        <DialogTitle>Poruke</DialogTitle>
+                        <DialogDescription>Razgovarajte s korisnikom u vezi ove rezervacije.</DialogDescription>
+                    </DialogHeader>
+                    {chatResId && <ReservationChat reservationId={chatResId} pollInterval={15000} />}
+                </DialogContent>
+            </Dialog>
+
+            {/* Vessel Modal */}
+            <Dialog open={showVesselDialog} onOpenChange={setShowVesselDialog}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{editingVessel ? "Uredi plovilo" : "Dodaj plovilo"}</DialogTitle>
+                        <DialogDescription>
+                            {editingVessel ? "Uredite podatke o plovilu." : "Unesite podatke o novom plovilu."}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="vessel-name">Naziv plovila *</Label>
+                            <Input
+                                id="vessel-name"
+                                value={vesselForm.name}
+                                onChange={(e) => setVesselForm({ ...vesselForm, name: e.target.value })}
+                                placeholder="npr. Stella Maris"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="vessel-type">Tip plovila</Label>
+                            <Select
+                                value={vesselForm.type}
+                                onValueChange={(val: any) => setVesselForm({ ...vesselForm, type: val })}
+                            >
+                                <SelectTrigger id="vessel-type">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="jedrilica">Jedrilica</SelectItem>
+                                    <SelectItem value="motorni">Motorni brod</SelectItem>
+                                    <SelectItem value="katamaran">Katamaran</SelectItem>
+                                    <SelectItem value="ostalo">Ostalo</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="vessel-registration">Registarska oznaka</Label>
+                            <Input
+                                id="vessel-registration"
+                                value={vesselForm.registration}
+                                onChange={(e) => setVesselForm({ ...vesselForm, registration: e.target.value })}
+                                placeholder="npr. ST-1234"
+                            />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="vessel-length">Dužina (m)</Label>
+                                <Input
+                                    id="vessel-length"
+                                    type="number"
+                                    step="0.01"
+                                    value={vesselForm.lengthM}
+                                    onChange={(e) => setVesselForm({ ...vesselForm, lengthM: e.target.value })}
+                                    placeholder="npr. 8.5"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="vessel-beam">Širina (m)</Label>
+                                <Input
+                                    id="vessel-beam"
+                                    type="number"
+                                    step="0.01"
+                                    value={vesselForm.beamM}
+                                    onChange={(e) => setVesselForm({ ...vesselForm, beamM: e.target.value })}
+                                    placeholder="npr. 2.8"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="vessel-weight">Težina (t)</Label>
+                                <Input
+                                    id="vessel-weight"
+                                    type="number"
+                                    step="0.01"
+                                    value={vesselForm.weightTons}
+                                    onChange={(e) => setVesselForm({ ...vesselForm, weightTons: e.target.value })}
+                                    placeholder="npr. 3.5"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowVesselDialog(false)}>
+                            Odustani
+                        </Button>
+                        <Button 
+                            onClick={handleSaveVessel}
+                            disabled={createVesselMutation.isPending || updateVesselMutation.isPending}
+                        >
+                            {(createVesselMutation.isPending || updateVesselMutation.isPending) && (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            )}
+                            Spremi
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+

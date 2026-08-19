@@ -1,0 +1,3160 @@
+// ============================================================================
+// BATCH 2/9: Server Core, Autentikacija, DB konekcija, Migracije & e-računi servis
+// ============================================================================
+
+server/_core/index.ts
+import "dotenv/config";
+import express from "express";
+import { createServer } from "http";
+import net from "net";
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { registerOAuthRoutes } from "./oauth";
+import { appRouter } from "../routers";
+import restApiRouter from "../restApi";
+import mobileApiRouter from "../routes/mobileApi";
+import { createContext } from "./context";
+import { serveStatic, setupVite } from "./vite";
+
+function isPortAvailable(port: number): Promise<boolean> {
+  return new Promise(resolve => {
+    const server = net.createServer();
+    server.listen(port, () => {
+      server.close(() => resolve(true));
+    });
+    server.on("error", () => resolve(false));
+  });
+}
+
+async function findAvailablePort(startPort: number = 3000): Promise<number> {
+  for (let port = startPort; port < startPort + 20; port++) {
+    if (await isPortAvailable(port)) {
+      return port;
+    }
+  }
+  throw new Error(`No available port found starting from ${startPort}`);
+}
+
+async function startServer() {
+  console.log("🚀 LSS STARTUP: Version 2.0.1 - Rate Limit Fix Applied");
+  if (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET) {
+    console.error("❌ CRITICAL: JWT_SECRET or JWT_REFRESH_SECRET is not set in environment.");
+    process.exit(1);
+  }
+  const app = express();
+  const server = createServer(app);
+  // Configure body parser with larger size limit for file uploads
+  app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+  // OAuth callback under /api/oauth/callback
+  registerOAuthRoutes(app);
+
+  // ─── Rate Limiting on auth endpoints ────────────────────────────────
+  const { createRateLimiter } = await import("./rateLimit");
+
+  const loginLimiter = createRateLimiter({
+    name: "login",
+    maxRequests: 5,
+    windowMs: 900_000, // 5 req / 15 min
+    message: "Previše pokušaja prijave. Pokušajte ponovo za 15 minuta.",
+  });
+
+  const registerLimiter = createRateLimiter({
+    name: "register",
+    maxRequests: 3,
+    windowMs: 3_600_000, // 3 req / 1 sat
+    message: "Previše pokušaja registracije. Pokušajte ponovo za sat vremena.",
+  });
+
+  const forgotPasswordLimiter = createRateLimiter({
+    name: "forgotPassword",
+    maxRequests: 3,
+    windowMs: 900_000, // 3 req / 15 min
+    message: "Previše zahtjeva za reset lozinke. Pokušajte ponovo za minutu.",
+  });
+
+  // Apply rate limiters to specific tRPC procedure paths
+  app.use("/api/trpc/auth.login", loginLimiter);
+  app.use("/api/trpc/auth.register", registerLimiter);
+  app.use("/api/trpc/auth.forgotPassword", forgotPasswordLimiter);
+
+  // Rate limit Google OAuth (reuse login limiter)
+  app.use("/auth/google", loginLimiter);
+
+  // tRPC API
+  app.use(
+    "/api/trpc",
+    createExpressMiddleware({
+      router: appRouter,
+      createContext,
+    })
+  );
+
+  // Member Sync Push Ingestion API v1 (must be mounted before general /api/v1)
+  const memberSyncApiRouter = (await import("../routes/memberSyncApi")).default;
+  app.use("/api/v1/member-sync", memberSyncApiRouter);
+
+  // REST API v1
+  app.use("/api/v1", restApiRouter);
+
+  // Mobile REST API v1
+  app.use("/api/mobile/v1", mobileApiRouter);
+
+  // SSE Real-time Calendar Sync Stream
+  app.get("/api/events/calendar-stream", async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    const clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const { calendarSync } = await import("../services/calendarSync");
+
+    calendarSync.addClient({
+      id: clientId,
+      res,
+      userId: clientId,
+    });
+  });
+
+  // development mode uses Vite, production mode uses static files
+  if (process.env.NODE_ENV === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+
+  const preferredPort = parseInt(process.env.PORT || "3000");
+  const port = await findAvailablePort(preferredPort);
+
+  if (port !== preferredPort) {
+    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+  }
+
+  server.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}/`);
+    // Phase 2: Start background services
+    import("../services/notifications").then(m => m.startNotificationCron()).catch(console.error);
+  });
+}
+
+startServer().catch(console.error);
+
+
+// ----------------------------------------------------------------------------
+
+server/_core/trpc.ts
+import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
+import { initTRPC, TRPCError } from "@trpc/server";
+import superjson from "superjson";
+import type { TrpcContext } from "./context";
+
+const t = initTRPC.context<TrpcContext>().create({
+  transformer: superjson,
+});
+
+export const router = t.router;
+export const publicProcedure = t.procedure;
+
+const requireUser = t.middleware(async opts => {
+  const { ctx, next } = opts;
+
+  if (!ctx.user) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  }
+
+  return next({
+    ctx: {
+      ...ctx,
+      user: ctx.user,
+    },
+  });
+});
+
+export const protectedProcedure = t.procedure.use(requireUser);
+
+export const adminProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+
+    if (!ctx.user || ctx.user.role !== 'admin') {
+      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  }),
+);
+
+// Allows admin and operator roles
+export const operatorProcedure = t.procedure.use(
+  t.middleware(async opts => {
+    const { ctx, next } = opts;
+
+    if (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.role !== 'operator')) {
+      throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
+    }
+
+    return next({
+      ctx: {
+        ...ctx,
+        user: ctx.user,
+      },
+    });
+  }),
+);
+
+
+// ----------------------------------------------------------------------------
+
+server/_core/context.ts
+import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
+import type { User } from "../../drizzle/schema";
+import { jwtVerify, SignJWT } from "jose";
+import {
+  COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+  ACCESS_TOKEN_EXPIRY_MS,
+} from "@shared/const";
+import { parse as parseCookieHeader } from "cookie";
+import * as db from "../db";
+import { getSessionCookieOptions } from "./cookies";
+
+export type TrpcContext = {
+  req: CreateExpressContextOptions["req"];
+  res: CreateExpressContextOptions["res"];
+  user: User | null;
+};
+
+export function getJwtSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("JWT_SECRET environment variable is not set");
+  return new TextEncoder().encode(secret);
+}
+
+export function getRefreshSecret() {
+  const secret = process.env.JWT_REFRESH_SECRET;
+  if (!secret) throw new Error("JWT_REFRESH_SECRET environment variable is not set");
+  return new TextEncoder().encode(secret);
+}
+
+/**
+ * Try to verify an access token and return the user ID.
+ * Returns null if the token is invalid or expired.
+ */
+async function verifyAccessToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
+      algorithms: ["HS256"],
+    });
+    return (payload.sub as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Try to verify a refresh token and return the user ID.
+ * Returns null if the token is invalid or expired.
+ */
+async function verifyRefreshToken(token: string): Promise<string | null> {
+  try {
+    const { payload } = await jwtVerify(token, getRefreshSecret(), {
+      algorithms: ["HS256"],
+    });
+    return (payload.sub as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Issue a new short-lived access token for the given user ID.
+ */
+async function issueAccessToken(userId: string): Promise<string> {
+  return new SignJWT({ sub: userId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1000}s`)
+    .setIssuedAt()
+    .sign(getJwtSecret());
+}
+
+export async function createContext(
+  opts: CreateExpressContextOptions
+): Promise<TrpcContext> {
+  let user: User | null = null;
+
+  try {
+    const cookieHeader = opts.req.headers.cookie;
+    if (cookieHeader) {
+      const cookies = parseCookieHeader(cookieHeader);
+      const accessToken = cookies[COOKIE_NAME];
+      const refreshToken = cookies[REFRESH_COOKIE_NAME];
+
+      // 1. Try access token first (fast path)
+      if (accessToken) {
+        const userId = await verifyAccessToken(accessToken);
+        if (userId) {
+          user = (await db.getUserById(userId)) ?? null;
+        }
+      }
+
+      // 2. If access token failed/expired, try silent refresh
+      if (!user && refreshToken) {
+        const userId = await verifyRefreshToken(refreshToken);
+        if (userId) {
+          user = (await db.getUserById(userId)) ?? null;
+          if (user) {
+            // Issue a new access token and set it as a cookie
+            const newAccessToken = await issueAccessToken(user.id);
+            const cookieOptions = getSessionCookieOptions(opts.req);
+            opts.res.cookie(COOKIE_NAME, newAccessToken, {
+              ...cookieOptions,
+              maxAge: ACCESS_TOKEN_EXPIRY_MS,
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    user = null;
+  }
+
+  return {
+    req: opts.req,
+    res: opts.res,
+    user,
+  };
+}
+
+
+// ----------------------------------------------------------------------------
+
+server/_core/cookies.ts
+import type { CookieOptions, Request } from "express";
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function isIpAddress(host: string) {
+  // Basic IPv4 check and IPv6 presence detection.
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
+  return host.includes(":");
+}
+
+function isSecureRequest(req: Request) {
+  if (req.protocol === "https") return true;
+
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  if (!forwardedProto) return false;
+
+  const protoList = Array.isArray(forwardedProto)
+    ? forwardedProto
+    : forwardedProto.split(",");
+
+  return protoList.some(proto => proto.trim().toLowerCase() === "https");
+}
+
+export function getSessionCookieOptions(
+  req: Request
+): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
+  const secure = isSecureRequest(req);
+  return {
+    httpOnly: true,
+    path: "/",
+    sameSite: secure ? "none" : "lax",
+    secure,
+  };
+}
+
+/**
+ * Cookie options for the refresh token — same security, different path scope.
+ */
+export function getRefreshCookieOptions(
+  req: Request
+): Pick<CookieOptions, "domain" | "httpOnly" | "path" | "sameSite" | "secure"> {
+  const secure = isSecureRequest(req);
+  return {
+    httpOnly: true,
+    path: "/",          // needs to be accessible for silent refresh
+    sameSite: secure ? "none" : "lax",
+    secure,
+  };
+}
+
+
+// ----------------------------------------------------------------------------
+
+server/_core/systemRouter.ts
+import { z } from "zod";
+import { notifyOwner } from "./notification";
+import { adminProcedure, publicProcedure, router } from "./trpc";
+
+export const systemRouter = router({
+  health: publicProcedure
+    .input(
+      z.object({
+        timestamp: z.number().min(0, "timestamp cannot be negative"),
+      })
+    )
+    .query(() => ({
+      ok: true,
+    })),
+
+  notifyOwner: adminProcedure
+    .input(
+      z.object({
+        title: z.string().min(1, "title is required"),
+        content: z.string().min(1, "content is required"),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const delivered = await notifyOwner(input);
+      return {
+        success: delivered,
+      } as const;
+    }),
+
+  auditLogs: adminProcedure
+    .input(z.object({ limit: z.number().int().positive().default(100).optional() }).optional())
+    .query(async ({ input }) => {
+      const { listAuditLog } = await import("../db");
+      return listAuditLog(input?.limit ?? 100);
+    }),
+});
+
+
+// ----------------------------------------------------------------------------
+
+server/db.ts
+import { eq, and, gte, lte, desc, lt, gt, or, isNull, ne, asc, sql, ilike, isNotNull, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import {
+  users,
+  cranes,
+  operatorCranes,
+  reservations,
+  vessels,
+  waitingList,
+  settings,
+  auditLog,
+  serviceTypes,
+  emailVerificationTokens,
+  messages,
+  seasons,
+  holidays,
+  apiKeys,
+  landZones,
+  landOccupancies,
+  landWaitingList,
+  craneOperationLog,
+  memberLinks,
+  memberMemberships,
+  syncRuns,
+  syncConflicts,
+  type InsertUser,
+  type InsertCrane,
+  type InsertReservation,
+  type InsertVessel,
+  type InsertWaitingList,
+  type InsertAuditLog,
+  type InsertServiceType,
+  type InsertLandZone,
+  type InsertLandOccupancy,
+  type InsertLandWaitingList,
+  type InsertCraneOperationLog,
+  type InsertMemberLink,
+  type InsertMemberMembership,
+  type InsertSyncRun,
+  type InsertSyncConflict,
+} from "../drizzle/schema";
+
+// ─── DB Connection ────────────────────────────────────────────────────
+let _db: ReturnType<typeof drizzle> | null = null;
+export async function getDb() {
+  if (!_db && process.env.DATABASE_URL) {
+    _db = drizzle(postgres(process.env.DATABASE_URL));
+  }
+  return _db;
+}
+
+// ─── Users ────────────────────────────────────────────────────────────
+export async function createLocalUser(data: {
+  email: string;
+  passwordHash: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  name?: string;
+  phone?: string;
+  oib?: string;
+  isLegalEntity?: boolean;
+  companyName?: string;
+  contactPerson?: string;
+  address?: string;
+  city?: string;
+  postalCode?: string;
+  mustChangePassword?: boolean;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const name = data.name || data.username || (data.isLegalEntity && data.companyName ? data.companyName : `${data.firstName || ""} ${data.lastName || ""}`.trim());
+  const res = await db.insert(users).values({
+    email: data.email,
+    passwordHash: data.passwordHash,
+    firstName: data.firstName || null,
+    lastName: data.lastName || null,
+    name,
+    phone: data.phone || null,
+    oib: data.oib || null,
+    isLegalEntity: data.isLegalEntity ?? false,
+    companyName: data.companyName || null,
+    contactPerson: data.contactPerson || null,
+    address: data.address || null,
+    city: data.city || "Split",
+    postalCode: data.postalCode || "21000",
+    mustChangePassword: data.mustChangePassword ?? false,
+    loginMethod: "email",
+    lastSignedIn: new Date(),
+  }).returning({ id: users.id });
+  return res[0]?.id;
+}
+
+export async function getUserByEmail(email: string) {
+  if (!email || !email.trim()) return undefined;
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(users)
+    .where(eq(users.email, email.trim().toLowerCase()))
+    .limit(1);
+  return res[0];
+}
+
+export async function getUserByGoogleId(googleId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(users)
+    .where(eq(users.googleId, googleId))
+    .limit(1);
+  return res[0];
+}
+
+export async function getUserById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(users).where(eq(users.id, id)).limit(1);
+  return res[0];
+}
+
+export async function listAllUsers(
+  limit = 100,
+  offset = 0,
+  search?: string,
+  role?: string,
+  status?: string,
+  vesselFilter?: string
+) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+
+  let conditions = [isNull(users.anonymizedAt)];
+
+  if (search) {
+    const pattern = `%${search}%`;
+    conditions.push(or(
+      ilike(users.firstName, pattern),
+      ilike(users.lastName, pattern),
+      ilike(users.email, pattern),
+      ilike(users.oib, pattern),
+      sql`exists (
+        select 1 from vessels 
+        where vessels.owner_id = ${users.id} 
+          and (vessels.name ilike ${pattern} or vessels.registration ilike ${pattern})
+      )`
+    ) as any);
+  }
+
+  if (role && role !== "all") {
+    if (role === "staff") {
+      conditions.push(or(eq(users.role, "admin"), eq(users.role, "operator")) as any);
+    } else {
+      conditions.push(eq(users.role, role as any));
+    }
+  }
+
+  if (status && status !== "all") {
+    if (status === "verified") {
+      conditions.push(isNotNull(users.emailVerifiedAt));
+    } else if (status === "unverified") {
+      conditions.push(isNull(users.emailVerifiedAt));
+    }
+  }
+
+  if (vesselFilter && vesselFilter !== "all") {
+    if (vesselFilter === "has_vessel") {
+      conditions.push(sql`exists (select 1 from vessels where vessels.owner_id = ${users.id})`);
+    } else if (vesselFilter === "no_vessel") {
+      conditions.push(sql`not exists (select 1 from vessels where vessels.owner_id = ${users.id})`);
+    }
+  }
+
+  const whereClause = and(...conditions);
+
+  const [countRes] = await db.select({ count: sql<number>`count(*)` })
+    .from(users)
+    .where(whereClause);
+
+  const data = await db.select().from(users)
+    .where(whereClause)
+    .orderBy(users.name, users.email)
+    .limit(limit)
+    .offset(offset);
+
+  const userIds = data.map(u => u.id);
+  let vesselsMap: Record<string, Array<{ id: string; name: string; registration: string | null; type: string }>> = {};
+  if (userIds.length > 0) {
+    const allVessels = await db.select({
+      id: vessels.id,
+      ownerId: vessels.ownerId,
+      name: vessels.name,
+      registration: vessels.registration,
+      type: vessels.type
+    }).from(vessels).where(inArray(vessels.ownerId, userIds));
+
+    for (const v of allVessels) {
+      if (!vesselsMap[v.ownerId]) vesselsMap[v.ownerId] = [];
+      vesselsMap[v.ownerId].push(v);
+    }
+  }
+
+  const dataWithVessels = data.map(u => ({
+    ...u,
+    vessels: vesselsMap[u.id] || []
+  }));
+
+  return { data: dataWithVessels, total: Number(countRes?.count || 0) };
+}
+
+export async function updateUserRole(id: string, role: "user" | "operator" | "admin") {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(users).set({ role, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
+export async function softDeleteUser(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  // Anonymize instead of hard delete for GDPR compliance
+  await db.update(users).set({
+    anonymizedAt: new Date(),
+    updatedAt: new Date(),
+    email: `deleted-${Date.now()}@deleted.invalid`,
+    firstName: "Obrisani",
+    lastName: "Korisnik",
+    name: "Obrisani Korisnik",
+    phone: null,
+    googleId: null,
+    passwordHash: null,
+  }).where(eq(users.id, id));
+}
+
+export async function updateUser(id: string, data: Partial<InsertUser>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const { id: _, role: __, ...updateData } = data as Record<string, unknown>;
+  await db.update(users).set({ ...updateData as Partial<InsertUser>, updatedAt: new Date() }).where(eq(users.id, id));
+}
+
+// ─── Cranes ───────────────────────────────────────────────────────────
+export async function listCranes(activeOnly = true) {
+  const db = await getDb();
+  if (!db) return [];
+  return activeOnly
+    ? db.select().from(cranes).where(eq(cranes.craneStatus, "active"))
+    : db.select().from(cranes);
+}
+
+export async function getCraneById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(cranes).where(eq(cranes.id, id)).limit(1);
+  return res[0];
+}
+
+export async function createCrane(data: InsertCrane) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(cranes).values(data).returning({ id: cranes.id });
+  return res[0].id;
+}
+
+export async function updateCrane(id: string, data: Partial<InsertCrane>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(cranes).set({ ...data, updatedAt: new Date() }).where(eq(cranes.id, id));
+}
+
+export async function deleteCrane(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(cranes).set({ craneStatus: "inactive", updatedAt: new Date() }).where(eq(cranes.id, id));
+}
+
+// ─── Vessels ──────────────────────────────────────────────────────────
+export async function listVesselsByUser(userId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(vessels)
+    .where(eq(vessels.ownerId, userId))
+    .orderBy(desc(vessels.createdAt));
+}
+
+export async function getVesselById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(vessels).where(eq(vessels.id, id)).limit(1);
+  return res[0];
+}
+
+export async function createVessel(data: InsertVessel) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(vessels).values(data).returning({ id: vessels.id });
+  return res[0].id;
+}
+
+export async function updateVessel(id: string, ownerId: string, data: Partial<InsertVessel>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(vessels)
+    .set({ ...data, updatedAt: new Date() })
+    .where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
+}
+
+export async function deleteVessel(id: string, ownerId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(vessels).where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
+}
+
+// ─── Reservations ─────────────────────────────────────────────────────
+export async function createReservation(data: InsertReservation) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(reservations).values(data).returning({ id: reservations.id });
+  return res[0].id;
+}
+
+export async function getReservationById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
+  return res[0];
+}
+
+export async function listReservationsByUser(userId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(reservations)
+    .where(eq(reservations.userId, userId))
+    .orderBy(desc(reservations.createdAt));
+}
+
+export async function listAllReservations(status?: string, limit = 50, offset = 0) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+
+  let countQuery = db.select({ count: sql<number>`count(*)` }).from(reservations);
+  let dataQuery = db.select().from(reservations).orderBy(desc(reservations.createdAt)).limit(limit).offset(offset);
+
+  if (status) {
+    countQuery.where(eq(reservations.status, status as any));
+    dataQuery.where(eq(reservations.status, status as any));
+  }
+
+  const [countRes] = await countQuery;
+  const data = await dataQuery;
+
+  return { data, total: Number(countRes.count) };
+}
+
+export async function updateReservationStatus(
+  id: string,
+  status: "approved" | "rejected" | "cancelled" | "completed",
+  approvedBy?: string,
+  adminNote?: string,
+  cancelReason?: string,
+  cancelledByType?: "user" | "admin"
+) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(reservations)
+    .set({
+      status,
+      approvedBy,
+      approvedAt: status === "approved" ? new Date() : undefined,
+      completedAt: status === "completed" ? new Date() : undefined,
+      adminNote,
+      cancelReason,
+      cancelledByType,
+      updatedAt: new Date(),
+    })
+    .where(eq(reservations.id, id));
+
+  if (status === "cancelled" || status === "rejected") {
+    const { landWaitingList } = await import("../drizzle/schema");
+    await db.update(landWaitingList)
+      .set({ status: "cancelled", updatedAt: new Date() })
+      .where(eq(landWaitingList.reservationId, id));
+  }
+}
+
+/**
+ * Check for time-slot overlap on a crane using scheduledStart/scheduledEnd.
+ */
+export async function checkOverlap(
+  craneId: string,
+  startDate: Date,
+  effectiveEnd: Date,
+  excludeId?: string
+) {
+  const db = await getDb();
+  if (!db) return false;
+  const conditions = [
+    eq(reservations.craneId, craneId),
+    or(
+      eq(reservations.status, "pending"),
+      eq(reservations.status, "approved")
+    ),
+    lt(reservations.scheduledStart, effectiveEnd),
+    gt(reservations.scheduledEnd, startDate),
+  ];
+  if (excludeId) conditions.push(ne(reservations.id, excludeId));
+  const res = await db.select({ id: reservations.id })
+    .from(reservations)
+    .where(and(...conditions))
+    .limit(1);
+  return res.length > 0;
+}
+
+export async function getReservationsForCalendar(start?: Date, end?: Date, includePending = true) {
+  const db = await getDb();
+  if (!db) return [];
+  const statusConditions = includePending
+    ? [or(eq(reservations.status, "approved"), eq(reservations.status, "pending"))]
+    : [eq(reservations.status, "approved")];
+
+  const conditions = [...statusConditions];
+  if (start) conditions.push(gte(reservations.scheduledStart, start));
+  if (end) conditions.push(lte(reservations.scheduledEnd, end));
+  return db.select().from(reservations).where(and(...conditions));
+}
+
+// ─── Waiting List ─────────────────────────────────────────────────────
+export async function addToWaitingList(data: InsertWaitingList) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(waitingList).values(data).returning({ id: waitingList.id });
+  return res[0].id;
+}
+
+export async function listWaitingListByUser(userId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(waitingList)
+    .where(eq(waitingList.userId, userId))
+    .orderBy(desc(waitingList.createdAt));
+}
+
+export async function listAllWaiting(limit = 50, offset = 0) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+
+  const [countRes] = await db.select({ count: sql<number>`count(*)` }).from(waitingList);
+  const data = await db.select().from(waitingList).orderBy(desc(waitingList.createdAt)).limit(limit).offset(offset);
+
+  return { data, total: Number(countRes.count) };
+}
+
+export async function getWaitingListById(id: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const res = await db.select().from(waitingList).where(eq(waitingList.id, id));
+  return res[0] ?? null;
+}
+
+export async function updateWaitingList(id: string, data: Partial<InsertWaitingList>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(waitingList).set({ ...data, updatedAt: new Date() }).where(eq(waitingList.id, id));
+}
+
+export async function adminRemoveFromWaitingList(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(waitingList).where(eq(waitingList.id, id));
+}
+
+export async function removeFromWaitingList(id: string, userId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(waitingList)
+    .where(and(eq(waitingList.id, id), eq(waitingList.userId, userId)));
+}
+
+// ─── Settings ─────────────────────────────────────────────────────────
+const DEFAULT_SETTINGS: Record<string, string> = {
+  slotDurationMinutes: "30",
+  bufferMinutes: "15",
+  workdayStart: "08:00",
+  workdayEnd: "16:00",
+  marinaName: "PŠD Špinut",
+  marinaLogo: "",
+};
+
+export async function getAllSettings(): Promise<Record<string, string>> {
+  const db = await getDb();
+  if (!db) return DEFAULT_SETTINGS;
+  const rows = await db.select().from(settings);
+  const result = { ...DEFAULT_SETTINGS };
+  for (const row of rows) {
+    // value is JSONB - cast it to string for backwards compat
+    const val = row.value;
+    result[row.key] = typeof val === "string" ? val : String(val);
+  }
+  return result;
+}
+
+export async function updateSetting(key: string, value: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.insert(settings)
+    .values({ key, value, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } });
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────
+export async function createAuditEntry(data: {
+  actorId?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  payload?: unknown;
+  ipAddress?: string;
+}) {
+  const db = await getDb();
+  if (db) await db.insert(auditLog).values({
+    actorId: data.actorId,
+    action: data.action,
+    entityType: data.entityType,
+    entityId: data.entityId,
+    payload: data.payload,
+    ipAddress: data.ipAddress,
+  });
+}
+
+export async function listAuditLog(limit = 50) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: auditLog.id,
+      action: auditLog.action,
+      entityType: auditLog.entityType,
+      entityId: auditLog.entityId,
+      payload: auditLog.payload,
+      ipAddress: auditLog.ipAddress,
+      createdAt: auditLog.createdAt,
+      actor: {
+        id: users.id,
+        name: users.name,
+      },
+    })
+    .from(auditLog)
+    .leftJoin(users, eq(auditLog.actorId, users.id))
+    .orderBy(desc(auditLog.createdAt))
+    .limit(limit);
+}
+
+// ─── Service Types ────────────────────────────────────────────────────
+export async function listServiceTypes(onlyActive = false) {
+  const db = await getDb();
+  if (!db) return [];
+  const query = db.select().from(serviceTypes);
+  if (onlyActive) query.where(eq(serviceTypes.isActive, true));
+  return query.orderBy(asc(serviceTypes.sortOrder), asc(serviceTypes.name));
+}
+
+export async function getServiceTypeById(id: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(serviceTypes).where(eq(serviceTypes.id, id)).limit(1);
+  return res[0];
+}
+
+export async function createServiceType(data: Omit<InsertServiceType, "id" | "createdAt" | "updatedAt">) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(serviceTypes).values(data).returning();
+  return res[0];
+}
+
+export async function updateServiceType(id: string, data: Partial<Omit<InsertServiceType, "id" | "createdAt">>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.update(serviceTypes)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(serviceTypes.id, id))
+    .returning();
+  return res[0];
+}
+
+export async function deleteServiceType(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.delete(serviceTypes).where(eq(serviceTypes.id, id));
+}
+
+export async function seedServiceTypes() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(serviceTypes).limit(1);
+  if (existing.length > 0) return; // already seeded
+  const defaults = [
+    { name: "Spuštanje", description: "Spuštanje plovila u more", defaultDurationMin: 60, sortOrder: 0 },
+    { name: "Vađenje", description: "Vađenje plovila iz mora", defaultDurationMin: 60, sortOrder: 1 },
+    { name: "Premještanje", description: "Premještanje plovila unutar marine", defaultDurationMin: 90, sortOrder: 2 },
+    { name: "Zimovanje", description: "Skladištenje plovila za zimu", defaultDurationMin: 120, sortOrder: 3 },
+    { name: "Ostalo", description: "Ostale operacije dizalicom", defaultDurationMin: 60, sortOrder: 4 },
+  ];
+  await db.insert(serviceTypes).values(defaults);
+}
+
+export async function seedLandZones() {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await db.select().from(landZones).limit(1);
+  if (existing.length > 0) return; // already seeded
+  const defaultZones = [
+    { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+    { name: "Arla 1", code: "A1", totalSpots: 18, sortOrder: 1 },
+    { name: "Arla 2", code: "A2", totalSpots: 30, sortOrder: 2 },
+    { name: "Arla 3", code: "A3", totalSpots: 50, sortOrder: 3 },
+    { name: "Zapadna obala", code: "ZO", totalSpots: 16, sortOrder: 4 },
+    { name: "Lukobran", code: "LB", totalSpots: 50, sortOrder: 5 },
+  ];
+  await db.insert(landZones).values(defaultZones);
+}
+
+// ─── Email Verification ───────────────────────────────────────────────
+import crypto from "crypto";
+
+export async function createEmailVerificationToken(userId: string): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  await db.insert(emailVerificationTokens).values({
+    userId,
+    token,
+    expiresAt,
+  });
+  return token;
+}
+
+export async function verifyEmailToken(token: string): Promise<string | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const [row] = await db.select()
+    .from(emailVerificationTokens)
+    .where(and(
+      eq(emailVerificationTokens.token, token),
+      gte(emailVerificationTokens.expiresAt, new Date())
+    ))
+    .limit(1);
+  if (!row) return null;
+
+  // Mark user as verified
+  await db.update(users)
+    .set({ emailVerifiedAt: new Date(), userStatus: "active", updatedAt: new Date() })
+    .where(eq(users.id, row.userId));
+
+  // Cleanup used tokens
+  await db.delete(emailVerificationTokens)
+    .where(eq(emailVerificationTokens.userId, row.userId));
+
+  return row.userId;
+}
+
+export async function deleteExpiredVerificationTokens() {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(emailVerificationTokens)
+    .where(lt(emailVerificationTokens.expiresAt, new Date()));
+}
+
+// ─── Messages ─────────────────────────────────────────────────────────
+import { sql as sqlTag } from "drizzle-orm";
+
+export async function sendMessage(data: { reservationId: string; senderId: string; body: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [msg] = await db.insert(messages).values(data).returning();
+  return msg;
+}
+
+export async function listMessages(reservationId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: messages.id,
+    reservationId: messages.reservationId,
+    senderId: messages.senderId,
+    senderName: users.name,
+    senderRole: users.role,
+    body: messages.body,
+    isRead: messages.isRead,
+    createdAt: messages.createdAt,
+  })
+    .from(messages)
+    .innerJoin(users, eq(messages.senderId, users.id))
+    .where(eq(messages.reservationId, reservationId))
+    .orderBy(asc(messages.createdAt));
+}
+
+export async function markMessagesRead(reservationId: string, readerId: string) {
+  const db = await getDb();
+  if (!db) return;
+  // Mark as read all messages NOT sent by the reader
+  await db.update(messages)
+    .set({ isRead: true })
+    .where(and(
+      eq(messages.reservationId, reservationId),
+      ne(messages.senderId, readerId),
+      eq(messages.isRead, false)
+    ));
+}
+
+export async function countUnreadMessages(userId: string, role: string) {
+  const db = await getDb();
+  if (!db) return 0;
+  if (role === "admin" || role === "operator") {
+    // Count unread messages sent by users (not by admin/operator)
+    const result = await db.select({
+      id: messages.id,
+    })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(
+        eq(messages.isRead, false),
+        eq(users.role, "user")
+      ));
+    return result.length;
+  } else {
+    // Count unread messages on user's reservations sent by staff
+    const result = await db.select({
+      id: messages.id,
+    })
+      .from(messages)
+      .innerJoin(reservations, eq(messages.reservationId, reservations.id))
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(
+        eq(messages.isRead, false),
+        eq(reservations.userId, userId),
+        ne(users.role, "user")
+      ));
+    return result.length;
+  }
+}
+
+export async function getUnreadCountForReservation(reservationId: string, userId: string, role: string) {
+  const db = await getDb();
+  if (!db) return 0;
+
+  const conditions = [
+    eq(messages.reservationId, reservationId),
+    eq(messages.isRead, false),
+  ];
+
+  if (role === "admin" || role === "operator") {
+    // Staff sees unread messages from users
+    const result = await db.select({ id: messages.id })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(...conditions, eq(users.role, "user")));
+    return result.length;
+  } else {
+    // Users see unread messages from staff
+    const result = await db.select({ id: messages.id })
+      .from(messages)
+      .innerJoin(users, eq(messages.senderId, users.id))
+      .where(and(...conditions, ne(users.role, "user")));
+    return result.length;
+  }
+}
+
+// ─── Seasons ──────────────────────────────────────────────────────────────
+
+export async function createSeason(data: { name: string; startDate: string; endDate: string; workingHours: any }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [s] = await db.insert(seasons).values(data).returning();
+  return s;
+}
+
+export async function listSeasons() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(seasons).orderBy(asc(seasons.startDate));
+}
+
+export async function updateSeason(id: string, data: Partial<{ name: string; startDate: string; endDate: string; workingHours: any; isActive: boolean }>) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(seasons).set(data).where(eq(seasons.id, id));
+}
+
+export async function deleteSeason(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(seasons).where(eq(seasons.id, id));
+}
+
+export async function getActiveSeason(dateStr: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [s] = await db.select().from(seasons)
+    .where(and(
+      eq(seasons.isActive, true),
+      lte(seasons.startDate, dateStr),
+      gte(seasons.endDate, dateStr)
+    ));
+  return s ?? null;
+}
+
+// ─── Holidays ─────────────────────────────────────────────────────────────
+
+export async function createHoliday(data: { date: string; name: string; isRecurring?: boolean }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [h] = await db.insert(holidays).values(data).returning();
+  return h;
+}
+
+export async function listHolidays() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(holidays).orderBy(asc(holidays.date));
+}
+
+export async function deleteHoliday(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(holidays).where(eq(holidays.id, id));
+}
+
+export async function isHoliday(dateStr: string): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  // Check exact date match
+  const [exact] = await db.select().from(holidays).where(eq(holidays.date, dateStr));
+  if (exact) return true;
+  // Check recurring: match month-day across years
+  const md = dateStr.slice(5); // "MM-DD"
+  const recurring = await db.select().from(holidays)
+    .where(eq(holidays.isRecurring, true));
+  return recurring.some(h => h.date.slice(5) === md);
+}
+
+export async function seedCroatianHolidays() {
+  const db = await getDb();
+  if (!db) return;
+  const currentYear = new Date().getFullYear();
+  const hrHolidays = [
+    { date: `${currentYear}-01-01`, name: "Nova godina" },
+    { date: `${currentYear}-01-06`, name: "Sveta tri kralja" },
+    { date: `${currentYear}-05-01`, name: "Praznik rada" },
+    { date: `${currentYear}-05-30`, name: "Dan državnosti" },
+    { date: `${currentYear}-06-22`, name: "Dan antifašističke borbe" },
+    { date: `${currentYear}-08-05`, name: "Dan pobjede" },
+    { date: `${currentYear}-08-15`, name: "Velika Gospa" },
+    { date: `${currentYear}-10-08`, name: "Dan neovisnosti" },
+    { date: `${currentYear}-11-01`, name: "Svi sveti" },
+    { date: `${currentYear}-11-18`, name: "Dan sjećanja na Vukovar" },
+    { date: `${currentYear}-12-25`, name: "Božić" },
+    { date: `${currentYear}-12-26`, name: "Sveti Stjepan" },
+  ];
+  for (const h of hrHolidays) {
+    // Upsert: skip if already exists for that date
+    const existing = await db.select().from(holidays).where(eq(holidays.date, h.date));
+    if (existing.length === 0) {
+      await db.insert(holidays).values({ ...h, isRecurring: true });
+    }
+  }
+}
+
+// ─── API Keys ─────────────────────────────────────────────────────────────
+
+export async function createApiKey(data: { name: string; key: string; createdBy: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [k] = await db.insert(apiKeys).values(data).returning();
+  return k;
+}
+
+export async function listApiKeys() {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select({
+    id: apiKeys.id,
+    name: apiKeys.name,
+    key: apiKeys.key, // Only returning partial key or full key depending on security, let's return full for now since admin needs to see it once or we just show it. Actually, better return truncated or full. Let's return full.
+    isActive: apiKeys.isActive,
+    lastUsedAt: apiKeys.lastUsedAt,
+    createdAt: apiKeys.createdAt,
+  }).from(apiKeys).orderBy(desc(apiKeys.createdAt));
+}
+
+export async function revokeApiKey(id: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(apiKeys).set({ isActive: false }).where(eq(apiKeys.id, id));
+}
+
+export async function validateApiKeyAndUpdateLastUsed(key: string) {
+  const db = await getDb();
+  if (!db) return false;
+  const [k] = await db.select().from(apiKeys).where(and(eq(apiKeys.key, key), eq(apiKeys.isActive, true)));
+  if (k) {
+    // Fire and forget update
+    db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, k.id)).execute();
+    return true;
+  }
+  return false;
+}
+
+// ─── Legacy SDK compatibility ──────────────────────────────────────────
+// These functions support the existing oauth sdk.ts until v2 auth is implemented
+
+export async function getUserByOpenId(openId: string) {
+  return getUserByGoogleId(openId);
+}
+
+export async function upsertUser(data: {
+  openId: string;
+  name?: string | null;
+  email?: string | null;
+  loginMethod?: string | null;
+  lastSignedIn?: Date;
+}) {
+  const db = await getDb();
+  if (!db) return;
+  const existing = await getUserByGoogleId(data.openId);
+  if (existing) {
+    await db.update(users)
+      .set({
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        ...(typeof data.email === "string" ? { email: data.email } : {}),
+        ...(data.loginMethod !== undefined ? { loginMethod: data.loginMethod } : {}),
+        ...(data.lastSignedIn ? { lastSignedIn: data.lastSignedIn } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.googleId, data.openId));
+  } else {
+    await db.insert(users).values({
+      googleId: data.openId,
+      email: data.email ?? `${data.openId}@oauth.placeholder`,
+      name: data.name,
+      loginMethod: data.loginMethod,
+      lastSignedIn: data.lastSignedIn ?? new Date(),
+    });
+  }
+}
+
+// ─── Dry Berths (Mjesta na kopnu) Queries ──────────────────────────────
+
+export async function listLandZones() {
+  const db = await getDb();
+  if (!db) return [];
+  const zones = await db.select().from(landZones).orderBy(landZones.sortOrder);
+  const occupancies = await db.select().from(landOccupancies).where(isNull(landOccupancies.returnedAt));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  // Get approved lift_from_sea reservations
+  const allApprovedReservations = await db.select({
+    id: reservations.id,
+    landZoneId: reservations.landZoneId,
+    vesselId: reservations.vesselId,
+    scheduledStart: reservations.scheduledStart,
+  })
+  .from(reservations)
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(serviceTypes.operationCategory, "lift_from_sea"),
+      isNotNull(reservations.landZoneId)
+    )
+  );
+
+  const waitingListEntries = await db.select().from(landWaitingList).where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered")));
+
+  return zones.map(z => {
+    const registeredCount = occupancies.filter(o => o.zoneId === z.id).length;
+    const manualCount = z.manualOccupiedSpots || 0;
+    const activeCount = registeredCount + manualCount;
+
+    const zoneReservedRes = allApprovedReservations.filter(r => 
+      r.landZoneId === z.id && (!r.vesselId || !activeVesselIds.has(r.vesselId))
+    );
+    const reservedCount = zoneReservedRes.length;
+
+    const waitingCount = waitingListEntries.filter(w => w.preferredZoneId === z.id).length;
+    const availableSpots = Math.max(0, z.totalSpots - activeCount - reservedCount);
+    const percentFull = z.totalSpots > 0 ? Math.round(((activeCount + reservedCount) / z.totalSpots) * 100) : 0;
+
+    return {
+      ...z,
+      activeSpots: activeCount,
+      registeredSpots: registeredCount,
+      reservedSpots: reservedCount,
+      availableSpots,
+      waitingCount,
+      percentFull,
+      isOver80: percentFull >= 80,
+      isFull: (activeCount + reservedCount) >= z.totalSpots,
+    };
+  });
+}
+
+export async function getLandZoneCapacity(zoneId: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const [zone] = await db.select().from(landZones).where(eq(landZones.id, zoneId)).limit(1);
+  if (!zone) throw new Error(`Kopnena zona s ID-em ${zoneId} ne postoji.`);
+
+  const occupancies = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  const allApprovedReservations = await db.select({
+    id: reservations.id,
+    landZoneId: reservations.landZoneId,
+    vesselId: reservations.vesselId,
+    scheduledStart: reservations.scheduledStart,
+  })
+  .from(reservations)
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(reservations.landZoneId, zoneId),
+      eq(serviceTypes.operationCategory, "lift_from_sea")
+    )
+  );
+
+  const zoneReservedRes = allApprovedReservations.filter(r => 
+    !r.vesselId || !activeVesselIds.has(r.vesselId)
+  );
+
+  const registeredSpots = occupancies.length;
+  const manualSpots = zone.manualOccupiedSpots || 0;
+  const activeSpots = registeredSpots + manualSpots;
+  const reservedSpots = zoneReservedRes.length;
+  const totalSpots = zone.totalSpots;
+  const availableSpots = Math.max(0, totalSpots - activeSpots - reservedSpots);
+  const percentFull = totalSpots > 0 ? Math.round(((activeSpots + reservedSpots) / totalSpots) * 100) : 0;
+  const isOver80 = percentFull >= 80;
+  const isFull = (activeSpots + reservedSpots) >= totalSpots;
+
+  return {
+    id: zone.id,
+    name: zone.name,
+    code: zone.code,
+    totalSpots,
+    activeSpots,
+    registeredSpots,
+    manualOccupiedSpots: manualSpots,
+    reservedSpots,
+    availableSpots,
+    percentFull,
+    isOver80,
+    isFull,
+  };
+}
+
+export async function getUpcomingReservedVesselsForZone(zoneId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const occupancies = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.zoneId, zoneId), isNull(landOccupancies.returnedAt)));
+  const activeVesselIds = new Set(occupancies.map(o => o.vesselId).filter(Boolean));
+
+  const items = await db.select({
+    reservationId: reservations.id,
+    reservationNumber: reservations.reservationNumber,
+    scheduledStart: reservations.scheduledStart,
+    durationMin: reservations.durationMin,
+    status: reservations.status,
+    userId: reservations.userId,
+    userName: users.name,
+    userEmail: users.email,
+    vesselId: reservations.vesselId,
+    vesselRegistration: reservations.vesselRegistration,
+    vesselType: reservations.vesselType,
+    vesselName: vessels.name,
+    serviceTypeName: serviceTypes.name,
+  })
+  .from(reservations)
+  .leftJoin(users, eq(reservations.userId, users.id))
+  .leftJoin(vessels, eq(reservations.vesselId, vessels.id))
+  .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+  .where(
+    and(
+      eq(reservations.status, "approved"),
+      eq(reservations.landZoneId, zoneId),
+      eq(serviceTypes.operationCategory, "lift_from_sea")
+    )
+  );
+
+  return items.filter(r => !r.vesselId || !activeVesselIds.has(r.vesselId));
+}
+
+export async function createLandZone(data: InsertLandZone) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  // Check if code already exists
+  const existing = await db
+    .select()
+    .from(landZones)
+    .where(eq(landZones.code, data.code))
+    .limit(1);
+  if (existing.length > 0) {
+    throw new Error(`Kopnena zona s kodom "${data.code}" već postoji.`);
+  }
+
+  const res = await db.insert(landZones).values(data).returning({ id: landZones.id });
+  return res[0].id;
+}
+
+export async function updateLandZone(id: string, data: Partial<InsertLandZone>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  if (data.code) {
+    const existing = await db
+      .select()
+      .from(landZones)
+      .where(and(eq(landZones.code, data.code), ne(landZones.id, id)))
+      .limit(1);
+    if (existing.length > 0) {
+      throw new Error(`Kopnena zona s kodom "${data.code}" već postoji.`);
+    }
+  }
+
+  await db.update(landZones).set({ ...data, updatedAt: new Date() }).where(eq(landZones.id, id));
+}
+
+export async function deleteLandZone(id: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landZones).set({ isActive: false, updatedAt: new Date() }).where(eq(landZones.id, id));
+}
+
+export async function listActiveOccupancies(filters?: { zoneId?: string; userId?: string }) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [isNull(landOccupancies.returnedAt)];
+  if (filters?.zoneId) conditions.push(eq(landOccupancies.zoneId, filters.zoneId));
+  if (filters?.userId) conditions.push(eq(landOccupancies.userId, filters.userId));
+
+  return db
+    .select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      reservationId: landOccupancies.reservationId,
+      returnReservationId: landOccupancies.returnReservationId,
+      liftedAt: landOccupancies.liftedAt,
+      returnedAt: landOccupancies.returnedAt,
+      note: landOccupancies.note,
+      createdBy: landOccupancies.createdBy,
+      createdAt: landOccupancies.createdAt,
+      updatedAt: landOccupancies.updatedAt,
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+        lengthM: vessels.lengthM,
+        beamM: vessels.beamM,
+        draftM: vessels.draftM,
+        weightTons: vessels.weightTons,
+      },
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      zone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(...conditions))
+    .orderBy(desc(landOccupancies.liftedAt));
+}
+
+export async function listOccupancyHistory(filters?: { zoneId?: string; userId?: string; limit?: number; offset?: number }) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const conditions = [sql`${landOccupancies.returnedAt} IS NOT NULL`];
+  if (filters?.zoneId) conditions.push(eq(landOccupancies.zoneId, filters.zoneId));
+  if (filters?.userId) conditions.push(eq(landOccupancies.userId, filters.userId));
+
+  const countRes = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(landOccupancies)
+    .where(and(...conditions));
+
+  const data = await db
+    .select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      reservationId: landOccupancies.reservationId,
+      returnReservationId: landOccupancies.returnReservationId,
+      liftedAt: landOccupancies.liftedAt,
+      returnedAt: landOccupancies.returnedAt,
+      note: landOccupancies.note,
+      createdBy: landOccupancies.createdBy,
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+      },
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+      },
+      zone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(...conditions))
+    .orderBy(desc(landOccupancies.returnedAt))
+    .limit(filters?.limit ?? 50)
+    .offset(filters?.offset ?? 0);
+
+  return { data, total: Number(countRes[0]?.count ?? 0) };
+}
+
+export async function createLandOccupancy(data: InsertLandOccupancy) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(landOccupancies).values(data).returning({ id: landOccupancies.id });
+  return res[0].id;
+}
+
+export async function completeLandOccupancy(id: string, returnReservationId?: string, returnedAt = new Date()) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landOccupancies).set({
+    returnedAt,
+    returnReservationId,
+    updatedAt: new Date()
+  }).where(eq(landOccupancies.id, id));
+}
+
+export async function getActiveOccupancyByVessel(vesselId: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const res = await db.select().from(landOccupancies)
+    .where(and(eq(landOccupancies.vesselId, vesselId), isNull(landOccupancies.returnedAt)))
+    .limit(1);
+  return res[0];
+}
+
+export async function listLandWaitingList() {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select({
+      id: landWaitingList.id,
+      userId: landWaitingList.userId,
+      vesselId: landWaitingList.vesselId,
+      preferredZoneId: landWaitingList.preferredZoneId,
+      position: landWaitingList.position,
+      status: landWaitingList.status,
+      note: landWaitingList.note,
+      adminNote: landWaitingList.adminNote,
+      assignedOccupancyId: landWaitingList.assignedOccupancyId,
+      reservationId: landWaitingList.reservationId,
+      offeredAt: landWaitingList.offeredAt,
+      declinedAt: landWaitingList.declinedAt,
+      declineCount: landWaitingList.declineCount,
+      createdAt: landWaitingList.createdAt,
+      updatedAt: landWaitingList.updatedAt,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        phone: users.phone,
+      },
+      vessel: {
+        id: vessels.id,
+        name: vessels.name,
+        type: vessels.type,
+        registration: vessels.registration,
+      },
+      preferredZone: {
+        id: landZones.id,
+        name: landZones.name,
+        code: landZones.code,
+      }
+    })
+    .from(landWaitingList)
+    .innerJoin(users, eq(landWaitingList.userId, users.id))
+    .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
+    .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+    .where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined")))
+    .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
+}
+
+export async function addLandWaitingListEntry(data: Omit<InsertLandWaitingList, "position">) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+
+  const existing = await db.select().from(landWaitingList)
+    .where(and(
+      eq(landWaitingList.userId, data.userId),
+      or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined"))
+    ));
+  if (existing.length > 0) return existing[0].id;
+
+  const maxPosRes = await db.select({ maxPos: sql<number>`max(position)` }).from(landWaitingList);
+  const nextPos = (maxPosRes[0]?.maxPos ?? 0) + 1;
+
+  const res = await db.insert(landWaitingList).values({
+    ...data,
+    position: nextPos,
+  } as any).returning({ id: landWaitingList.id });
+  return res[0].id;
+}
+
+export async function updateLandWaitingListStatus(id: string, status: "waiting" | "offered" | "assigned" | "declined" | "cancelled", extra?: Partial<InsertLandWaitingList>) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  await db.update(landWaitingList).set({
+    status,
+    ...extra,
+    updatedAt: new Date()
+  }).where(eq(landWaitingList.id, id));
+}
+
+export async function reorderWaitingList(ids: string[]) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  for (let i = 0; i < ids.length; i++) {
+    await db.update(landWaitingList).set({ position: i + 1, updatedAt: new Date() }).where(eq(landWaitingList.id, ids[i]));
+  }
+}
+
+export async function logCraneOperation(data: InsertCraneOperationLog) {
+  const db = await getDb();
+  if (!db) throw new Error("DB not available");
+  const res = await db.insert(craneOperationLog).values(data).returning({ id: craneOperationLog.id });
+  return res[0].id;
+}
+
+export async function listCraneOps(filters?: { craneId?: string; limit?: number; offset?: number }) {
+  const db = await getDb();
+  if (!db) return { data: [], total: 0 };
+  const conditions = [];
+  if (filters?.craneId) conditions.push(eq(craneOperationLog.craneId, filters.craneId));
+
+  const countRes = await db.select({ count: sql<number>`count(*)` })
+    .from(craneOperationLog)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+
+  const data = await db
+    .select({
+      id: craneOperationLog.id,
+      craneId: craneOperationLog.craneId,
+      reservationId: craneOperationLog.reservationId,
+      operationType: craneOperationLog.operationType,
+      startTime: craneOperationLog.startTime,
+      endTime: craneOperationLog.endTime,
+      durationMinutes: craneOperationLog.durationMinutes,
+      operatorId: craneOperationLog.operatorId,
+      note: craneOperationLog.note,
+      createdAt: craneOperationLog.createdAt,
+      crane: {
+        id: cranes.id,
+        name: cranes.name,
+      },
+      operator: {
+        id: users.id,
+        name: users.name,
+      }
+    })
+    .from(craneOperationLog)
+    .innerJoin(cranes, eq(craneOperationLog.craneId, cranes.id))
+    .leftJoin(users, eq(craneOperationLog.operatorId, users.id))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(craneOperationLog.startTime))
+    .limit(filters?.limit ?? 50)
+    .offset(filters?.offset ?? 0);
+
+  return { data, total: Number(countRes[0]?.count ?? 0) };
+}
+
+export async function getCraneStats() {
+  const db = await getDb();
+  if (!db) return [];
+  const stats = await db
+    .select({
+      craneId: craneOperationLog.craneId,
+      totalDuration: sql<number>`sum(${craneOperationLog.durationMinutes})::int`,
+      opsCount: sql<number>`count(*)::int`,
+    })
+    .from(craneOperationLog)
+    .groupBy(craneOperationLog.craneId);
+
+  const allCranes = await db.select().from(cranes);
+  return allCranes.map(c => {
+    const crStat = stats.find(s => s.craneId === c.id);
+    return {
+      id: c.id,
+      name: c.name,
+      type: c.type,
+      location: c.location,
+      status: c.craneStatus,
+      totalHours: Number(((crStat?.totalDuration ?? 0) / 60).toFixed(1)),
+      opsCount: crStat?.opsCount ?? 0,
+    };
+  });
+}
+
+// ─── Operator Crane & PIN Management ─────────────────────────────────────
+
+export async function getOperatorCranes(userId: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ craneId: operatorCranes.craneId })
+    .from(operatorCranes)
+    .where(eq(operatorCranes.userId, userId));
+  return rows.map(r => r.craneId);
+}
+
+export async function assignOperatorCranes(userId: string, craneIds: string[]) {
+  const db = await getDb();
+  if (!db) return;
+  await db.delete(operatorCranes).where(eq(operatorCranes.userId, userId));
+  if (craneIds.length > 0) {
+    await db.insert(operatorCranes).values(
+      craneIds.map(craneId => ({ userId, craneId }))
+    );
+  }
+}
+
+export async function setOperatorPin(userId: string, pinCode: string | null) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(users).set({ pinCode, updatedAt: new Date() }).where(eq(users.id, userId));
+}
+
+export async function getUserByPin(pinCode: string) {
+  const db = await getDb();
+  if (!db) return null;
+  const [user] = await db.select().from(users).where(and(eq(users.pinCode, pinCode), eq(users.userStatus, "active")));
+  return user ?? null;
+}
+
+
+// ----------------------------------------------------------------------------
+
+server/migrate.ts
+
+import "dotenv/config";
+import { drizzle } from "drizzle-orm/postgres-js";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import postgres from "postgres";
+
+async function runMigration() {
+    if (!process.env.DATABASE_URL) {
+        throw new Error("DATABASE_URL is missing");
+    }
+
+    console.log("Running migrations...");
+
+    const migrationClient = postgres(process.env.DATABASE_URL, { max: 1 });
+    const db = drizzle(migrationClient);
+
+    // ─── Pre-migration check ───────────────────────────────────────────
+    // If __drizzle_migrations exists but key tables are missing, the DB was
+    // reset without clearing migration history. Drop the tracking table to
+    // force Drizzle to re-run all migrations from scratch.
+    // Ensure new user columns exist prior to ORM queries
+    try {
+        await migrationClient`
+            ALTER TABLE "users" 
+            ADD COLUMN IF NOT EXISTS "is_legal_entity" boolean DEFAULT false NOT NULL,
+            ADD COLUMN IF NOT EXISTS "company_name" varchar(255),
+            ADD COLUMN IF NOT EXISTS "contact_person" varchar(255),
+            ADD COLUMN IF NOT EXISTS "address" text,
+            ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
+            ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL,
+            ADD COLUMN IF NOT EXISTS "pin_code" varchar(10)
+        `;
+        console.log("User table columns verified.");
+    } catch (e: any) {
+        console.warn("User column verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "operator_cranes" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id") ON DELETE CASCADE,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("operator_cranes table verified.");
+    } catch (e: any) {
+        console.warn("operator_cranes table verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "land_zones" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "name" varchar(100) NOT NULL,
+                "code" varchar(20) NOT NULL UNIQUE,
+                "total_spots" integer DEFAULT 10 NOT NULL,
+                "manual_occupied_spots" integer DEFAULT 0 NOT NULL,
+                "description" text,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`ALTER TABLE "land_zones" ADD COLUMN IF NOT EXISTS "manual_occupied_spots" integer DEFAULT 0 NOT NULL`;
+        console.log("land_zones table verified.");
+    } catch (e: any) {
+        console.warn("land_zones table verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "land_occupancies" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "vessel_id" uuid NOT NULL REFERENCES "vessels"("id"),
+                "user_id" uuid REFERENCES "users"("id"),
+                "zone_id" uuid NOT NULL REFERENCES "land_zones"("id"),
+                "spot_number" integer,
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "return_reservation_id" uuid REFERENCES "reservations"("id"),
+                "lifted_at" timestamp DEFAULT now() NOT NULL,
+                "returned_at" timestamp,
+                "note" text,
+                "created_by" uuid REFERENCES "users"("id"),
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "user_id" uuid REFERENCES "users"("id")`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "spot_number" integer`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "return_reservation_id" uuid REFERENCES "reservations"("id")`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "lifted_at" timestamp DEFAULT now()`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "returned_at" timestamp`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "note" text`;
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "created_by" uuid REFERENCES "users"("id")`;
+        console.log("land_occupancies table verified.");
+    } catch (e: any) {
+        console.warn("land_occupancies table verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "land_waiting_list" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "vessel_id" uuid REFERENCES "vessels"("id"),
+                "vessel_name" varchar(255),
+                "vessel_registration" varchar(100),
+                "preferred_zone_id" uuid REFERENCES "land_zones"("id"),
+                "status" varchar(50) DEFAULT 'waiting' NOT NULL,
+                "contact_phone" varchar(50),
+                "requested_date" date,
+                "note" text,
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("land_waiting_list table verified.");
+    } catch (e: any) {
+        console.warn("land_waiting_list table verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."invoice_type" AS ENUM('crane_operation', 'annual_berth_fee', 'transit_berth', 'membership_fee', 'other');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."invoice_payment_method" AS ENUM('bank_transfer', 'cash', 'card', 'compensation');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."invoice_payment_status" AS ENUM('unpaid', 'partially_paid', 'paid', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "invoices" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "invoice_number" varchar(50) NOT NULL,
+                "document_id" varchar(50),
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "vessel_id" uuid REFERENCES "vessels"("id"),
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "berth_assignment_id" uuid REFERENCES "berth_assignments"("id"),
+                "invoice_type" "public"."invoice_type" DEFAULT 'crane_operation' NOT NULL,
+                "issue_date" timestamp DEFAULT now() NOT NULL,
+                "due_date" timestamp NOT NULL,
+                "date_of_supply" timestamp DEFAULT now() NOT NULL,
+                "total_net_amount" numeric(10, 2) NOT NULL,
+                "total_vat_amount" numeric(10, 2) DEFAULT '0' NOT NULL,
+                "total_gross_amount" numeric(10, 2) NOT NULL,
+                "currency" varchar(3) DEFAULT 'EUR' NOT NULL,
+                "payment_method" "public"."invoice_payment_method" DEFAULT 'bank_transfer' NOT NULL,
+                "payment_status" "public"."invoice_payment_status" DEFAULT 'unpaid' NOT NULL,
+                "paid_amount" numeric(10, 2) DEFAULT '0' NOT NULL,
+                "paid_at" timestamp,
+                "fiscal_zki" varchar(64),
+                "fiscal_jir" varchar(64),
+                "pdf_url" text,
+                "notes" text,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "invoice_items" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "invoice_id" uuid NOT NULL REFERENCES "invoices"("id") ON DELETE CASCADE,
+                "product_code" varchar(50),
+                "description" text NOT NULL,
+                "quantity" numeric(10, 2) DEFAULT '1' NOT NULL,
+                "unit" varchar(20) DEFAULT 'kom' NOT NULL,
+                "unit_price" numeric(10, 2) NOT NULL,
+                "discount_percent" numeric(5, 2) DEFAULT '0' NOT NULL,
+                "vat_rate" numeric(5, 2) DEFAULT '25' NOT NULL,
+                "net_amount" numeric(10, 2) NOT NULL,
+                "vat_amount" numeric(10, 2) NOT NULL,
+                "gross_amount" numeric(10, 2) NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("Invoices and invoice_items tables verified.");
+    } catch (e: any) {
+        console.warn("Invoices tables verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."work_order_status" AS ENUM('in_progress', 'completed', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."work_order_client_type" AS ENUM('member', 'external');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."card_entry_type" AS ENUM('statutory_quota_used', 'fee_adjustment_charge', 'commercial_service');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."pricelist_target_type" AS ENUM('member_adjustment', 'external_commercial');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "price_list_items" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "code" varchar(50) NOT NULL UNIQUE,
+                "name" varchar(255) NOT NULL,
+                "target_type" varchar(50) DEFAULT 'external_commercial' NOT NULL,
+                "min_length_m" numeric(5, 2),
+                "max_length_m" numeric(5, 2),
+                "price_per_meter_eur" numeric(8, 2),
+                "fixed_price_eur" numeric(8, 2),
+                "vat_rate" numeric(5, 2) DEFAULT 25.00 NOT NULL,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("price_list_items table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "member_statutory_rights" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL UNIQUE REFERENCES "users"("id"),
+                "lift_available" boolean DEFAULT true NOT NULL,
+                "lift_acquired_year" integer NOT NULL,
+                "lift_expires_at" date NOT NULL,
+                "lower_available" boolean DEFAULT true NOT NULL,
+                "lower_acquired_year" integer NOT NULL,
+                "lower_expires_at" date NOT NULL,
+                "pending_fee_adjustments_count" integer DEFAULT 0 NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("member_statutory_rights table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "work_orders" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "order_number" varchar(30) NOT NULL UNIQUE,
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "vessel_id" uuid REFERENCES "vessels"("id"),
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id"),
+                "operator_id" uuid REFERENCES "users"("id"),
+                "status" varchar(50) DEFAULT 'in_progress' NOT NULL,
+                "client_type" varchar(50) DEFAULT 'member' NOT NULL,
+                "is_statutory_covered" boolean DEFAULT false NOT NULL,
+                "quota_operation_type" varchar(20),
+                "charge_item_code" varchar(50),
+                "charge_item_name" varchar(255),
+                "vessel_length_m" numeric(7, 2),
+                "commercial_price_per_meter" numeric(8, 2),
+                "commercial_total" numeric(10, 2),
+                "vat_rate" numeric(5, 2) DEFAULT 25.00,
+                "started_at" timestamp DEFAULT now() NOT NULL,
+                "completed_at" timestamp,
+                "actual_duration_min" integer,
+                "operator_notes" text,
+                "erp_sync_status" varchar(30) DEFAULT 'pending' NOT NULL,
+                "erp_document_id" varchar(100),
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("work_orders table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "user_card_entries" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "work_order_id" uuid REFERENCES "work_orders"("id"),
+                "entry_type" varchar(50) NOT NULL,
+                "service_item_code" varchar(50),
+                "service_item_name" varchar(255) NOT NULL,
+                "vessel_name" varchar(255),
+                "vessel_registration" varchar(100),
+                "event_date" timestamp DEFAULT now() NOT NULL,
+                "note" text,
+                "erp_status" varchar(50) DEFAULT 'pending' NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("user_card_entries table verified.");
+    } catch (e: any) {
+        console.warn("Work orders tables verification warning:", e?.message || e);
+    }
+
+    // ─── Member Sync Tables & Alterations ─────────────────────────────
+    try {
+        await migrationClient`ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL`;
+        await migrationClient`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "jmbg_hash" varchar(64)`;
+        console.log("users table updated for member sync (nullable email, jmbg_hash).");
+    } catch (e: any) {
+        console.warn("users alter warning:", e?.message || e);
+    }
+
+    try {
+        // Ensure vessels registration is unique where not null
+        await migrationClient`
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'vessels_registration_unique'
+                ) THEN
+                    ALTER TABLE "vessels" ADD CONSTRAINT "vessels_registration_unique" UNIQUE ("registration");
+                END IF;
+            EXCEPTION WHEN others THEN null;
+            END $$;
+        `;
+        console.log("vessels registration uniqueness verified.");
+    } catch (e: any) {
+        console.warn("vessels uniqueness warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."sync_run_status" AS ENUM('running', 'completed', 'failed', 'partial');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."sync_conflict_status" AS ENUM('pending', 'resolved', 'ignored');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."sync_conflict_type" AS ENUM('duplicate_oib', 'duplicate_name', 'oib_mismatch', 'vessel_owner_conflict', 'ambiguous_match');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "member_links" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "legacy_mat_broj" varchar(10) NOT NULL UNIQUE,
+                "legacy_oib" varchar(11),
+                "legacy_jmbg" varchar(13),
+                "legacy_raw_data" jsonb,
+                "is_primary" boolean DEFAULT false NOT NULL,
+                "last_synced_at" timestamp DEFAULT now() NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "member_links_user_id_idx" ON "member_links" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "member_links_legacy_oib_idx" ON "member_links" ("legacy_oib")`;
+        console.log("member_links table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "member_memberships" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "legacy_mat_broj" varchar(10) NOT NULL,
+                "vrsta_c" varchar(1),
+                "clan" varchar(1),
+                "klub" varchar(3),
+                "klub2" varchar(3),
+                "klub3" varchar(3),
+                "active_member" boolean DEFAULT true NOT NULL,
+                "synced_at" timestamp DEFAULT now() NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_user_id_idx" ON "member_memberships" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_mat_broj_idx" ON "member_memberships" ("legacy_mat_broj")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_active_member_idx" ON "member_memberships" ("active_member")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "memberships_klub_idx" ON "member_memberships" ("klub")`;
+        console.log("member_memberships table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "sync_runs" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "started_at" timestamp NOT NULL,
+                "completed_at" timestamp,
+                "status" "sync_run_status" DEFAULT 'running' NOT NULL,
+                "source_rows_total" integer,
+                "members_created" integer DEFAULT 0 NOT NULL,
+                "members_updated" integer DEFAULT 0 NOT NULL,
+                "members_skipped" integer DEFAULT 0 NOT NULL,
+                "members_deactivated" integer DEFAULT 0 NOT NULL,
+                "vessels_created" integer DEFAULT 0 NOT NULL,
+                "vessels_updated" integer DEFAULT 0 NOT NULL,
+                "vessels_skipped" integer DEFAULT 0 NOT NULL,
+                "links_created" integer DEFAULT 0 NOT NULL,
+                "memberships_created" integer DEFAULT 0 NOT NULL,
+                "memberships_updated" integer DEFAULT 0 NOT NULL,
+                "conflicts_detected" integer DEFAULT 0 NOT NULL,
+                "error_message" text,
+                "error_details" jsonb,
+                "triggered_by" varchar(30) DEFAULT 'cron' NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("sync_runs table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "sync_conflicts" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "sync_run_id" uuid NOT NULL REFERENCES "sync_runs"("id"),
+                "conflict_type" "sync_conflict_type" NOT NULL,
+                "status" "sync_conflict_status" DEFAULT 'pending' NOT NULL,
+                "legacy_mat_broj" varchar(10),
+                "legacy_data" jsonb NOT NULL,
+                "matched_user_ids" jsonb,
+                "description" text NOT NULL,
+                "resolution" text,
+                "resolved_by" uuid REFERENCES "users"("id"),
+                "resolved_at" timestamp,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "sync_conflicts_sync_run_id_idx" ON "sync_conflicts" ("sync_run_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "sync_conflicts_status_idx" ON "sync_conflicts" ("status")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "sync_conflicts_type_idx" ON "sync_conflicts" ("conflict_type")`;
+        console.log("sync_conflicts table verified.");
+    } catch (e: any) {
+        console.warn("Member sync tables verification warning:", e?.message || e);
+    }
+
+    // ─── PŠD Marina: Clubs, Piers & Berths Tables ─────────────────────
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "pier_type" AS ENUM ('floating_pontoon', 'fixed_pier', 'breakwater', 'quay');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "berth_status" AS ENUM ('vacant', 'occupied', 'transit', 'debt_block', 'maintenance', 'reserved');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "berth_side" AS ENUM ('left', 'right', 'head', 'quay');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "berth_assignment_type" AS ENUM ('permanent_member', 'transit_guest', 'club_service', 'temporary_relocation');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "clubs" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "code" varchar(20) NOT NULL UNIQUE,
+                "name" varchar(255) NOT NULL,
+                "short_name" varchar(50),
+                "description" text,
+                "annual_fee" numeric(10, 2) DEFAULT 0.00 NOT NULL,
+                "color_hex" varchar(10) DEFAULT '#3b82f6',
+                "is_active" boolean DEFAULT true NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("clubs table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "piers" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "code" varchar(20) NOT NULL UNIQUE,
+                "name" varchar(255) NOT NULL,
+                "pier_type" "pier_type" DEFAULT 'floating_pontoon' NOT NULL,
+                "total_berths" integer NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "description" text,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "piers_code_idx" ON "piers" ("code")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "piers_sort_order_idx" ON "piers" ("sort_order")`;
+        console.log("piers table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "berths" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "pier_id" uuid NOT NULL REFERENCES "piers"("id") ON DELETE CASCADE,
+                "code" varchar(30) NOT NULL UNIQUE,
+                "berth_number" integer NOT NULL,
+                "side" "berth_side" DEFAULT 'left' NOT NULL,
+                "max_loa_m" numeric(6, 2) DEFAULT 10.00 NOT NULL,
+                "max_beam_m" numeric(6, 2) DEFAULT 3.20 NOT NULL,
+                "max_draft_m" numeric(5, 2) DEFAULT 2.50 NOT NULL,
+                "status" "berth_status" DEFAULT 'vacant' NOT NULL,
+                "has_electricity" boolean DEFAULT true NOT NULL,
+                "has_water" boolean DEFAULT true NOT NULL,
+                "electricity_meter_code" varchar(50),
+                "water_meter_code" varchar(50),
+                "notes" text,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berths_pier_id_idx" ON "berths" ("pier_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berths_code_idx" ON "berths" ("code")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berths_status_idx" ON "berths" ("status")`;
+        console.log("berths table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "berth_assignments" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "berth_id" uuid NOT NULL REFERENCES "berths"("id") ON DELETE CASCADE,
+                "vessel_id" uuid NOT NULL REFERENCES "vessels"("id"),
+                "user_id" uuid NOT NULL REFERENCES "users"("id"),
+                "assignment_type" "berth_assignment_type" DEFAULT 'permanent_member' NOT NULL,
+                "contract_number" varchar(50),
+                "start_date" timestamp DEFAULT now() NOT NULL,
+                "end_date" timestamp,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "assigned_by" uuid REFERENCES "users"("id"),
+                "notes" text,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_berth_id_idx" ON "berth_assignments" ("berth_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_vessel_id_idx" ON "berth_assignments" ("vessel_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_user_id_idx" ON "berth_assignments" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assignments_is_active_idx" ON "berth_assignments" ("is_active")`;
+        console.log("berth_assignments table verified.");
+    } catch (e: any) {
+        console.warn("Piers & berths tables verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrate(db, { migrationsFolder: "drizzle" });
+        console.log("Migrations completed.");
+    } catch (migErr: any) {
+        console.log("Drizzle folder migration skipped or already applied:", migErr?.message || migErr);
+    }
+
+    // ─── Import schema and helpers ────────────────────────────────────
+    const { cranes, users, serviceTypes, holidays, landZones, priceListItems, memberStatutoryRights } = await import("../drizzle/schema");
+    const { eq } = await import("drizzle-orm");
+    const bcrypt = await import("bcryptjs");
+
+    // ─── Seed: Price List Items ───────────────────────────────────────
+    const existingPriceItems = await db.select().from(priceListItems);
+    if (existingPriceItems.length === 0) {
+        console.log("Seeding price list items...");
+        await db.insert(priceListItems).values([
+            {
+                code: "USL-D9T",
+                name: "Korištenje dizalice 9T (Doplata članarine)",
+                targetType: "member_adjustment",
+                fixedPriceEur: "50.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 1,
+            },
+            {
+                code: "USL-TR50",
+                name: "Korištenje Travelifta 50T (Doplata članarine)",
+                targetType: "member_adjustment",
+                fixedPriceEur: "80.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 2,
+            },
+            {
+                code: "USL-VANJSKI-M",
+                name: "Dizanje/spuštanje za vanjske korisnike (po metru duljine)",
+                targetType: "external_commercial",
+                pricePerMeterEur: "12.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 3,
+            },
+            {
+                code: "USL-PRANJE",
+                name: "Pranje trupa visokotlačnim peračem",
+                targetType: "external_commercial",
+                fixedPriceEur: "30.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 4,
+            },
+        ]);
+        console.log("Price list items seeded.");
+    }
+
+    // ─── Seed: Member Statutory Rights for active users ───────────────
+    const allUsers = await db.select().from(users);
+    const currentYear = new Date().getFullYear();
+    const expiresAt = `${currentYear + 1}-12-31`;
+
+    for (const u of allUsers) {
+        const [existingRight] = await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, u.id));
+        if (!existingRight) {
+            await db.insert(memberStatutoryRights).values({
+                userId: u.id,
+                liftAvailable: true,
+                liftAcquiredYear: currentYear,
+                liftExpiresAt: expiresAt,
+                lowerAvailable: true,
+                lowerAcquiredYear: currentYear,
+                lowerExpiresAt: expiresAt,
+                pendingFeeAdjustmentsCount: 0,
+            });
+        }
+    }
+    console.log("Member statutory rights verified.");
+
+    // ─── Seed: Service Types (tipovi operacija) ───────────────────────
+    const existingServiceTypes = await db.select().from(serviceTypes);
+    if (existingServiceTypes.length === 0) {
+        console.log("Seeding service types...");
+        await db.insert(serviceTypes).values([
+            { name: "Spuštanje u more", description: "Spuštanje plovila s kopna ili brodogradilišta u more", defaultDurationMin: 60, sortOrder: 1, operationCategory: "lower_to_sea" },
+            { name: "Vađenje iz mora", description: "Vađenje plovila iz mora na kopno ili brodogradilište", defaultDurationMin: 60, sortOrder: 2, operationCategory: "lift_from_sea" },
+            { name: "Premještanje unutar marine", description: "Premještanje plovila unutar prostora marine", defaultDurationMin: 45, sortOrder: 3, operationCategory: "move" },
+            { name: "Zimovanje (dugotrajna pohrana)", description: "Izvlačenje plovila za zimsko odlaganje", defaultDurationMin: 90, sortOrder: 4, operationCategory: "lift_from_sea" },
+            { name: "Ostalo", description: "Ostale operacije — opis u napomeni", defaultDurationMin: 60, sortOrder: 5, operationCategory: "other" },
+        ]);
+        console.log("Service types seeded.");
+    } else {
+        // Upgrade existing ones
+        console.log("Updating existing service types with operation categories...");
+        for (const st of existingServiceTypes) {
+            let cat: "lift_from_sea" | "lower_to_sea" | "move" | "maintenance" | "other" = "other";
+            const nameLower = st.name.toLowerCase();
+            if (nameLower.includes("vađenje") || nameLower.includes("vadenje") || nameLower.includes("zimovanje")) {
+                cat = "lift_from_sea";
+            } else if (nameLower.includes("spuštanje") || nameLower.includes("spustanje")) {
+                cat = "lower_to_sea";
+            } else if (nameLower.includes("premještanje") || nameLower.includes("premjestanje")) {
+                cat = "move";
+            } else if (nameLower.includes("održavanje") || nameLower.includes("odrzavanje") || nameLower.includes("servis")) {
+                cat = "maintenance";
+            }
+            await db.update(serviceTypes).set({ operationCategory: cat }).where(eq(serviceTypes.id, st.id));
+        }
+        console.log("Service types updated.");
+    }
+
+    // ─── Seed: Cranes ────────────────────────────────────────────────
+    const existingCranes = await db.select().from(cranes);
+    if (existingCranes.length === 0) {
+        console.log("Seeding cranes...");
+        await db.insert(cranes).values([
+            {
+                name: "Mala dizalica",
+                type: "travelift",
+                maxCapacityKN: 50,
+                description: "Za manja plovila do 50 kN (cca 5 tona)",
+                location: "Bazen A",
+                craneStatus: "active",
+            },
+            {
+                name: "Srednja dizalica",
+                type: "travelift",
+                maxCapacityKN: 200,
+                description: "Standardna dizalica do 200 kN (cca 20 tona)",
+                location: "Bazen B",
+                craneStatus: "active",
+            },
+            {
+                name: "Velika dizalica",
+                type: "travelift",
+                maxCapacityKN: 500,
+                description: "Travel lift do 500 kN (cca 50 tona)",
+                location: "Bazen C",
+                craneStatus: "active",
+            },
+        ]);
+        console.log("Cranes seeded.");
+    }
+
+    // ─── Seed: HR Holidays ───────────────────────────────────────────
+    const existingHolidays = await db.select().from(holidays);
+    if (existingHolidays.length === 0) {
+        console.log("Seeding HR holidays...");
+        await db.insert(holidays).values([
+            { date: "2026-01-01", name: "Nova godina", isRecurring: true },
+            { date: "2026-01-06", name: "Bogojavljenje (Sveta tri kralja)", isRecurring: true },
+            { date: "2026-04-05", name: "Uskrs", isRecurring: false },
+            { date: "2026-04-06", name: "Uskrsni ponedjeljak", isRecurring: false },
+            { date: "2026-05-01", name: "Praznik rada", isRecurring: true },
+            { date: "2026-05-30", name: "Dan državnosti", isRecurring: true },
+            { date: "2026-06-04", name: "Tijelovo", isRecurring: false },
+            { date: "2026-06-22", name: "Dan antifašističke borbe", isRecurring: true },
+            { date: "2026-08-05", name: "Dan domovinske zahvalnosti", isRecurring: true },
+            { date: "2026-08-15", name: "Velika Gospa", isRecurring: true },
+            { date: "2026-10-08", name: "Dan neovisnosti", isRecurring: true },
+            { date: "2026-11-01", name: "Svi sveti", isRecurring: true },
+            { date: "2026-12-25", name: "Božić", isRecurring: true },
+            { date: "2026-12-26", name: "Sveti Stjepan (Štefanje)", isRecurring: true },
+        ]);
+        console.log("HR holidays seeded.");
+    }
+
+    // ─── Seed: Land Zones ────────────────────────────────────────────
+    const existingLandZones = await db.select().from(landZones);
+    if (existingLandZones.length === 0) {
+        console.log("Seeding land zones...");
+        await db.insert(landZones).values([
+            { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
+            { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
+            { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
+            { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
+            { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
+            { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
+        ]);
+        console.log("Land zones seeded.");
+    }
+
+    // ─── Seed: Admin Users ───────────────────────────────────────────
+    console.log("Checking administrator accounts...");
+    const admins = [
+        { email: "admin@lucicaspinut.hr", password: "$pinut89823" },
+        { email: "admin@spinut.hr", password: "Spinut" },
+        { email: "mario@imagomatrix.hr", password: "Spinut" },
+    ];
+
+    for (const admin of admins) {
+        const passwordHash = await bcrypt.default.hash(admin.password, 12);
+        const existing = await db.select().from(users).where(eq(users.email, admin.email));
+
+        if (existing.length === 0) {
+            console.log(`Creating admin: ${admin.email}`);
+            await db.insert(users).values({
+                email: admin.email,
+                passwordHash,
+                firstName: admin.email.split("@")[0],
+                lastName: "Admin",
+                name: admin.email.split("@")[0],
+                role: "admin",
+                loginMethod: "email",
+                userStatus: "active",
+                emailVerifiedAt: new Date(),
+            });
+        } else {
+            console.log(`Ensuring admin role: ${admin.email}`);
+            await db.update(users).set({
+                role: "admin",
+                emailVerifiedAt: existing[0].emailVerifiedAt || new Date(),
+                updatedAt: new Date()
+            }).where(eq(users.email, admin.email));
+        }
+    }
+    console.log("Admin check completed.");
+
+    await migrationClient.end();
+}
+
+runMigration().catch((err) => {
+    console.error("Migration failed:", err);
+    process.exit(1);
+});
+
+
+// ----------------------------------------------------------------------------
+
+server/storage.ts
+// Preconfigured storage helpers for Manus WebDev templates
+// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
+
+import { ENV } from './_core/env';
+
+type StorageConfig = { baseUrl: string; apiKey: string };
+
+function getStorageConfig(): StorageConfig {
+  const baseUrl = ENV.forgeApiUrl;
+  const apiKey = ENV.forgeApiKey;
+
+  if (!baseUrl || !apiKey) {
+    throw new Error(
+      "Storage proxy credentials missing: set BUILT_IN_FORGE_API_URL and BUILT_IN_FORGE_API_KEY"
+    );
+  }
+
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey };
+}
+
+function buildUploadUrl(baseUrl: string, relKey: string): URL {
+  const url = new URL("v1/storage/upload", ensureTrailingSlash(baseUrl));
+  url.searchParams.set("path", normalizeKey(relKey));
+  return url;
+}
+
+async function buildDownloadUrl(
+  baseUrl: string,
+  relKey: string,
+  apiKey: string
+): Promise<string> {
+  const downloadApiUrl = new URL(
+    "v1/storage/downloadUrl",
+    ensureTrailingSlash(baseUrl)
+  );
+  downloadApiUrl.searchParams.set("path", normalizeKey(relKey));
+  const response = await fetch(downloadApiUrl, {
+    method: "GET",
+    headers: buildAuthHeaders(apiKey),
+  });
+  return (await response.json()).url;
+}
+
+function ensureTrailingSlash(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`;
+}
+
+function normalizeKey(relKey: string): string {
+  return relKey.replace(/^\/+/, "");
+}
+
+function toFormData(
+  data: Buffer | Uint8Array | string,
+  contentType: string,
+  fileName: string
+): FormData {
+  const blob =
+    typeof data === "string"
+      ? new Blob([data], { type: contentType })
+      : new Blob([data as any], { type: contentType });
+  const form = new FormData();
+  form.append("file", blob, fileName || "file");
+  return form;
+}
+
+function buildAuthHeaders(apiKey: string): HeadersInit {
+  return { Authorization: `Bearer ${apiKey}` };
+}
+
+export async function storagePut(
+  relKey: string,
+  data: Buffer | Uint8Array | string,
+  contentType = "application/octet-stream"
+): Promise<{ key: string; url: string }> {
+  const { baseUrl, apiKey } = getStorageConfig();
+  const key = normalizeKey(relKey);
+  const uploadUrl = buildUploadUrl(baseUrl, key);
+  const formData = toFormData(data, contentType, key.split("/").pop() ?? key);
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: buildAuthHeaders(apiKey),
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const message = await response.text().catch(() => response.statusText);
+    throw new Error(
+      `Storage upload failed (${response.status} ${response.statusText}): ${message}`
+    );
+  }
+  const url = (await response.json()).url;
+  return { key, url };
+}
+
+export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
+  const { baseUrl, apiKey } = getStorageConfig();
+  const key = normalizeKey(relKey);
+  return {
+    key,
+    url: await buildDownloadUrl(baseUrl, key, apiKey),
+  };
+}
+
+
+// ----------------------------------------------------------------------------
+
+server/services/eRacuniService.ts
+/**
+ * PŠD Špinut — e-racuni.com / Eurofaktura Web Services API Client
+ * 
+ * Integracija s e-racuni.com za:
+ * 1. Automatsku sinkronizaciju kupaca / članova (PartnerCreate / PartnerUpdate / PartnerList)
+ * 2. Automatsko izdavanje računa za dizalicu, ugovore o vezu i članarine (SalesInvoiceCreate)
+ * 3. Dohvat PDF računa (SalesInvoicePdf / SalesInvoiceGet)
+ * 4. Provjeru statusa plaćanja (SalesInvoiceGet)
+ * 
+ * Sigurnost: Sve vjerodajnice se učitavaju isključivo iz varijabli okruženja (.env).
+ */
+
+export interface ERacuniConfig {
+    apiUrl: string;
+    username: string;
+    secretKey: string;
+    token: string;
+    isSandbox?: boolean;
+    mockEnabled?: boolean;
+}
+
+export interface ERacuniItem {
+    description: string;
+    quantity: number;
+    unit?: string; // npr. "kom", "m", "dan", "sat"
+    netPrice: number;
+    vatRate?: number; // npr. 25 ili 0
+    discount?: number; // postotak popusta
+    itemCode?: string;
+    productCode?: string;
+}
+
+export interface CreateInvoiceParams {
+    userId: string;
+    userName: string;
+    userFirstName?: string;
+    userLastName?: string;
+    userOib?: string;
+    userEmail?: string;
+    userPhone?: string;
+    userAddress?: string;
+    userCity?: string;
+    userPostalCode?: string;
+    isLegalEntity?: boolean;
+    companyName?: string;
+    
+    // Podaci o računu
+    invoiceType?: "crane_operation" | "annual_berth_fee" | "transit_berth" | "membership_fee" | "other";
+    date?: Date;
+    dateDue?: Date;
+    dateOfSupply?: Date;
+    paymentMethod?: "bank_transfer" | "cash" | "card" | "compensation";
+    currency?: string;
+    notes?: string;
+    items: ERacuniItem[];
+}
+
+export class ERacuniService {
+    private config: ERacuniConfig;
+
+    constructor(config?: Partial<ERacuniConfig>) {
+        this.config = {
+            apiUrl: config?.apiUrl || process.env.ERACUNI_API_URL || "https://eurofaktura.com/WebServicesHR/API",
+            username: config?.username || process.env.ERACUNI_USERNAME || "",
+            secretKey: config?.secretKey || process.env.ERACUNI_MD5PASS || "",
+            token: config?.token || process.env.ERACUNI_TOKEN || "",
+            isSandbox: config?.isSandbox ?? (process.env.ERACUNI_SANDBOX_MODE === "true" || process.env.NODE_ENV !== "production"),
+            mockEnabled: config?.mockEnabled ?? (process.env.ERACUNI_MOCK_ENABLED === "true"),
+        };
+    }
+
+    /**
+     * Provjera postojanja obaveznih API vjerodajnica u okruženju
+     */
+    private validateConfig() {
+        if (!this.config.mockEnabled) {
+            if (!this.config.username || !this.config.secretKey || !this.config.token) {
+                throw new Error(
+                    "e-racuni.com API vjerodajnice nisu konfigurirane. Postavite ERACUNI_USERNAME, ERACUNI_MD5PASS i ERACUNI_TOKEN u .env datoteci."
+                );
+            }
+        }
+    }
+
+    /**
+     * Izvršavanje generičkog JSON API poziva prema e-racuni.com
+     */
+    async callApi<T = any>(method: string, parameters: any = {}): Promise<T> {
+        this.validateConfig();
+
+        const payload = {
+            username: this.config.username,
+            secretKey: this.config.secretKey,
+            token: this.config.token,
+            method,
+            parameters,
+        };
+
+        const response = await fetch(this.config.apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`e-racuni API HTTP ${response.status}: ${errorText}`);
+        }
+
+        const json = await response.json();
+
+        if (json.response?.status === "error") {
+            const msg = json.response?.error?.message || json.response?.error || JSON.stringify(json.response);
+            throw new Error(`e-racuni API greška: ${msg}`);
+        }
+
+        return (json.response?.result ?? json.response) as T;
+    }
+
+    /**
+     * Pronalaženje ili kreiranje Partnera (Kupca / Člana) u e-racuni.com
+     */
+    async syncPartner(user: {
+        id: string;
+        name?: string | null;
+        firstName?: string | null;
+        lastName?: string | null;
+        oib?: string | null;
+        email?: string | null;
+        phone?: string | null;
+        address?: string | null;
+        city?: string | null;
+        postalCode?: string | null;
+        isLegalEntity?: boolean | null;
+        companyName?: string | null;
+    }): Promise<{ partnerDocumentId: string; partnerCode?: string }> {
+        if (this.config.mockEnabled) {
+            return {
+                partnerDocumentId: `mock-partner-${user.id.slice(0, 8)}`,
+                partnerCode: "MOCK-001",
+            };
+        }
+
+        // 1. Ako imamo OIB ili email, prvo provjeri postoji li već partner
+        const cleanOib = user.oib?.trim() || "";
+        const cleanEmail = user.email?.trim() || "";
+
+        try {
+            const existingPartners = await this.callApi<any[]>("PartnerList", {});
+            if (Array.isArray(existingPartners)) {
+                const match = existingPartners.find((p) => {
+                    if (cleanOib && (p.personalID === cleanOib || p.vatRegistration === cleanOib)) return true;
+                    if (cleanEmail && p.eMail && p.eMail.toLowerCase() === cleanEmail.toLowerCase()) return true;
+                    return false;
+                });
+
+                if (match?.documentID) {
+                    console.log(`[eRacuni] Partner već postoji: ${match.documentID} (${match.firstName || ""} ${match.lastName || match.companyName || ""})`);
+                    return {
+                        partnerDocumentId: match.documentID,
+                        partnerCode: match.code,
+                    };
+                }
+            }
+        } catch (e: any) {
+            console.warn("[eRacuni] Upozorenje pri dohvatu PartnerList:", e.message);
+        }
+
+        // 2. Ako ne postoji, kreiraj novog partnera
+        const displayName = user.name || `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.companyName || "Član PŠD Špinut";
+        const partnerPayload: any = {
+            partner: {
+                firstName: user.firstName || displayName.split(" ")[0] || "Član",
+                lastName: user.lastName || displayName.split(" ").slice(1).join(" ") || "Špinut",
+                companyName: user.isLegalEntity ? (user.companyName || displayName) : undefined,
+                companyType: user.isLegalEntity ? "Ltd" : undefined,
+                personalID: cleanOib || undefined,
+                vatRegistration: user.isLegalEntity && cleanOib ? cleanOib : undefined,
+                eMail: cleanEmail || undefined,
+                addresses: [
+                    {
+                        street: user.address || "Lučica Špinut bb",
+                        postalCode: user.postalCode || "21000",
+                        city: user.city || "Split",
+                        country: "HR",
+                        telephone: user.phone || undefined,
+                        type: "Primary",
+                    }
+                ]
+            }
+        };
+
+        const createRes = await this.callApi<{ documentID: string; code?: string }>("PartnerCreate", partnerPayload);
+        console.log(`[eRacuni] Kreiran novi partner: ${createRes.documentID}`);
+
+        return {
+            partnerDocumentId: createRes.documentID,
+            partnerCode: createRes.code,
+        };
+    }
+
+    /**
+     * Izdavanje izlaznog računa (SalesInvoiceCreate)
+     */
+    async createSalesInvoice(params: CreateInvoiceParams): Promise<{
+        documentId: string;
+        invoiceNumber: string;
+        totalNetAmount: number;
+        totalVatAmount: number;
+        totalGrossAmount: number;
+        issueDate: string;
+        dueDate: string;
+    }> {
+        // Formatiranje datuma (YYYY-MM-DD)
+        const formatDate = (d?: Date) => {
+            const dateObj = d || new Date();
+            return dateObj.toISOString().split("T")[0];
+        };
+
+        const docDate = formatDate(params.date);
+        const dateDue = formatDate(params.dateDue || new Date(Date.now() + 15 * 24 * 60 * 60 * 1000));
+        const dateSupply = formatDate(params.dateOfSupply);
+
+        // Priprema stavki i izračuni
+        let calculatedNet = 0;
+        let calculatedVat = 0;
+        let calculatedGross = 0;
+
+        const formattedItems = params.items.map((item) => {
+            const vatRate = item.vatRate !== undefined ? item.vatRate : 25;
+            const net = Number((item.quantity * item.netPrice * (1 - (item.discount || 0) / 100)).toFixed(2));
+            const vat = Number((net * (vatRate / 100)).toFixed(2));
+            const gross = Number((net + vat).toFixed(2));
+
+            calculatedNet += net;
+            calculatedVat += vat;
+            calculatedGross += gross;
+
+            return {
+                productCode: item.productCode || item.itemCode || "USL-DIZ",
+                description: item.description,
+                quantity: item.quantity,
+                unit: item.unit || "kom",
+                netPrice: item.netPrice,
+                vatRate: vatRate,
+                discountPercent: item.discount || 0,
+            };
+        });
+
+        // Mock / Sandbox simulacija (ako je omogućena za lokalni razvoj)
+        if (this.config.mockEnabled) {
+            const mockDocId = `mock-inv-${Date.now()}`;
+            const mockNumber = `2026-${Math.floor(1000 + Math.random() * 9000)}`;
+            console.log(`[eRacuni MOCK] Kreiran simulirani račun br. ${mockNumber} (ID: ${mockDocId})`);
+
+            return {
+                documentId: mockDocId,
+                invoiceNumber: mockNumber,
+                totalNetAmount: calculatedNet,
+                totalVatAmount: calculatedVat,
+                totalGrossAmount: calculatedGross,
+                issueDate: docDate,
+                dueDate: dateDue,
+            };
+        }
+
+        // 1. Sinkroniziraj / dohvati partnera
+        const { partnerDocumentId } = await this.syncPartner({
+            id: params.userId,
+            name: params.userName,
+            firstName: params.userFirstName,
+            lastName: params.userLastName,
+            oib: params.userOib,
+            email: params.userEmail,
+            phone: params.userPhone,
+            address: params.userAddress,
+            city: params.userCity,
+            postalCode: params.userPostalCode,
+            isLegalEntity: params.isLegalEntity,
+            companyName: params.companyName,
+        });
+
+        // 2. Mapiranje načina plaćanja
+        const paymentMethodMap: Record<string, string> = {
+            bank_transfer: "WireTransfer",
+            cash: "Cash",
+            card: "CreditCard",
+            compensation: "Compensation",
+        };
+        const mappedPaymentMethod = paymentMethodMap[params.paymentMethod || "bank_transfer"] || "WireTransfer";
+
+        const prefix = this.config.isSandbox ? "[SANDBOX / TEST] " : "";
+        const finalRemarks = `${prefix}${params.notes || "PŠD Špinut lučke usluge"}`.trim();
+
+        // 3. Slanje na SalesInvoiceCreate
+        const invoicePayload: any = {
+            SalesInvoice: {
+                buyerPartnerID: partnerDocumentId,
+                date: docDate,
+                dateDue: dateDue,
+                dateOfSupplyFrom: dateSupply,
+                dateOfSupplyTo: dateSupply,
+                paymentMethod: mappedPaymentMethod,
+                currency: params.currency || "EUR",
+                remarks: finalRemarks,
+                Items: formattedItems,
+            }
+        };
+
+        const res = await this.callApi<{ documentID: string; number?: string }>("SalesInvoiceCreate", invoicePayload);
+        const documentId = res.documentID;
+        const invoiceNumber = res.number || `R-${documentId}`;
+
+        console.log(`[eRacuni] Uspješno kreiran račun br. ${invoiceNumber} (ID: ${documentId})`);
+
+        return {
+            documentId,
+            invoiceNumber,
+            totalNetAmount: calculatedNet,
+            totalVatAmount: calculatedVat,
+            totalGrossAmount: calculatedGross,
+            issueDate: docDate,
+            dueDate: dateDue,
+        };
+    }
+
+    /**
+     * Dohvat detalja računa (SalesInvoiceGet)
+     */
+    async getSalesInvoice(documentId: string): Promise<any> {
+        if (this.config.mockEnabled) {
+            return {
+                documentID: documentId,
+                number: "MOCK-2026-0001",
+                paidAmount: 0,
+                status: "unpaid",
+            };
+        }
+        return this.callApi("SalesInvoiceGet", { documentID: documentId });
+    }
+
+    /**
+     * Dohvat PDF-a izdanog računa (SalesInvoicePdf)
+     */
+    async getSalesInvoicePdf(documentId: string): Promise<{ pdfBase64?: string; url?: string }> {
+        if (this.config.mockEnabled) {
+            return {
+                url: "https://example.com/mock-invoice.pdf",
+            };
+        }
+        return this.callApi("SalesInvoicePdf", { documentID: documentId });
+    }
+}
+
+// Singleton instanca servisa
+export const eRacuniService = new ERacuniService();
+
+
+// ----------------------------------------------------------------------------
+

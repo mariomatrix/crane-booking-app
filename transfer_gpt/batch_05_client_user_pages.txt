@@ -1,0 +1,2817 @@
+// ============================================================================
+// BATCH 5/9: Korisničke stranice & Mobilna aplikacija za operatere
+// ============================================================================
+
+client/src/pages/Home.tsx
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { getLoginUrl } from "@/const";
+import { useLocation } from "wouter";
+import Calendar from "./Calendar";
+import LandingPage from "../components/LandingPage";
+import { trpc } from "@/lib/trpc";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatusBadge } from "@/components/StatusBadge";
+import { formatAppDate } from "@/lib/date-utils";
+import {
+  CalendarDays,
+  ClipboardList,
+  LogOut,
+  Plus,
+  Settings,
+  Construction,
+  Ship,
+  IdCard,
+  ChevronRight,
+  Clock,
+  Anchor,
+  ListOrdered,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useLang } from "@/contexts/LangContext";
+import { Users } from "lucide-react";
+import { LanguageSelector } from "@/components/LanguageSelector";
+import { useEffect } from "react";
+import { Footer } from "@/components/Footer";
+import { BottomNav } from "@/components/BottomNav";
+
+export default function Home() {
+  const { t, lang } = useLang();
+  const { user, loading, logout } = useAuth();
+  const [, setLocation] = useLocation();
+
+  // Redirect admin/operator to their dashboard by default
+  useEffect(() => {
+    if (!loading && user && (user.role === "admin" || user.role === "operator")) {
+      setLocation("/admin");
+    }
+  }, [loading, user, setLocation]);
+
+  const { data: reservationsList = [] } = trpc.reservation.myReservations.useQuery(
+    undefined,
+    { enabled: !!user && user.role === "user" }
+  );
+
+  const upcomingReservation = reservationsList.find(r => r.status === "approved" && r.scheduledStart && new Date(r.scheduledStart) > new Date());
+  const pendingRequests = reservationsList.filter(r => r.status === "pending");
+
+  const { data: waitlistStatus } = trpc.landWaiting.getMyStatus.useQuery(
+    undefined,
+    { enabled: !!user && user.role === "user" }
+  );
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Top Navigation */}
+      <header className="sticky top-0 z-50 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="container flex h-14 items-center justify-between">
+          <div
+            className="flex items-center gap-2 cursor-pointer"
+            onClick={() => setLocation("/")}
+          >
+            <img src="/logo.png" alt="PŠD Špinut Logo" className="h-8 w-auto object-contain max-w-[150px]" />
+            <span className="font-semibold text-lg tracking-tight hidden sm:inline">
+              Crane Booking
+            </span>
+          </div>
+
+          <nav className="flex items-center gap-1">
+            {user && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setLocation("/my-reservations")}
+                  className="text-sm"
+                >
+                  <ClipboardList className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">{t.nav.myReservations}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setLocation("/my-vessels")}
+                  className="text-sm"
+                >
+                  <Ship className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">{t.nav.vessels}</span>
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => setLocation("/new-reservation")}
+                  className="text-sm"
+                >
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  <span className="hidden sm:inline">{t.nav.newReservation}</span>
+                </Button>
+              </>
+            )}
+
+            {loading ? (
+              <div className="h-8 w-8 rounded-full bg-muted animate-pulse ml-2" />
+            ) : user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="ml-1 p-1">
+                    <Avatar className="h-7 w-7">
+                      <AvatarFallback className="text-xs bg-primary/10 text-primary">
+                        {user.name?.charAt(0)?.toUpperCase() ?? "U"}
+                      </AvatarFallback>
+                    </Avatar>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="px-2 py-1.5">
+                    <p className="text-sm font-medium">{user.name ?? "User"}</p>
+                    <p className="text-xs text-muted-foreground">{user.email ?? ""}</p>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setLocation("/my-reservations")}>
+                    <ClipboardList className="h-4 w-4 mr-2" />
+                    {t.nav.myReservations}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation("/my-vessels")}>
+                    <Ship className="h-4 w-4 mr-2" />
+                    {t.nav.vessels}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setLocation("/my-card")}>
+                    <IdCard className="h-4 w-4 mr-2" />
+                    Moj karton
+                  </DropdownMenuItem>
+                  {user.role === "admin" || user.role === "operator" ? (
+                    <>
+                      <DropdownMenuItem onClick={() => setLocation("/admin")}>
+                        <Settings className="h-4 w-4 mr-2" />
+                        {user.role === "admin" ? t.nav.adminPanel : "Operator Panel"}
+                      </DropdownMenuItem>
+
+                      {user.role === "admin" && (
+                        <DropdownMenuItem onClick={() => setLocation("/admin/users")}>
+                          <Users className="h-4 w-4 mr-2" />
+                          {t.admin.users}
+                        </DropdownMenuItem>
+                      )}
+                    </>
+                  ) : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    {t.nav.signOut}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { window.location.href = getLoginUrl(); }}
+                className="ml-2"
+              >
+                Sign In
+              </Button>
+            )}
+
+            <div className="ml-2 border-l pl-2 flex items-center gap-2">
+              <LanguageSelector />
+            </div>
+          </nav>
+        </div>
+      </header>
+
+      {/* Dashboard or Calendar Content */}
+      <main className="container py-8 pb-24 sm:pb-8">
+        {user && user.role === "user" ? (
+          <div className="space-y-8">
+            <section>
+              <h2 className="text-2xl font-bold tracking-tight mb-1">
+                {(t as any).dashboard.welcome}, {user.name?.split(' ')[0]}!
+              </h2>
+              <p className="text-muted-foreground">
+                {(t as any).dashboard.overview}
+              </p>
+            </section>
+
+            <div className={`grid grid-cols-1 gap-6 ${waitlistStatus ? "md:grid-cols-2 lg:grid-cols-3" : "md:grid-cols-2"}`}>
+              {/* Upcoming Appointment */}
+              <Card className="relative overflow-hidden">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4" />
+                    {(t as any).dashboard.nextReservation}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {upcomingReservation ? (
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-2xl font-bold">
+                          {formatAppDate(upcomingReservation.scheduledStart!, lang as any, true)}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground mt-1">
+                          <Anchor className="h-3.5 w-3.5" />
+                          {upcomingReservation.crane?.name}
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => setLocation("/my-reservations")} className="w-full">
+                        {(t as any).dashboard.details}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="py-4 text-center">
+                      <p className="text-sm text-muted-foreground">{(t as any).dashboard.noUpcoming}</p>
+                      <Button variant="link" size="sm" onClick={() => setLocation("/new-reservation")} className="mt-2">
+                        {t.nav.newReservation}
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Active Requests Summary */}
+              <Card>
+                <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    {(t as any).dashboard.activeRequests}
+                  </CardTitle>
+                  <Button variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={() => setLocation("/my-reservations")}>
+                    {(t as any).dashboard.viewAll}
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {pendingRequests.length > 0 ? (
+                      pendingRequests.slice(0, 3).map((r) => (
+                        <div key={r.id} className="flex items-center justify-between text-sm py-1 border-b last:border-0">
+                          <span className="truncate max-w-[150px] font-medium">
+                            {(r as any).vesselName || (r as any).vessel?.name || (t as any).myReservations.stepper.request}
+                          </span>
+                          <StatusBadge status={r.status} />
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground py-4 text-center">
+                        {(t as any).dashboard.noActive}
+                      </p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Dry Berth Waitlist Status */}
+              {waitlistStatus && (
+                <Card className="relative overflow-hidden border-blue-100 bg-blue-50/5">
+                  <CardHeader className="pb-2 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                      <ListOrdered className="h-4 w-4 text-primary" />
+                      {lang === "hr" ? "Čeka suhi vez" : "Waitlist"}
+                    </CardTitle>
+                    {waitlistStatus.status === "offered" ? (
+                      <Badge className="bg-emerald-500 hover:bg-emerald-600 animate-pulse text-white">
+                        {lang === "hr" ? "Ponuđeno!" : "Offered!"}
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">
+                        {lang === "hr" ? "Na listi" : "Queued"}
+                      </Badge>
+                    )}
+                  </CardHeader>
+                  <CardContent className="pt-2">
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-2xl font-bold flex items-baseline gap-1">
+                          {waitlistStatus.position}
+                          <span className="text-xs text-muted-foreground font-normal">
+                            . {lang === "hr" ? "mjesto" : "position"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {lang === "hr"
+                            ? `Preferirana zona: ${waitlistStatus.preferredZoneName || "Bilo koja"}`
+                            : `Preferred zone: ${waitlistStatus.preferredZoneName || "Any"}`}
+                        </p>
+                      </div>
+                      
+                      {waitlistStatus.status === "offered" && (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 text-xs text-emerald-800 space-y-1">
+                          <p className="font-semibold">
+                            {lang === "hr" 
+                              ? "Lučka uprava Vam je ponudila slobodno mjesto!" 
+                              : "The harbor office has offered you a free spot!"}
+                          </p>
+                          <p>
+                            {lang === "hr"
+                              ? "Molimo javite se kapetanu na 021/385-122 radi rasporeda."
+                              : "Please contact the harbor captain at 021/385-122 to arrange allocation."}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Quick Actions */}
+            <section className="space-y-4">
+              <h3 className="text-lg font-semibold">{(t as any).dashboard.quickActions}</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <Button
+                  variant="outline"
+                  className="h-24 flex flex-col gap-2 hover:bg-primary/5 hover:border-primary/50 transition-all"
+                  onClick={() => setLocation("/new-reservation")}
+                >
+                  <Plus className="h-6 w-6 text-primary" />
+                  <span className="text-xs font-medium">{t.nav.newReservation}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-24 flex flex-col gap-2 hover:bg-primary/5 hover:border-primary/50 transition-all"
+                  onClick={() => setLocation("/my-vessels")}
+                >
+                  <Ship className="h-6 w-6 text-primary" />
+                  <span className="text-xs font-medium">{t.nav.vessels}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-24 flex flex-col gap-2 hover:bg-primary/5 hover:border-primary/50 transition-all"
+                  onClick={() => setLocation("/my-reservations")}
+                >
+                  <ClipboardList className="h-6 w-6 text-primary" />
+                  <span className="text-xs font-medium">{t.nav.myReservations}</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  className="h-24 flex flex-col gap-2 hover:bg-primary/5 hover:border-primary/50 transition-all"
+                  onClick={() => setLocation("/my-card")}
+                >
+                  <IdCard className="h-6 w-6 text-primary" />
+                  <span className="text-xs font-medium">{(t as any).dashboard.myCard}</span>
+                </Button>
+              </div>
+            </section>
+
+          </div>
+        ) : (
+          <LandingPage />
+        )}
+      </main>
+      <Footer />
+      <BottomNav />
+    </div>
+  );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/AuthPage.tsx
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { trpc } from "@/lib/trpc";
+import { useLang } from "@/contexts/LangContext";
+import { Anchor, Loader2, ArrowLeft } from "lucide-react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+import { isValidOib } from "@shared/oib";
+
+type AuthMode = "login" | "register" | "forgotPassword" | "resetPassword" | "verifyEmail";
+
+export default function AuthPage() {
+    const { t } = useLang();
+    const [, setLocation] = useLocation();
+    const [mode, setMode] = useState<AuthMode>("login");
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const urlMode = params.get("mode");
+        if (urlMode === "register" || urlMode === "login") {
+            setMode(urlMode);
+        }
+    }, []);
+
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [firstName, setFirstName] = useState("");
+    const [lastName, setLastName] = useState("");
+    const [username, setUsername] = useState("");
+    const [phone, setPhone] = useState("");
+    const [oib, setOib] = useState("");
+    const [oibError, setOibError] = useState<string | null>(null);
+    const [token, setToken] = useState("");
+    const [verifyToken, setVerifyToken] = useState("");
+    const [privacyAccepted, setPrivacyAccepted] = useState(false);
+
+    const verifyEmailMutation = trpc.auth.verifyEmail.useMutation({
+        onSuccess: () => {
+            toast.success("Email je uspješno potvrđen. Sada se možete prijaviti.");
+            setMode("login");
+            window.history.replaceState({}, document.title, window.location.pathname);
+        },
+        onError: (err) => toast.error(err.message),
+    });
+
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const tkn = params.get("token");
+        const vTkn = params.get("verifyToken");
+
+        if (tkn) {
+            setToken(tkn);
+            setMode("resetPassword");
+        } else if (vTkn) {
+            setVerifyToken(vTkn);
+            setMode("verifyEmail");
+            verifyEmailMutation.mutate({ token: vTkn });
+        }
+    }, [verifyEmailMutation.mutate]);
+
+    const loginMutation = trpc.auth.login.useMutation({
+        onSuccess: () => { window.location.href = "/"; },
+        onError: (err) => toast.error(err.message),
+    });
+
+    const registerMutation = trpc.auth.register.useMutation({
+        onSuccess: () => {
+            toast.success("Registracija uspješna. Molimo potvrdite email.");
+            window.location.href = "/";
+        },
+        onError: (err) => toast.error(err.message),
+    });
+
+    const forgotPasswordMutation = trpc.auth.forgotPassword.useMutation({
+        onSuccess: () => {
+            toast.success("Link za resetiranje je poslan na vaš email.");
+            setMode("login");
+        },
+        onError: (err) => toast.error(err.message),
+    });
+
+    const resetPasswordMutation = trpc.auth.resetPassword.useMutation({
+        onSuccess: () => {
+            toast.success("Lozinka je uspješno promijenjena. Sada se možete prijaviti.");
+            setMode("login");
+            // Clear URL params without reloading
+            window.history.replaceState({}, document.title, window.location.pathname);
+        },
+        onError: (err) => toast.error(err.message),
+    });
+
+    const isPending = loginMutation.isPending || registerMutation.isPending || forgotPasswordMutation.isPending || resetPasswordMutation.isPending || verifyEmailMutation.isPending;
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (mode === "login") {
+            loginMutation.mutate({ email, password });
+        } else if (mode === "register") {
+            if (!privacyAccepted) {
+                toast.error("Morate prihvatiti Uvjete korištenja i Politiku privatnosti za registraciju.");
+                return;
+            }
+            if (!oib || oib.length !== 11 || !isValidOib(oib)) {
+                setOibError("Unesite ispravan OIB (11 znamenki).");
+                return;
+            }
+            registerMutation.mutate({
+                email,
+                password,
+                firstName,
+                lastName,
+                username: username || undefined,
+                phone,
+                oib,
+            });
+        } else if (mode === "forgotPassword") {
+            forgotPasswordMutation.mutate({ email });
+        } else if (mode === "resetPassword") {
+            if (password !== confirmPassword) {
+                toast.error("Lozinke se ne podudaraju.");
+                return;
+            }
+            resetPasswordMutation.mutate({ token, password });
+        }
+    };
+
+    const getTitle = () => {
+        if (mode === "login") return t.auth.login;
+        if (mode === "register") return t.auth.register;
+        if (mode === "forgotPassword") return (t.auth as any).forgotPasswordTitle;
+        if (mode === "verifyEmail") return "Potvrda email adrese";
+        return (t.auth as any).resetPasswordTitle;
+    };
+
+    return (
+        <div className="min-h-screen bg-background flex items-center justify-center p-4">
+            <Card className="w-full max-w-md">
+                <CardHeader className="text-center space-y-2">
+                    <div className="flex items-center justify-center mb-2">
+                        <img src="/logo.png" alt="PŠD Špinut Logo" className="h-12 w-auto object-contain max-w-[200px]" />
+                    </div>
+                    <CardTitle>{getTitle()}</CardTitle>
+                    <CardDescription>
+                        {mode === "forgotPassword"
+                            ? (t.auth as any).forgotPasswordSubtitle
+                            : mode === "verifyEmail"
+                                ? "Molimo pričekajte dok potvrdimo vašu email adresu..."
+                                : "Marina Crane Booking"}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {mode === "verifyEmail" ? (
+                        <div className="flex flex-col items-center justify-center py-8 space-y-4">
+                            {verifyEmailMutation.isPending ? (
+                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            ) : verifyEmailMutation.isError ? (
+                                <div className="text-destructive text-center">
+                                    <p>Došlo je do pogreške prilikom potvrde emaila.</p>
+                                    <Button variant="link" onClick={() => setMode("login")}>Povratak na prijavu</Button>
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : (
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            {mode === "register" && (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.firstName} *</Label>
+                                        <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.lastName} *</Label>
+                                        <Input value={lastName} onChange={(e) => setLastName(e.target.value)} required />
+                                    </div>
+                                </div>
+                            )}
+
+                            {(mode === "login" || mode === "register" || mode === "forgotPassword") && (
+                                <div className="space-y-2">
+                                    <Label>{t.auth.email} *</Label>
+                                    <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+                                </div>
+                            )}
+
+                            {(mode === "login" || mode === "register" || mode === "resetPassword") && (
+                                <div className="space-y-2">
+                                    <Label>{mode === "resetPassword" ? "Nova lozinka" : t.auth.password + " *"}</Label>
+                                    <Input
+                                        type="password"
+                                        value={password}
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        required
+                                        minLength={mode === "login" ? undefined : 8}
+                                        autoComplete={mode === "login" ? "current-password" : "new-password"}
+                                    />
+                                </div>
+                            )}
+
+                            {mode === "resetPassword" && (
+                                <div className="space-y-2">
+                                    <Label>Potvrdi novu lozinku *</Label>
+                                    <Input
+                                        type="password"
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        required
+                                        minLength={8}
+                                    />
+                                </div>
+                            )}
+
+                            {mode === "register" && (
+                                <>
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.username}</Label>
+                                        <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="npr. mario123" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>{t.auth.phone} *</Label>
+                                        <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>OIB *</Label>
+                                        <Input
+                                            value={oib}
+                                            onChange={(e) => {
+                                                const val = e.target.value.replace(/\D/g, "").slice(0, 11);
+                                                setOib(val);
+                                                if (val.length === 11) {
+                                                    setOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
+                                                } else {
+                                                    setOibError(null);
+                                                }
+                                            }}
+                                            placeholder="12345678901"
+                                            maxLength={11}
+                                            inputMode="numeric"
+                                            required
+                                        />
+                                        {oibError && <p className="text-xs text-destructive">{oibError}</p>}
+                                        {oib.length === 11 && !oibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}
+                                    </div>
+                                    <div className="flex items-center space-x-2 mt-4 text-sm">
+                                        <Input
+                                            type="checkbox"
+                                            id="privacy-policy"
+                                            className="w-4 h-4 cursor-pointer"
+                                            checked={privacyAccepted}
+                                            onChange={(e) => setPrivacyAccepted(e.target.checked)}
+                                            required
+                                        />
+                                        <Label htmlFor="privacy-policy" className="cursor-pointer text-muted-foreground font-normal">
+                                            {(t.auth as any).privacyLabel}
+                                            <a href="/privacy" target="_blank" className="text-primary hover:underline">
+                                                {(t.auth as any).privacyLink}
+                                            </a> *
+                                        </Label>
+                                    </div>
+                                </>
+                            )}
+
+                            <Button type="submit" className="w-full" disabled={isPending}>
+                                {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                {mode === "login" && t.auth.loginButton}
+                                {mode === "register" && t.auth.registerButton}
+                                {mode === "forgotPassword" && (t.auth as any).sendResetLink}
+                                {mode === "resetPassword" && (t.auth as any).setNewPassword}
+                            </Button>
+                        </form>
+                    )}
+
+
+
+                    {mode !== "verifyEmail" && (
+                        <div className="mt-4 flex flex-col items-center gap-2">
+                            {mode === "login" && (
+                                <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="px-0 h-auto"
+                                    onClick={() => setMode("forgotPassword")}
+                                >
+                                    {(t.auth as any).forgotPassword}
+                                </Button>
+                            )}
+
+                            {mode === "forgotPassword" && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="flex items-center gap-2"
+                                    onClick={() => setMode("login")}
+                                >
+                                    <ArrowLeft className="h-4 w-4" />
+                                    {(t.auth as any).backToLogin}
+                                </Button>
+                            )}
+
+                            <Button
+                                variant="link"
+                                className="text-sm"
+                                onClick={() => setMode(mode === "login" ? "register" : "login")}
+                            >
+                                {mode === "login" ? t.auth.switchToRegister : t.auth.switchToLogin}
+                            </Button>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/Profile.tsx
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { trpc } from "@/lib/trpc";
+import { Loader2, User, Save, Download } from "lucide-react";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { useLang } from "@/contexts/LangContext";
+import { BottomNav } from "@/components/BottomNav";
+
+export default function Profile() {
+    const { user, loading, refresh } = useAuth({ redirectOnUnauthenticated: true });
+    const { t } = useLang();
+
+    const [firstName, setFirstName] = useState("");
+    const [lastName, setLastName] = useState("");
+    const [email, setEmail] = useState("");
+    const [phone, setPhone] = useState("");
+
+    useEffect(() => {
+        if (user) {
+            setFirstName(user.firstName || "");
+            setLastName(user.lastName || "");
+            setEmail(user.email || "");
+            setPhone(user.phone || "");
+        }
+    }, [user]);
+
+    const updateMutation = trpc.user.updateMe.useMutation({
+        onSuccess: () => {
+            toast.success(t.profile.success);
+            refresh();
+        },
+        onError: (err: any) => toast.error(err.message),
+    });
+
+    const handleSave = (e: React.FormEvent) => {
+        e.preventDefault();
+        updateMutation.mutate({
+            firstName,
+            lastName,
+            phone,
+        });
+    };
+
+    const [oldPassword, setOldPassword] = useState("");
+    const [newPassword, setNewPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
+
+    const changePasswordMutation = trpc.user.changePassword.useMutation({
+        onSuccess: () => {
+            toast.success(t.profile.passwordSuccess);
+            setOldPassword("");
+            setNewPassword("");
+            setConfirmPassword("");
+        },
+        onError: (err: any) => toast.error(t.profile.passwordError + ": " + err.message),
+    });
+
+    const handleChangePassword = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (newPassword !== confirmPassword) {
+            toast.error(t.profile.passwordsDontMatch);
+            return;
+        }
+        changePasswordMutation.mutate({
+            oldPassword,
+            newPassword,
+        });
+    };
+
+    const { refetch: fetchExportData, isFetching: isExporting } = trpc.user.exportData.useQuery(undefined, { enabled: false });
+
+    const handleExportData = async () => {
+        try {
+            const { data } = await fetchExportData();
+            if (data) {
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `moji_podaci_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                toast.success("Podaci su uspješno preuzeti.");
+            }
+        } catch (error: any) {
+            toast.error("Greška pri preuzimanju podataka: " + error.message);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-[60vh]">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
+    }
+
+    return (
+    <>
+        <div className="container max-w-2xl py-8 space-y-8">
+            <div>
+                <h1 className="text-3xl font-bold tracking-tight">{t.profile.title}</h1>
+                <p className="text-muted-foreground">{t.profile.subtitle}</p>
+            </div>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <User className="h-5 w-5" />
+                        {t.profile.title}
+                    </CardTitle>
+                    <CardDescription>
+                        {t.auth.email}: {email}
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <form onSubmit={handleSave} className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="firstName">{t.auth.firstName}</Label>
+                                <Input
+                                    id="firstName"
+                                    value={firstName}
+                                    onChange={(e) => setFirstName(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="lastName">{t.auth.lastName}</Label>
+                                <Input
+                                    id="lastName"
+                                    value={lastName}
+                                    onChange={(e) => setLastName(e.target.value)}
+                                    required
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="phone">{t.auth.phone}</Label>
+                            <Input
+                                id="phone"
+                                type="tel"
+                                value={phone}
+                                onChange={(e) => setPhone(e.target.value)}
+                                placeholder="+385 91 234 5678"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="oib">OIB</Label>
+                            <Input
+                                id="oib"
+                                value={(user as any)?.oib || ""}
+                                disabled
+                                className="bg-muted font-mono"
+                                placeholder="Nije unesen"
+                            />
+                            <p className="text-xs text-muted-foreground">OIB se može izmijeniti samo kontaktiranjem administratora marine.</p>
+                        </div>
+
+                        <div className="pt-4 flex justify-end">
+                            <Button type="submit" disabled={updateMutation.isPending}>
+                                {updateMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                ) : (
+                                    <Save className="h-4 w-4 mr-2" />
+                                )}
+                                {t.profile.save}
+                            </Button>
+                        </div>
+                    </form>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-lg">{t.profile.changePassword}</CardTitle>
+                    <CardDescription>
+                        Redovita promjena lozinke povećava sigurnost vašeg računa.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <form onSubmit={handleChangePassword} className="space-y-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="oldPassword">{t.profile.oldPassword}</Label>
+                            <Input
+                                id="oldPassword"
+                                type="password"
+                                value={oldPassword}
+                                onChange={(e) => setOldPassword(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="newPassword">{t.profile.newPassword}</Label>
+                                <Input
+                                    id="newPassword"
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    required
+                                    minLength={8}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="confirmPassword">{t.profile.confirmPassword}</Label>
+                                <Input
+                                    id="confirmPassword"
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    required
+                                    minLength={8}
+                                />
+                            </div>
+                        </div>
+                        <div className="pt-2 flex justify-end">
+                            <Button type="submit" variant="secondary" disabled={changePasswordMutation.isPending}>
+                                {changePasswordMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                {t.profile.changePassword}
+                            </Button>
+                        </div>
+                    </form>
+                </CardContent>
+            </Card>
+
+            <Card className="border-border">
+                <CardHeader>
+                    <CardTitle className="text-lg">Vaši podaci (GDPR)</CardTitle>
+                    <CardDescription>
+                        Preuzmite arhivu svih vaših osobnih podataka, plovila i rezervacija iz sustava.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Button variant="outline" onClick={handleExportData} disabled={isExporting}>
+                        {isExporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
+                        Preuzmi moje podatke
+                    </Button>
+                </CardContent>
+            </Card>
+        </div>
+        <BottomNav />
+    </>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/MyCard.tsx
+import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/StatusBadge";
+import {
+    Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import { ReservationChat } from "@/components/ReservationChat";
+import {
+    Loader2, CalendarDays, CheckCircle2, XCircle, Hourglass, Ban, MessageSquare, Ship,
+} from "lucide-react";
+import { useState } from "react";
+import { useLang } from "@/contexts/LangContext";
+import { formatAppDate } from "@/lib/date-utils";
+
+const STAT_CARDS = [
+    { key: "total", label: "Ukupno", icon: CalendarDays, color: "text-foreground" },
+    { key: "pending", label: "Na čekanju", icon: Hourglass, color: "text-amber-500" },
+    { key: "approved", label: "Odobreno", icon: CheckCircle2, color: "text-blue-500" },
+    { key: "completed", label: "Izvršeno", icon: CheckCircle2, color: "text-green-600" },
+    { key: "rejected", label: "Odbijeno", icon: XCircle, color: "text-red-500" },
+    { key: "cancelled", label: "Otkazano", icon: Ban, color: "text-gray-500" },
+];
+
+export default function MyCard() {
+    const { user: authUser, loading: authLoading } = useAuth({ redirectOnUnauthenticated: true });
+    const { lang } = useLang();
+    const [chatResId, setChatResId] = useState<string | null>(null);
+    const [statusFilter, setStatusFilter] = useState("all");
+
+    const { data, isLoading } = trpc.user.getCard.useQuery(undefined, {
+        enabled: !!authUser,
+    });
+
+    if (authLoading || isLoading || !data) {
+        return (
+            <div className="flex justify-center p-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
+    }
+
+    const { stats, reservations, vessels } = data;
+    const filteredReservations = statusFilter === "all"
+        ? reservations
+        : reservations.filter((r: any) => r.status === statusFilter);
+
+    return (
+        <div className="max-w-4xl mx-auto space-y-6 p-4 sm:p-6">
+            <div>
+                <h1 className="text-2xl font-bold">Moj karton</h1>
+                <p className="text-sm text-muted-foreground">Pregled vaših zahtjeva i rezervacija</p>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {STAT_CARDS.map(({ key, label, icon: Icon, color }) => (
+                    <Card
+                        key={key}
+                        className={`cursor-pointer transition hover:shadow-md ${statusFilter === key ? "ring-2 ring-primary" : ""}`}
+                        onClick={() => setStatusFilter(statusFilter === key ? "all" : key)}
+                    >
+                        <CardContent className="p-4 flex items-center gap-3">
+                            <Icon className={`h-5 w-5 ${color}`} />
+                            <div>
+                                <p className="text-2xl font-bold">{(stats as any)[key]}</p>
+                                <p className="text-xs text-muted-foreground">{label}</p>
+                            </div>
+                        </CardContent>
+                    </Card>
+                ))}
+            </div>
+
+            {/* Reservations */}
+            <Card>
+                <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                        <CalendarDays className="h-4 w-4" />
+                        Moje rezervacije ({filteredReservations.length})
+                        {statusFilter !== "all" && (
+                            <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setStatusFilter("all")}>
+                                Prikaži sve
+                            </Button>
+                        )}
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {filteredReservations.length === 0 ? (
+                        <p className="text-center text-muted-foreground py-8">Nema rezervacija.</p>
+                    ) : (
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Br.</TableHead>
+                                    <TableHead>Datum</TableHead>
+                                    <TableHead>Plovilo</TableHead>
+                                    <TableHead>Dizalica</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Poruke</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {filteredReservations.map((r: any) => (
+                                    <TableRow key={r.id}>
+                                        <TableCell className="font-mono text-xs">{r.reservationNumber || "—"}</TableCell>
+                                        <TableCell>
+                                            {r.scheduledStart
+                                                ? formatAppDate(r.scheduledStart, lang as any, true)
+                                                : r.requestedDate
+                                                    ? formatAppDate(r.requestedDate, lang as any)
+                                                    : "—"}
+                                        </TableCell>
+                                        <TableCell>{r.vesselRegistration || "—"}</TableCell>
+                                        <TableCell>{r.craneName || "—"}</TableCell>
+                                        <TableCell><StatusBadge status={r.status} /></TableCell>
+                                        <TableCell className="text-right">
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="h-7 text-xs"
+                                                onClick={() => setChatResId(r.id)}
+                                            >
+                                                <MessageSquare className="h-3 w-3 mr-1" />Poruke
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Vessels */}
+            {vessels.length > 0 && (
+                <Card>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                            <Ship className="h-4 w-4" />Moja plovila ({vessels.length})
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Naziv</TableHead>
+                                    <TableHead>Tip</TableHead>
+                                    <TableHead>Težina</TableHead>
+                                    <TableHead>Registracija</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {(vessels as any[]).map((v: any) => (
+                                    <TableRow key={v.id}>
+                                        <TableCell className="font-medium">{v.name}</TableCell>
+                                        <TableCell>{v.type}</TableCell>
+                                        <TableCell>{v.weightTons ? `${v.weightTons} t` : "—"}</TableCell>
+                                        <TableCell>{v.registration || "—"}</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Chat Modal */}
+            <Dialog open={!!chatResId} onOpenChange={(open) => !open && setChatResId(null)}>
+                <DialogContent className="max-w-lg p-0">
+                    <DialogHeader className="p-4 pb-0">
+                        <DialogTitle>Poruke</DialogTitle>
+                        <DialogDescription>Razgovor o ovoj rezervaciji.</DialogDescription>
+                    </DialogHeader>
+                    {chatResId && <ReservationChat reservationId={chatResId} pollInterval={15000} />}
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/MyReservations.tsx
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatusBadge } from "@/components/StatusBadge";
+import { trpc } from "@/lib/trpc";
+import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock, MessageSquare, Check, Circle } from "lucide-react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+import { useLang } from "@/contexts/LangContext";
+import { ReservationChat } from "@/components/ReservationChat";
+import { BottomNav } from "@/components/BottomNav";
+import { formatAppDate } from "@/lib/date-utils";
+import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useState } from "react";
+
+
+export default function MyReservations() {
+  const { user, loading: authLoading } = useAuth();
+  const [, setLocation] = useLocation();
+  const { lang, t } = useLang();
+  const utils = trpc.useUtils();
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [chatReservationId, setChatReservationId] = useState<string | null>(null);
+
+  const isHr = lang === "hr";
+
+  const { data: reservationsList = [], isLoading } = trpc.reservation.myReservations.useQuery(
+    undefined,
+    { enabled: !!user }
+  );
+
+  const { data: serviceTypes = [] } = trpc.serviceType.list.useQuery({ onlyActive: false });
+
+  const cancelMutation = trpc.reservation.cancel.useMutation({
+    onSuccess: () => {
+      toast.success(isHr ? "Rezervacija je otkazana." : "Reservation cancelled.");
+      setCancellingId(null);
+      setCancelReason("");
+      utils.reservation.myReservations.invalidate();
+    },
+    onError: (error) => {
+      toast.error(error.message);
+    },
+  });
+
+  // Helper: get service type name by ID
+  const getServiceTypeName = (id: string | null | undefined) => {
+    if (!id) return null;
+    const st = (serviceTypes as any[]).find((s: any) => s.id === id);
+    return st?.name ?? null;
+  };
+
+  const StatusStepper = ({ status }: { status: string }) => {
+    const steps = [
+      { id: "pending", label: (t as any).myReservations.stepper.request },
+      { id: "approved", label: (t as any).myReservations.stepper.approved },
+      { id: "completed", label: (t as any).myReservations.stepper.done },
+    ];
+
+    if (status === "rejected" || status === "cancelled") {
+      return (
+        <div className="flex items-center gap-2 text-xs font-medium text-destructive mt-2">
+          <X className="h-3 w-3" />
+          {status === "rejected" ? t.myReservations.status.rejected : t.myReservations.status.cancelled}
+        </div>
+      );
+    }
+
+    const currentStepIndex = steps.findIndex(s => s.id === status);
+    const activeIndex = status === "completed" ? 2 : status === "approved" ? 1 : 0;
+
+    return (
+      <div className="flex items-center w-full max-w-xs mt-4 mb-2">
+        {steps.map((step, idx) => (
+          <div key={step.id} className="flex items-center flex-1 last:flex-none">
+            <div className="flex flex-col items-center relative">
+              <div className={cn(
+                "h-6 w-6 rounded-full border-2 flex items-center justify-center transition-colors",
+                idx <= activeIndex ? "bg-primary border-primary text-primary-foreground" : "bg-background border-muted text-muted-foreground"
+              )}>
+                {idx < activeIndex ? <Check className="h-3.5 w-3.5" /> : <Circle className={cn("h-1.5 w-1.5 fill-current", idx > activeIndex && "text-transparent")} />}
+              </div>
+              <span className={cn(
+                "absolute -bottom-5 text-[10px] font-medium whitespace-nowrap",
+                idx <= activeIndex ? "text-foreground" : "text-muted-foreground"
+              )}>
+                {step.label}
+              </span>
+            </div>
+            {idx < steps.length - 1 && (
+              <div className={cn(
+                "h-[2px] flex-1 mx-2",
+                idx < activeIndex ? "bg-primary" : "bg-muted"
+              )} />
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Card className="max-w-md w-full mx-4">
+          <CardHeader className="text-center">
+            <CardTitle>{isHr ? "Potrebna prijava" : "Sign In Required"}</CardTitle>
+            <CardDescription>{isHr ? "Morate biti prijavljeni za pregled rezervacija." : "You need to be signed in to view your reservations."}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" onClick={() => setLocation("/auth")}>
+              {isHr ? "Prijava" : "Sign In"}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="border-b bg-card">
+        <div className="container py-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="mb-2 -ml-2">
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                {isHr ? "Kalendar" : "Calendar"}
+              </Button>
+              <h1 className="text-xl font-semibold">{isHr ? "Moje rezervacije" : "My Reservations"}</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                {isHr ? "Pratite status vaših zahtjeva za rezervaciju." : "Track the status of your reservation requests."}
+              </p>
+            </div>
+            <Button onClick={() => setLocation("/new-reservation")}>
+              <Plus className="h-4 w-4 mr-2" />
+              {isHr ? "Nova rezervacija" : "New Reservation"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="container py-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : reservationsList.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center">
+              <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+              <h3 className="text-lg font-medium mb-2">{isHr ? "Nemate rezervacija" : "No reservations yet"}</h3>
+              <p className="text-muted-foreground mb-4">
+                {isHr ? "Još niste podnijeli zahtjev za rezervaciju." : "You haven't made any reservation requests."}
+              </p>
+              <Button onClick={() => setLocation("/new-reservation")}>
+                <Plus className="h-4 w-4 mr-2" />
+                {isHr ? "Zatraži rezervaciju" : "Request a Reservation"}
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {reservationsList.map((reservation) => {
+              const serviceTypeName = getServiceTypeName((reservation as any).serviceTypeId);
+              return (
+                <Card key={reservation.id}>
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Show service type name as primary label */}
+                          <span className="font-medium">
+                            {serviceTypeName || (reservation.crane?.name ?? (isHr ? "Čekanje na odobrenje" : "Awaiting approval"))}
+                          </span>
+                          <StatusBadge status={reservation.status} />
+                        </div>
+
+                        {/* For approved/completed: show assigned crane */}
+                        {reservation.crane && (
+                          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                            <Anchor className="h-3.5 w-3.5" />
+                            {reservation.crane.name}
+                            {reservation.crane.location && (
+                              <span className="text-xs bg-muted px-1.5 py-0.5 rounded ml-1">{reservation.crane.location}</span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Date info */}
+                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                          <CalendarDays className="h-3.5 w-3.5" />
+                          {reservation.scheduledStart
+                            ? `${formatAppDate(reservation.scheduledStart, lang as any, true)} — ${reservation.scheduledEnd ? formatAppDate(reservation.scheduledEnd, lang as any, true) : ""}`
+                            : `${isHr ? "Traženi datum" : "Requested"}: ${formatAppDate((reservation as any).requestedDate, lang as any)}`
+                          }
+                        </div>
+
+                        {/* Time slot preference for pending */}
+                        {reservation.status === "pending" && (reservation as any).requestedTimeSlot && (
+                          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                            <Clock className="h-3.5 w-3.5" />
+                            {(reservation as any).requestedTimeSlot === "jutro"
+                              ? (isHr ? "Jutro (08-12h)" : "Morning")
+                              : (reservation as any).requestedTimeSlot === "poslijepodne"
+                                ? (isHr ? "Poslijepodne (12-16h)" : "Afternoon")
+                                : (isHr ? "Po dogovoru" : "By arrangement")}
+                          </div>
+                        )}
+
+                        {/* Completed date */}
+                        {reservation.status === "completed" && (reservation as any).completedAt && (
+                          <div className="text-xs text-emerald-600 dark:text-emerald-400">
+                            {isHr ? "Završeno" : "Completed"}: {formatAppDate((reservation as any).completedAt, lang as any)}
+                          </div>
+                        )}
+
+                        {/* Admin note */}
+                        {reservation.adminNote && (
+                          <div className="mt-2 p-3 bg-muted rounded-md text-sm">
+                            <span className="font-medium">{isHr ? "Napomena administratora:" : "Admin note:"} </span>
+                            {reservation.adminNote}
+                          </div>
+                        )}
+
+                        <StatusStepper status={reservation.status} />
+                      </div>
+                      <div className="flex flex-col gap-2 shrink-0">
+                        <div className="relative">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setChatReservationId(reservation.id)}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5 mr-1" />
+                            {isHr ? "Poruke" : "Messages"}
+                          </Button>
+                          {(reservation as any).unreadCount > 0 && (
+                            <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-background">
+                              {(reservation as any).unreadCount}
+                            </span>
+                          )}
+                        </div>
+                        {(reservation.status === "pending" || reservation.status === "approved") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => {
+                              setCancellingId(reservation.id);
+                              setCancelReason("");
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5 mr-1" />
+                            {isHr ? "Otkazivanje" : "Cancel"}
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        <Dialog open={!!cancellingId} onOpenChange={(open) => !open && setCancellingId(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{isHr ? "Otkazivanje rezervacije" : "Cancel Reservation"}</DialogTitle>
+              <DialogDescription>
+                {isHr
+                  ? "Molimo navedite razlog otkazivanja. Ovo nam pomaže u boljem planiranju termina."
+                  : "Please provide a reason for cancellation. This helps us plan better."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="reason">{isHr ? "Razlog otkazivanja" : "Reason for cancellation"}</Label>
+                <Textarea
+                  id="reason"
+                  placeholder={isHr ? "npr. Promjena plana, loše vrijeme, brod nije spreman..." : "e.g. Change of plans, bad weather..."}
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="min-h-[100px]"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCancellingId(null)}>
+                {isHr ? "Odustani" : "Cancel"}
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={cancelReason.length < 3 || cancelMutation.isPending}
+                onClick={() => cancellingId && cancelMutation.mutate({ id: cancellingId, reason: cancelReason })}
+              >
+                {cancelMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isHr ? "Potvrdi otkazivanje" : "Confirm Cancellation"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Chat Dialog */}
+        <Dialog open={!!chatReservationId} onOpenChange={(open) => !open && setChatReservationId(null)}>
+          <DialogContent className="max-w-lg p-0">
+            <DialogHeader className="p-4 pb-0">
+              <DialogTitle>{isHr ? "Poruke" : "Messages"}</DialogTitle>
+              <DialogDescription>
+                {isHr ? "Razgovarajte s osobljem marine u vezi vaše rezervacije." : "Chat with marina staff about your reservation."}
+              </DialogDescription>
+            </DialogHeader>
+            {chatReservationId && (
+              <ReservationChat reservationId={chatReservationId} pollInterval={15000} />
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+      <BottomNav />
+    </div>
+  );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/MyVessels.tsx
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { trpc } from "@/lib/trpc";
+import { ArrowLeft, Loader2, Plus, Ship, Trash2, Edit2 } from "lucide-react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+import { useLang } from "@/contexts/LangContext";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useState } from "react";
+import { BottomNav } from "@/components/BottomNav";
+
+export default function MyVessels() {
+    const { user, loading: authLoading } = useAuth();
+    const [, setLocation] = useLocation();
+    const { t } = useLang();
+    const utils = trpc.useUtils();
+    const [isAddOpen, setIsAddOpen] = useState(false);
+
+    // Form state
+    const [name, setName] = useState("");
+    const [registration, setRegistration] = useState("");
+    const [type, setType] = useState<"jedrilica" | "motorni" | "katamaran" | "ostalo">("motorni");
+    const [length, setLength] = useState("");
+    const [width, setWidth] = useState("");
+    const [draft, setDraft] = useState("");
+    const [weight, setWeight] = useState("");
+
+    const { data: vessels = [], isLoading } = trpc.vessel.listMine.useQuery(
+        undefined,
+        { enabled: !!user }
+    );
+
+    const createMutation = trpc.vessel.create.useMutation({
+        onSuccess: () => {
+            toast.success(t.vessels.save);
+            utils.vessel.listMine.invalidate();
+            setIsAddOpen(false);
+            resetForm();
+        },
+        onError: (err: any) => toast.error(err.message),
+    });
+
+    const deleteMutation = trpc.vessel.delete.useMutation({
+        onSuccess: () => {
+            toast.success(t.vessels.delete);
+            utils.vessel.listMine.invalidate();
+        },
+        onError: (err: any) => toast.error(err.message),
+    });
+
+    const resetForm = () => {
+        setName("");
+        setRegistration("");
+        setType("motorni");
+        setLength("");
+        setWidth("");
+        setDraft("");
+        setWeight("");
+    };
+
+    const handleCreate = (e: React.FormEvent) => {
+        e.preventDefault();
+        createMutation.mutate({
+            name,
+            registration: registration || undefined,
+            type,
+            lengthM: length ? Number(length) : undefined,
+            beamM: width ? Number(width) : undefined,
+            draftM: draft ? Number(draft) : undefined,
+            weightTons: weight ? Number(weight) : undefined,
+        });
+    };
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
+    }
+
+    if (!user) {
+        window.location.href = "/auth";
+        return null;
+    }
+
+    return (
+        <div className="min-h-screen bg-background">
+            <div className="border-b bg-card">
+                <div className="container py-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <div>
+                            <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="mb-2 -ml-2">
+                                <ArrowLeft className="h-4 w-4 mr-1" />
+                                {t.nav.calendar}
+                            </Button>
+                            <h1 className="text-xl font-semibold">{t.vessels.title}</h1>
+                            <p className="text-sm text-muted-foreground mt-1">
+                                {t.vessels.subtitle}
+                            </p>
+                        </div>
+
+                        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+                            <DialogTrigger asChild>
+                                <Button>
+                                    <Plus className="h-4 w-4 mr-2" />
+                                    {t.vessels.addVessel}
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[425px]">
+                                <form onSubmit={handleCreate}>
+                                    <DialogHeader>
+                                        <DialogTitle>{t.vessels.addVessel}</DialogTitle>
+                                        <DialogDescription>
+                                            {t.vessels.dimensions}
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="grid gap-4 py-4">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="name">{t.vessels.vesselName} *</Label>
+                                                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} required />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="registration">Registracijska oznaka</Label>
+                                                <Input id="registration" placeholder="npr. ST-1234 ili KS-9923" value={registration} onChange={(e) => setRegistration(e.target.value)} />
+                                            </div>
+                                        </div>
+                                        <div className="grid gap-2">
+                                            <Label>{t.vessels.vesselType} *</Label>
+                                            <Select value={type} onValueChange={(v: any) => setType(v)}>
+                                                <SelectTrigger>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="jedrilica">{t.form.vesselTypeSailboat}</SelectItem>
+                                                    <SelectItem value="motorni">{t.form.vesselTypeMotorboat}</SelectItem>
+                                                    <SelectItem value="katamaran">{t.form.vesselTypeCatamaran}</SelectItem>
+                                                    <SelectItem value="ostalo">{t.form.vesselTypeOther}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                         <div className="grid grid-cols-3 gap-4">
+                                             <div className="grid gap-2">
+                                                 <Label>{t.form.vesselLength}</Label>
+                                                 <Input type="number" step="0.01" value={length} onChange={(e) => setLength(e.target.value)} />
+                                             </div>
+                                             <div className="grid gap-2">
+                                                 <Label>{t.form.vesselWidth}</Label>
+                                                 <Input type="number" step="0.01" value={width} onChange={(e) => setWidth(e.target.value)} />
+                                             </div>
+                                             <div className="grid gap-2">
+                                                 <Label>{t.form.vesselWeight}</Label>
+                                                 <Input type="number" step="0.01" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="t" />
+                                             </div>
+                                         </div>
+                                    </div>
+                                    <DialogFooter>
+                                        <Button type="submit" disabled={createMutation.isPending}>
+                                            {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            {t.vessels.save}
+                                        </Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
+                    </div>
+                </div>
+            </div>
+
+            <div className="container py-6">
+                {isLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                    </div>
+                ) : vessels.length === 0 ? (
+                    <Card>
+                        <CardContent className="py-12 text-center">
+                            <Ship className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                            <h3 className="text-lg font-medium mb-2">{t.vessels.noVessels}</h3>
+                            <p className="text-muted-foreground mb-4">
+                                {t.vessels.subtitle}
+                            </p>
+                            <Button onClick={() => setIsAddOpen(true)}>
+                                <Plus className="h-4 w-4 mr-2" />
+                                {t.vessels.addVessel}
+                            </Button>
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {vessels.map((vessel: any) => (
+                            <Card key={vessel.id}>
+                                <CardHeader className="pb-2">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex flex-col gap-1">
+                                            <CardTitle className="text-lg flex items-center gap-2">
+                                                <Ship className="h-5 w-5 text-primary" />
+                                                {vessel.name}
+                                            </CardTitle>
+                                            {vessel.registration && (
+                                                <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900 w-fit">
+                                                    {vessel.registration}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="text-destructive h-8 w-8"
+                                            onClick={() => {
+                                                if (confirm(t.vessels.deleteConfirm)) {
+                                                    deleteMutation.mutate({ id: vessel.id });
+                                                }
+                                            }}
+                                        >
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    <CardDescription>
+                                        {vessel.type === "jedrilica" ? t.form.vesselTypeSailboat :
+                                            vessel.type === "motorni" ? t.form.vesselTypeMotorboat :
+                                                vessel.type === "katamaran" ? t.form.vesselTypeCatamaran :
+                                                    t.form.vesselTypeOther}
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-2 gap-y-2 text-sm">
+                                        <div className="text-muted-foreground">{t.form.vesselLength}</div>
+                                        <div>{vessel.lengthM} m</div>
+                                        <div className="text-muted-foreground">{t.form.vesselWidth}</div>
+                                        <div>{vessel.beamM} m</div>
+                                        <div className="text-muted-foreground">{t.form.vesselWeight}</div>
+                                        <div className="font-semibold">{vessel.weightTons ? `${vessel.weightTons} t` : "—"}</div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
+            </div>
+            <BottomNav />
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/NewReservation.tsx
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useLang } from "@/contexts/LangContext";
+import { ArrowLeft } from "lucide-react";
+import { useLocation } from "wouter";
+import { ReservationForm } from "@/components/ReservationForm";
+
+export default function NewReservation() {
+  const [, setLocation] = useLocation();
+  const { t, lang } = useLang();
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="border-b bg-card">
+        <div className="container py-6">
+          <Button variant="ghost" size="sm" onClick={() => setLocation("/")} className="mb-2 -ml-2">
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            {t.nav.calendar}
+          </Button>
+          <h1 className="text-xl font-semibold">{t.form.title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{t.form.subtitle}</p>
+        </div>
+      </div>
+
+      <div className="container py-6">
+        <Card className="max-w-4xl mx-auto">
+          <CardHeader>
+            <CardTitle>{lang === "hr" ? "Detalji zahtjeva" : "Request Details"}</CardTitle>
+            <CardDescription>
+              {t.form.subtitle}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ReservationForm
+              onSuccess={() => setLocation("/my-reservations")}
+              onCancel={() => setLocation("/")}
+            />
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/PrivacyPolicy.tsx
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Link } from "wouter";
+import { useLang } from "@/contexts/LangContext";
+
+export default function PrivacyPolicy() {
+    const { lang } = useLang();
+    const isHr = lang === 'hr';
+
+    return (
+        <div className="container max-w-4xl mx-auto py-12 px-4">
+            <h1 className="text-3xl font-bold mb-8">
+                {isHr ? "Politika Privatnosti" : "Privacy Policy"}
+            </h1>
+
+            <div className="space-y-8">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{isHr ? "1. Prikupljanje podataka" : "1. Data Collection"}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <p className="text-muted-foreground">
+                            {isHr
+                                ? "Marina app prikuplja samo podatke nužne za operativno izvršavanje usluge (rezervacije dizalice), što uključuje vaše ime, email adresu te kontakt broj, kao i specifikacije vaših registriranih plovila."
+                                : "The Marina app collects only the data necessary for the operational execution of the service (crane reservations), which includes your name, email address, contact number, and the specifications of your registered vessels."}
+                        </p>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{isHr ? "2. Svrha obrade" : "2. Purpose of Processing"}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <p className="text-muted-foreground">
+                            {isHr
+                                ? "Prikupljeni podaci koriste se isključivo u svrhe koordinacije rezervacija, verifikacije identiteta i komunikacije vezane uz usluge marine. Podaci se obrađuju na temelju nužnosti za izvršenje usluge (ugovora)."
+                                : "The collected data is used exclusively for reservation coordination, identity verification, and communication related to marina services. Data is processed based on the necessity for the execution of the service (contract)."}
+                        </p>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{isHr ? "3. Vaša prava (GDPR)" : "3. Your Rights (GDPR)"}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4 text-muted-foreground">
+                        <p>
+                            {isHr
+                                ? "U skladu s GDPR-om, imate sljedeća prava:"
+                                : "In accordance with GDPR, you have the following rights:"}
+                        </p>
+                        <ul className="list-disc pl-5 space-y-2">
+                            <li>{isHr ? "Pravo na pristup i kopiju podataka" : "Right of access and a copy of the data"}</li>
+                            <li>{isHr ? "Pravo na ispravak netočnih podataka" : "Right to rectification of inaccurate data"}</li>
+                            <li>{isHr ? "Pravo na brisanje (pravo na zaborav)" : "Right to erasure (right to be forgotten)"}</li>
+                            <li>{isHr ? "Pravo na ograničenje obrade i prenosivost podataka" : "Right to restriction of processing and data portability"}</li>
+                        </ul>
+                        <p>
+                            {isHr
+                                ? "Ova prava možete ostvariti kontaktiranjem administratora marine ili putem vašeg korisničkog profila."
+                                : "You can exercise these rights by contacting the marina administrator or through your user profile."}
+                        </p>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>{isHr ? "4. Sigurnost i čuvanje" : "4. Security and Retention"}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <p className="text-muted-foreground">
+                            {isHr
+                                ? "Vaši podaci čuvaju se uz primjenu suvremenih sigurnosnih standarda. Podaci se čuvaju dokle god je vaš korisnički račun aktivan ili dok je to nužno za pružanje usluga i ispunjavanje zakonskih obveza."
+                                : "Your data is stored using modern security standards. Data is retained as long as your user account is active or as necessary to provide services and fulfill legal obligations."}
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            <div className="flex justify-center mt-12">
+                <Link href="/">
+                    <a className="text-primary hover:underline">
+                        {isHr ? "← Natrag na početnu stranicu" : "← Back to Home"}
+                    </a>
+                </Link>
+            </div>
+        </div>
+    );
+}
+
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/NotFound.tsx
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { AlertCircle, Home } from "lucide-react";
+import { useLocation } from "wouter";
+
+export default function NotFound() {
+  const [, setLocation] = useLocation();
+
+  const handleGoHome = () => {
+    setLocation("/");
+  };
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
+      <Card className="w-full max-w-lg mx-4 shadow-lg border-0 bg-white/80 backdrop-blur-sm">
+        <CardContent className="pt-8 pb-8 text-center">
+          <div className="flex justify-center mb-6">
+            <div className="relative">
+              <div className="absolute inset-0 bg-red-100 rounded-full animate-pulse" />
+              <AlertCircle className="relative h-16 w-16 text-red-500" />
+            </div>
+          </div>
+
+          <h1 className="text-4xl font-bold text-slate-900 mb-2">404</h1>
+
+          <h2 className="text-xl font-semibold text-slate-700 mb-4">
+            Page Not Found
+          </h2>
+
+          <p className="text-slate-600 mb-8 leading-relaxed">
+            Sorry, the page you are looking for doesn't exist.
+            <br />
+            It may have been moved or deleted.
+          </p>
+
+          <div
+            id="not-found-button-group"
+            className="flex flex-col sm:flex-row gap-3 justify-center"
+          >
+            <Button
+              onClick={handleGoHome}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            >
+              <Home className="w-4 h-4 mr-2" />
+              Go Home
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+
+// ----------------------------------------------------------------------------
+
+client/src/pages/mobile/MobileOperatorApp.tsx
+import { useState, useEffect, useMemo } from "react";
+import {
+    Anchor,
+    Search,
+    Phone,
+    CheckCircle2,
+    Clock,
+    Play,
+    Check,
+    MessageSquare,
+    Settings,
+    LogOut,
+    Smartphone,
+    MapPin,
+    AlertCircle,
+    Calendar,
+    ChevronRight,
+    Send,
+    User,
+    Ship
+} from "lucide-react";
+import { toast } from "sonner";
+
+interface OperatorUser {
+    id: string;
+    email: string;
+    name: string | null;
+    role: string;
+    phone: string | null;
+}
+
+interface AssignedCrane {
+    id: string;
+    name: string;
+    type: string;
+}
+
+interface TaskItem {
+    id: string;
+    reservationNumber: string;
+    status: "approved" | "in_progress" | "completed" | "cancelled";
+    scheduledStart: string;
+    scheduledEnd: string;
+    durationMin: number;
+    vessel: {
+        id: string;
+        name: string;
+        type: string;
+        registration: string;
+        lengthM: string | null;
+        beamM: string | null;
+        weightTons: string | null;
+    } | null;
+    owner: {
+        id: string;
+        name: string;
+        phone: string | null;
+    } | null;
+    serviceType: {
+        id: string;
+        name: string;
+        category: string;
+    } | null;
+    crane: {
+        id: string;
+        name: string;
+    } | null;
+    dryBerthPlacement: {
+        zoneCode: string;
+        zoneName: string;
+    } | null;
+}
+
+interface LandZone {
+    id: string;
+    name: string;
+    code: string;
+    totalSpots: number;
+    occupiedSpots: number;
+    availableSpots: number;
+}
+
+export default function MobileOperatorApp() {
+    // Auth State
+    const [token, setToken] = useState<string | null>(localStorage.getItem("mobile_operator_token"));
+    const [operatorUser, setOperatorUser] = useState<OperatorUser | null>(null);
+    const [assignedCranes, setAssignedCranes] = useState<AssignedCrane[]>([]);
+
+    // PIN Login pad state
+    const [pin, setPin] = useState("");
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+    // Active Navigation Tab: "tasks" | "notifications" | "settings"
+    const [activeTab, setActiveTab] = useState<"tasks" | "notifications" | "settings">("tasks");
+
+    // Tasks & Schedule State
+    const [tasks, setTasks] = useState<TaskItem[]>([]);
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [selectedCraneId, setSelectedCraneId] = useState<string>("all");
+    const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+
+    // Land Zones state for Dry Berth Assignment dialog
+    const [landZones, setLandZones] = useState<LandZone[]>([]);
+    const [assigningTask, setAssigningTask] = useState<TaskItem | null>(null);
+    const [selectedZoneId, setSelectedZoneId] = useState<string>("");
+    const [assignNote, setAssignNote] = useState("");
+    const [isSubmittingAssign, setIsSubmittingAssign] = useState(false);
+
+    // Chat / Message Dialog State
+    const [messagingTask, setMessagingTask] = useState<TaskItem | null>(null);
+    const [messageText, setMessageText] = useState("");
+    const [isSendingMessage, setIsSendingMessage] = useState(false);
+
+    // Load Profile when token exists
+    useEffect(() => {
+        if (!token) return;
+        fetchProfile();
+    }, [token]);
+
+    // Load tasks when authenticated and date changes
+    useEffect(() => {
+        if (!token) return;
+        fetchSchedule();
+        fetchLandZones();
+    }, [token, selectedDate]);
+
+    const fetchProfile = async () => {
+        try {
+            const res = await fetch("/api/mobile/v1/profile", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                if (res.status === 401) handleLogout();
+                return;
+            }
+            const data = await res.json();
+            setOperatorUser(data.user);
+            setAssignedCranes(data.assignedCranes || []);
+        } catch (e) {
+            console.error("Failed to load profile", e);
+        }
+    };
+
+    const fetchSchedule = async () => {
+        setIsLoadingTasks(true);
+        try {
+            const res = await fetch(`/api/mobile/v1/schedule/today?date=${selectedDate}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setTasks(data.tasks || []);
+            }
+        } catch (e) {
+            console.error("Failed to fetch schedule", e);
+        } finally {
+            setIsLoadingTasks(false);
+        }
+    };
+
+    const fetchLandZones = async () => {
+        try {
+            const res = await fetch("/api/mobile/v1/land-zones", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setLandZones(data || []);
+            }
+        } catch (e) {
+            console.error("Failed to fetch land zones", e);
+        }
+    };
+
+    const handlePinSubmit = async (pinValue: string) => {
+        if (pinValue.length < 4) return;
+        setIsLoggingIn(true);
+        try {
+            const res = await fetch("/api/mobile/v1/auth/pin-login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pin: pinValue })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || "Neispravan PIN");
+                setPin("");
+                return;
+            }
+            localStorage.setItem("mobile_operator_token", data.token);
+            setToken(data.token);
+            setOperatorUser(data.user);
+            toast.success(`Dobrodošli, ${data.user.name || data.user.email}`);
+        } catch (e: any) {
+            toast.error("Greška pri mreži ili poslužitelju");
+        } finally {
+            setIsLoggingIn(false);
+        }
+    };
+
+    const handleLogout = () => {
+        localStorage.removeItem("mobile_operator_token");
+        setToken(null);
+        setOperatorUser(null);
+        setPin("");
+    };
+
+    const handleUpdateStatus = async (taskId: string, newStatus: string) => {
+        try {
+            const res = await fetch(`/api/mobile/v1/reservations/${taskId}/status`, {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ status: newStatus })
+            });
+            if (res.ok) {
+                toast.success(`Status promijenjen na ${newStatus === "in_progress" ? "U tijeku" : "Završeno"}`);
+                fetchSchedule();
+            } else {
+                toast.error("Greška pri promjeni statusa");
+            }
+        } catch (e) {
+            toast.error("Mrežna greška");
+        }
+    };
+
+    const handleAssignLandZone = async () => {
+        if (!assigningTask?.vessel?.id || !selectedZoneId) {
+            toast.error("Odaberite zonu suhog veza");
+            return;
+        }
+        setIsSubmittingAssign(true);
+        try {
+            const res = await fetch("/api/mobile/v1/land-occupancies", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    vesselId: assigningTask.vessel.id,
+                    zoneId: selectedZoneId,
+                    notes: assignNote.trim()
+                })
+            });
+            if (res.ok) {
+                toast.success("Brod uspješno dodijeljen u zonu suhog veza!");
+                setAssigningTask(null);
+                setAssignNote("");
+                fetchSchedule();
+                fetchLandZones();
+            } else {
+                toast.error("Greška pri dodjeli zone");
+            }
+        } catch (e) {
+            toast.error("Mrežna greška");
+        } finally {
+            setIsSubmittingAssign(false);
+        }
+    };
+
+    const handleSendMessage = async () => {
+        if (!messagingTask?.id || !messageText.trim()) return;
+        setIsSendingMessage(true);
+        try {
+            const res = await fetch("/api/mobile/v1/messages/send", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    reservationId: messagingTask.id,
+                    content: messageText.trim()
+                })
+            });
+            if (res.ok) {
+                toast.success("Poruka poslana korisniku!");
+                setMessagingTask(null);
+                setMessageText("");
+            } else {
+                toast.error("Greška pri slanju poruke");
+            }
+        } catch (e) {
+            toast.error("Mrežna greška");
+        } finally {
+            setIsSendingMessage(false);
+        }
+    };
+
+    // Filtered tasks
+    const filteredTasks = useMemo(() => {
+        return tasks.filter(t => {
+            if (selectedCraneId !== "all" && t.crane?.id !== selectedCraneId) return false;
+            if (searchQuery.trim()) {
+                const q = searchQuery.toLowerCase();
+                const vName = t.vessel?.name?.toLowerCase() || "";
+                const vReg = t.vessel?.registration?.toLowerCase() || "";
+                const oName = t.owner?.name?.toLowerCase() || "";
+                return vName.includes(q) || vReg.includes(q) || oName.includes(q);
+            }
+            return true;
+        });
+    }, [tasks, selectedCraneId, searchQuery]);
+
+    // Metric stats
+    const totalCount = filteredTasks.length;
+    const approvedCount = filteredTasks.filter(t => t.status === "approved").length;
+    const inProgressCount = filteredTasks.filter(t => t.status === "in_progress").length;
+    const completedCount = filteredTasks.filter(t => t.status === "completed").length;
+
+    // PIN Pad Login View
+    if (!token || !operatorUser) {
+        return (
+            <div className="min-h-screen bg-indigo-600 flex flex-col justify-between p-6 text-white font-sans">
+                <div className="text-center pt-8 space-y-3">
+                    <div className="inline-flex items-center justify-center h-20 w-20 rounded-3xl bg-white/10 backdrop-blur-md border border-white/20 shadow-2xl mx-auto">
+                        <Anchor className="h-10 w-10 text-white" />
+                    </div>
+                    <h1 className="text-3xl font-extrabold tracking-tight">Dizalica Port Manager</h1>
+                    <p className="text-indigo-100 text-sm font-medium">Aplikacija za operatere na terenu</p>
+                </div>
+
+                <div className="max-w-xs mx-auto w-full space-y-6">
+                    <div className="text-center space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-200">Unesite 4-Znamenkasti PIN</p>
+                        <div className="flex justify-center gap-3 py-2">
+                            {[0, 1, 2, 3].map(idx => (
+                                <div
+                                    key={idx}
+                                    className={`h-4 w-4 rounded-full transition-all duration-200 ${
+                                        pin.length > idx ? "bg-white scale-125 shadow" : "bg-white/25"
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Keypad */}
+                    <div className="grid grid-cols-3 gap-3">
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+                            <button
+                                key={num}
+                                onClick={() => {
+                                    if (pin.length < 4) {
+                                        const newPin = pin + num;
+                                        setPin(newPin);
+                                        if (newPin.length === 4) handlePinSubmit(newPin);
+                                    }
+                                }}
+                                className="h-16 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition font-bold text-2xl backdrop-blur-sm border border-white/10"
+                            >
+                                {num}
+                            </button>
+                        ))}
+                        <button
+                            onClick={() => setPin("")}
+                            className="h-16 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition font-semibold text-xs text-indigo-200 uppercase backdrop-blur-sm border border-white/10"
+                        >
+                            Briši
+                        </button>
+                        <button
+                            onClick={() => {
+                                if (pin.length < 4) {
+                                    const newPin = pin + "0";
+                                    setPin(newPin);
+                                    if (newPin.length === 4) handlePinSubmit(newPin);
+                                }
+                            }}
+                            className="h-16 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition font-bold text-2xl backdrop-blur-sm border border-white/10"
+                        >
+                            0
+                        </button>
+                        <button
+                            disabled={pin.length < 4 || isLoggingIn}
+                            onClick={() => handlePinSubmit(pin)}
+                            className="h-16 rounded-2xl bg-white text-indigo-600 font-bold text-lg hover:bg-indigo-50 active:scale-95 transition flex items-center justify-center shadow-lg disabled:opacity-50"
+                        >
+                            {isLoggingIn ? "..." : "OK"}
+                        </button>
+                    </div>
+                </div>
+
+                <div className="text-center text-xs text-indigo-200/80 pb-4">
+                    Marina Cranes Mobile v2.0 • Proel Postgres
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-sky-50 flex flex-col font-sans pb-24 text-slate-800">
+            {/* Rich Indigo Header Bar (bg-indigo-600) */}
+            <header className="bg-indigo-600 text-white px-5 pt-6 pb-5 shadow-lg space-y-3">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="h-11 w-11 rounded-2xl bg-white text-indigo-600 flex items-center justify-center shadow-md shrink-0">
+                            <Anchor className="h-6 w-6" />
+                        </div>
+                        <div>
+                            <h1 className="text-lg font-bold leading-tight">Dizalica Port Manager</h1>
+                            <p className="text-xs text-indigo-100 font-medium">
+                                Danas: <span className="font-bold text-white">{totalCount} poslova</span>
+                            </p>
+                        </div>
+                    </div>
+                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm tracking-wider border border-white/20">
+                        {operatorUser.role}
+                    </span>
+                </div>
+
+                {/* High Contrast Status Bar */}
+                <div className="flex items-center gap-2 bg-indigo-900/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-indigo-400/30 text-xs font-semibold">
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                    <span className="text-emerald-300 font-bold tracking-wide">SUSTAV AKTIVAN</span>
+                    <span className="text-indigo-200 ml-auto font-normal text-[11px]">{operatorUser.name || operatorUser.email}</span>
+                </div>
+            </header>
+
+            {/* Main Content View */}
+            <main className="p-4 space-y-4 max-w-lg mx-auto w-full">
+                {activeTab === "tasks" && (
+                    <>
+                        {/* 3XL Metric Cards (Vibrant Accent Pills) */}
+                        <div className="grid grid-cols-4 gap-2">
+                            <div className="bg-indigo-50 border-2 border-indigo-100 p-2.5 rounded-2xl text-center shadow-xs">
+                                <span className="text-[10px] font-extrabold uppercase text-indigo-600 tracking-tight block">Ukupno</span>
+                                <span className="text-xl font-black text-indigo-700">{totalCount}</span>
+                            </div>
+                            <div className="bg-emerald-50 border-2 border-emerald-200 p-2.5 rounded-2xl text-center shadow-xs">
+                                <span className="text-[10px] font-extrabold uppercase text-emerald-700 tracking-tight block">Odobreno</span>
+                                <span className="text-xl font-black text-emerald-700">{approvedCount}</span>
+                            </div>
+                            <div className="bg-amber-50 border-2 border-amber-200 p-2.5 rounded-2xl text-center shadow-xs">
+                                <span className="text-[10px] font-extrabold uppercase text-amber-700 tracking-tight block">U tijeku</span>
+                                <span className="text-xl font-black text-amber-700">{inProgressCount}</span>
+                            </div>
+                            <div className="bg-slate-100 border-2 border-slate-200 p-2.5 rounded-2xl text-center shadow-xs">
+                                <span className="text-[10px] font-extrabold uppercase text-slate-600 tracking-tight block">Završeno</span>
+                                <span className="text-xl font-black text-slate-700">{completedCount}</span>
+                            </div>
+                        </div>
+
+                        {/* Controls Bar: Search & Crane Filter */}
+                        <div className="space-y-2">
+                            <div className="relative">
+                                <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Pretraži brodicu, registraciju (npr. ST-402) ili vlasnika..."
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-indigo-100 rounded-2xl text-xs font-medium shadow-xs focus:outline-none focus:border-indigo-500"
+                                />
+                            </div>
+
+                            {/* Crane Selection (Only assigned cranes for logged operator) */}
+                            {assignedCranes.length > 0 && (
+                                <div className="flex items-center gap-2 bg-white px-3 py-2 border-2 border-indigo-100 rounded-2xl text-xs font-semibold text-slate-700 shadow-xs">
+                                    <Anchor className="h-4 w-4 text-indigo-600 shrink-0" />
+                                    <select
+                                        value={selectedCraneId}
+                                        onChange={(e) => setSelectedCraneId(e.target.value)}
+                                        className="bg-transparent w-full text-xs font-bold text-indigo-900 focus:outline-none cursor-pointer"
+                                    >
+                                        <option value="all">Sve dodijeljene dizalice ({assignedCranes.length})</option>
+                                        {assignedCranes.map(c => (
+                                            <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Task List (3XL Cards with border-4 border-indigo-100) */}
+                        <div className="space-y-3.5 pt-1">
+                            {isLoadingTasks ? (
+                                <div className="text-center py-10 text-slate-400 font-medium text-xs">
+                                    Učitavanje rasporeda...
+                                </div>
+                            ) : filteredTasks.length === 0 ? (
+                                <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-8 text-center space-y-2 shadow-sm">
+                                    <Clock className="h-10 w-10 text-indigo-300 mx-auto" />
+                                    <p className="font-bold text-slate-700 text-sm">Nema poslova za odabrani dan ili filter</p>
+                                    <p className="text-xs text-slate-500">Provjerite datum ili pretragu registracije.</p>
+                                </div>
+                            ) : (
+                                filteredTasks.map(t => {
+                                    const timeStr = t.scheduledStart
+                                        ? new Date(t.scheduledStart).toLocaleTimeString("hr-HR", { hour: "2-digit", minute: "2-digit" })
+                                        : "--:--";
+
+                                    return (
+                                        <div
+                                            key={t.id}
+                                            className={`bg-white border-4 rounded-[2rem] p-4 shadow-sm space-y-3 transition-all ${
+                                                t.status === "in_progress"
+                                                    ? "border-amber-400 ring-2 ring-amber-400/20"
+                                                    : t.status === "completed"
+                                                    ? "border-slate-200 opacity-85"
+                                                    : "border-indigo-100"
+                                            }`}
+                                        >
+                                            {/* Time & Vessel Title */}
+                                            <div className="flex items-start justify-between gap-2 border-b pb-3">
+                                                <div>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-sm font-black text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-indigo-100">
+                                                            🕒 {timeStr}
+                                                        </span>
+                                                        <span className="text-xs font-bold text-slate-900">
+                                                            {t.vessel?.registration ? `[${t.vessel.registration}]` : ""} {t.vessel?.name || "Nepoznato plovilo"}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs font-medium text-slate-500 mt-1">
+                                                        {t.serviceType?.name || "Operacija dizalice"} ({t.crane?.name || "Dizalica"})
+                                                    </p>
+                                                </div>
+                                                <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full shrink-0 ${
+                                                    t.status === "in_progress" ? "bg-amber-100 text-amber-800" :
+                                                    t.status === "completed" ? "bg-slate-100 text-slate-700" :
+                                                    "bg-emerald-100 text-emerald-800"
+                                                }`}>
+                                                    {t.status === "in_progress" ? "U tijeku" : t.status === "completed" ? "Završeno" : "Odobreno"}
+                                                </span>
+                                            </div>
+
+                                            {/* Vessel Dimensions & Contact */}
+                                            <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                                                <div>
+                                                    <span className="text-[10px] text-slate-400 font-bold block uppercase">Dimenzije plovila</span>
+                                                    <span className="font-semibold text-slate-700">
+                                                        {t.vessel?.lengthM || "?"}m × {t.vessel?.beamM || "?"}m | {t.vessel?.weightTons || "?"}t
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[10px] text-slate-400 font-bold block uppercase">Vlasnik plovila</span>
+                                                    <span className="font-semibold text-slate-700">{t.owner?.name || "Nije naveden"}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Dry Berth Placement Info */}
+                                            <div className="flex items-center justify-between text-xs bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100">
+                                                <div className="flex items-center gap-1.5">
+                                                    <MapPin className="h-4 w-4 text-indigo-600 shrink-0" />
+                                                    <span className="font-semibold text-indigo-950">
+                                                        Suhi vez: {t.dryBerthPlacement ? (
+                                                            <strong className="text-indigo-700 font-bold">{t.dryBerthPlacement.zoneCode} ({t.dryBerthPlacement.zoneName})</strong>
+                                                        ) : (
+                                                            <span className="text-amber-700 font-medium">Nije dodijeljena zona</span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    onClick={() => {
+                                                        setAssigningTask(t);
+                                                        setSelectedZoneId("");
+                                                        setAssignNote("");
+                                                    }}
+                                                    className="text-[11px] font-bold text-indigo-600 bg-white px-2 py-1 rounded-lg border border-indigo-200 shadow-2xs hover:bg-indigo-50"
+                                                >
+                                                    {t.dryBerthPlacement ? "Izmjeni" : "+ Dodijeli"}
+                                                </button>
+                                            </div>
+
+                                            {/* Action Buttons Row */}
+                                            <div className="flex items-center gap-2 pt-1">
+                                                {/* Click-to-Call */}
+                                                {t.owner?.phone && (
+                                                    <a
+                                                        href={`tel:${t.owner.phone}`}
+                                                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
+                                                    >
+                                                        <Phone className="h-3.5 w-3.5" />
+                                                        <span>Pozovi</span>
+                                                    </a>
+                                                )}
+
+                                                {/* Status Action Button */}
+                                                {t.status === "approved" && (
+                                                    <button
+                                                        onClick={() => handleUpdateStatus(t.id, "in_progress")}
+                                                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
+                                                    >
+                                                        <Play className="h-3.5 w-3.5 fill-current" />
+                                                        <span>Započni rad</span>
+                                                    </button>
+                                                )}
+
+                                                {t.status === "in_progress" && (
+                                                    <button
+                                                        onClick={() => handleUpdateStatus(t.id, "completed")}
+                                                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
+                                                    >
+                                                        <CheckCircle2 className="h-3.5 w-3.5" />
+                                                        <span>Završi rad</span>
+                                                    </button>
+                                                )}
+
+                                                {/* Send Chat / Note */}
+                                                <button
+                                                    onClick={() => {
+                                                        setMessagingTask(t);
+                                                        setMessageText("");
+                                                    }}
+                                                    className="bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold p-2 rounded-xl text-xs flex items-center justify-center active:scale-95 transition"
+                                                    title="Pošalji poruku korisniku"
+                                                >
+                                                    <MessageSquare className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </>
+                )}
+
+                {activeTab === "notifications" && (
+                    <div className="space-y-4">
+                        <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 shadow-sm space-y-3">
+                            <h2 className="font-bold text-base text-indigo-950 flex items-center gap-2">
+                                <MessageSquare className="h-5 w-5 text-indigo-600" />
+                                Obavijesti & Chat s korisnicima
+                            </h2>
+                            <p className="text-xs text-slate-500">
+                                Slanje obavijesti i informacija vlasnicima brodova u realnom vremenu.
+                            </p>
+                        </div>
+
+                        {/* Preset Notification Shortcuts */}
+                        <div className="space-y-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Brzi predlošci obavijesti</span>
+                            <div className="space-y-2">
+                                <button
+                                    onClick={() => toast.info("Odaberite posao u listi za slanje poruke.")}
+                                    className="w-full text-left bg-white border-2 border-emerald-200 p-3 rounded-2xl text-xs font-semibold text-emerald-900 shadow-2xs hover:bg-emerald-50 flex items-center justify-between"
+                                >
+                                    <span>🟢 "Operacija dizanja brodice je započeta."</span>
+                                    <ChevronRight className="h-4 w-4 text-emerald-600" />
+                                </button>
+                                <button
+                                    onClick={() => toast.info("Odaberite posao u listi za slanje poruke.")}
+                                    className="w-full text-left bg-white border-2 border-indigo-200 p-3 rounded-2xl text-xs font-semibold text-indigo-900 shadow-2xs hover:bg-indigo-50 flex items-center justify-between"
+                                >
+                                    <span>🔵 "Plovilo je uspješno smješteno u zonu suhog veza."</span>
+                                    <ChevronRight className="h-4 w-4 text-indigo-600" />
+                                </button>
+                                <button
+                                    onClick={() => toast.info("Odaberite posao u listi za slanje poruke.")}
+                                    className="w-full text-left bg-white border-2 border-amber-200 p-3 rounded-2xl text-xs font-semibold text-amber-900 shadow-2xs hover:bg-amber-50 flex items-center justify-between"
+                                >
+                                    <span>🟡 "Molimo dođite do dizalice u lučici."</span>
+                                    <ChevronRight className="h-4 w-4 text-amber-600" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === "settings" && (
+                    <div className="space-y-4">
+                        <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 shadow-sm space-y-4">
+                            <div className="flex items-center gap-3 border-b pb-4">
+                                <div className="h-12 w-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-lg">
+                                    {operatorUser.name ? operatorUser.name[0].toUpperCase() : "O"}
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-900">{operatorUser.name || "Operater dizalice"}</h3>
+                                    <p className="text-xs text-slate-500">{operatorUser.email}</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-2 text-xs">
+                                <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Dodijeljene dizalice</span>
+                                {assignedCranes.length === 0 ? (
+                                    <p className="text-slate-600 font-medium">Sve dizalice u lučici (Admin pristup)</p>
+                                ) : (
+                                    <div className="space-y-1">
+                                        {assignedCranes.map(c => (
+                                            <div key={c.id} className="bg-slate-50 p-2 rounded-xl border border-slate-200 font-semibold text-slate-700 flex items-center gap-2">
+                                                <Anchor className="h-3.5 w-3.5 text-indigo-600" />
+                                                <span>{c.name} ({c.type})</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                onClick={handleLogout}
+                                className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold py-3 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 border border-rose-200 transition active:scale-95"
+                            >
+                                <LogOut className="h-4 w-4" />
+                                <span>Odjava s uređaja</span>
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </main>
+
+            {/* Dry Berth Zone Assignment Modal Dialog */}
+            {assigningTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
+                    <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 w-full max-w-md space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200">
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                <MapPin className="h-5 w-5 text-indigo-600" />
+                                Dodjela Suhog Veza
+                            </h3>
+                            <button onClick={() => setAssigningTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+                        </div>
+
+                        <div className="text-xs space-y-1 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+                            <span className="font-bold text-indigo-950 block text-sm">
+                                [{assigningTask.vessel?.registration || "Plovilo"}] {assigningTask.vessel?.name}
+                            </span>
+                            <span className="text-slate-600 block">Vlasnik: {assigningTask.owner?.name}</span>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-700 block">Odaberite zonu na kopnu:</label>
+                            <select
+                                value={selectedZoneId}
+                                onChange={(e) => setSelectedZoneId(e.target.value)}
+                                className="w-full p-3 bg-slate-50 border-2 border-indigo-100 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
+                            >
+                                <option value="">-- Odaberite zonu --</option>
+                                {landZones.map(z => (
+                                    <option key={z.id} value={z.id}>
+                                        {z.code} ({z.name}) — Slobodno: {z.availableSpots}/{z.totalSpots}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-700 block">Napomena operatera (opcionalno):</label>
+                            <input
+                                type="text"
+                                value={assignNote}
+                                onChange={(e) => setAssignNote(e.target.value)}
+                                placeholder="npr. Smješteno na stalažu #12"
+                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                            />
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                            <button
+                                onClick={() => setAssigningTask(null)}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                            >
+                                Odustani
+                            </button>
+                            <button
+                                disabled={!selectedZoneId || isSubmittingAssign}
+                                onClick={handleAssignLandZone}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md disabled:opacity-50"
+                            >
+                                {isSubmittingAssign ? "Spremanje..." : "Potvrdi smještaj"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Chat / Message Modal Dialog */}
+            {messagingTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
+                    <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 w-full max-w-md space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200">
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                <MessageSquare className="h-5 w-5 text-indigo-600" />
+                                Pošalji obavijest korisniku
+                            </h3>
+                            <button onClick={() => setMessagingTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+                        </div>
+
+                        <div className="text-xs space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                            <span className="font-bold text-slate-900 block">Korisnik: {messagingTask.owner?.name}</span>
+                            <span className="text-slate-500 block">Plovilo: {messagingTask.vessel?.name} ({messagingTask.vessel?.registration})</span>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold text-slate-700 block">Sadržaj poruke / obavijesti:</label>
+                            <textarea
+                                rows={3}
+                                value={messageText}
+                                onChange={(e) => setMessageText(e.target.value)}
+                                placeholder="Napišite obavijest vlasniku plovila..."
+                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                            />
+                        </div>
+
+                        <div className="flex gap-2 pt-2">
+                            <button
+                                onClick={() => setMessagingTask(null)}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                            >
+                                Odustani
+                            </button>
+                            <button
+                                disabled={!messageText.trim() || isSendingMessage}
+                                onClick={handleSendMessage}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-1.5"
+                            >
+                                <Send className="h-3.5 w-3.5" />
+                                <span>{isSendingMessage ? "Slanje..." : "Pošalji poruku"}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Bottom Navigation Bar (3 Tabs: Poslovi, Notifikacije, Postavke) */}
+            <nav className="fixed bottom-0 left-0 right-0 bg-indigo-950 text-white border-t border-indigo-900 shadow-2xl z-40">
+                <div className="max-w-lg mx-auto flex items-center justify-around h-16 px-2">
+                    <button
+                        onClick={() => setActiveTab("tasks")}
+                        className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                            activeTab === "tasks" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
+                        }`}
+                    >
+                        <div className="relative">
+                            <Calendar className="h-5 w-5" />
+                            {totalCount > 0 && (
+                                <span className="absolute -top-1.5 -right-2.5 bg-indigo-600 text-white text-[9px] font-black h-4 w-4 rounded-full flex items-center justify-center border border-indigo-950">
+                                    {totalCount}
+                                </span>
+                            )}
+                        </div>
+                        <span className="text-[11px]">Poslovi</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab("notifications")}
+                        className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                            activeTab === "notifications" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
+                        }`}
+                    >
+                        <MessageSquare className="h-5 w-5" />
+                        <span className="text-[11px]">Notifikacije</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab("settings")}
+                        className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                            activeTab === "settings" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
+                        }`}
+                    >
+                        <Settings className="h-5 w-5" />
+                        <span className="text-[11px]">Postavke</span>
+                    </button>
+                </div>
+            </nav>
+        </div>
+    );
+}
+
+
+// ----------------------------------------------------------------------------
+
