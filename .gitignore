@@ -110,6 +110,5 @@ temp/
 .webdev/
 
 /generated/prisma
-
 # Transfer artifacts
 transfer_gpt/
