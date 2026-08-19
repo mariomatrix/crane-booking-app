@@ -94,7 +94,7 @@ export function UserSearchCombobox({
                                         value={user.id}
                                         keywords={[
                                             user.name || "",
-                                            user.email,
+                                            user.email || "",
                                             user.oib || "",
                                         ]}
                                         onSelect={() => {
