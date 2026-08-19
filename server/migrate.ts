@@ -315,6 +315,26 @@ async function runMigration() {
             )
         `;
         console.log("user_card_entries table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "crane_operation_log" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id"),
+                "reservation_id" uuid REFERENCES "reservations"("id"),
+                "operation_type" varchar(50) NOT NULL,
+                "start_time" timestamp NOT NULL,
+                "end_time" timestamp NOT NULL,
+                "duration_minutes" integer NOT NULL,
+                "operator_id" uuid REFERENCES "users"("id"),
+                "note" text,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_crane_id_idx" ON "crane_operation_log" ("crane_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_operator_id_idx" ON "crane_operation_log" ("operator_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_start_time_idx" ON "crane_operation_log" ("start_time")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_reservation_id_idx" ON "crane_operation_log" ("reservation_id")`;
+        console.log("crane_operation_log table verified.");
     } catch (e: any) {
         console.warn("Work orders tables verification warning:", e?.message || e);
     }

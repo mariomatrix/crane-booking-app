@@ -14,7 +14,7 @@ import {
     craneOperationLog,
     serviceTypes,
 } from "../drizzle/schema";
-import { eq, desc, and, gte, lte, sql, count } from "drizzle-orm";
+import { eq, desc, and, gte, lte, sql, count, ne } from "drizzle-orm";
 
 // Helper for generating order number: RN-YYYY-XXXXX
 async function generateWorkOrderNumber(db: any, year: number): Promise<string> {
@@ -126,20 +126,35 @@ export const workOrdersRouter = router({
             const db = await getDb();
             if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-            // Check if active work order already exists
-            const existing = await db
-                .select()
-                .from(workOrders)
-                .where(and(eq(workOrders.reservationId, input.reservationId), eq(workOrders.status, "in_progress")))
-                .limit(1);
-
-            if (existing.length > 0) {
-                return { success: true, workOrder: existing[0], alreadyRunning: true };
-            }
-
             // Fetch reservation
             const [res] = await db.select().from(reservations).where(eq(reservations.id, input.reservationId)).limit(1);
             if (!res) throw new TRPCError({ code: "NOT_FOUND", message: "Rezervacija nije pronađena." });
+
+            if (res.status === "completed") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je već završena." });
+            }
+            if (res.status === "cancelled" || res.status === "rejected") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je otkazana ili odbijena." });
+            }
+
+            // Check if active or completed work order already exists
+            const [existing] = await db
+                .select()
+                .from(workOrders)
+                .where(and(eq(workOrders.reservationId, input.reservationId), ne(workOrders.status, "cancelled")))
+                .limit(1);
+
+            if (existing) {
+                if (existing.status === "in_progress") {
+                    return { success: true, workOrder: existing, alreadyRunning: true };
+                }
+                if (existing.status === "completed") {
+                    throw new TRPCError({
+                        code: "BAD_REQUEST",
+                        message: `Za ovu rezervaciju već postoji zaključeni radni nalog (${existing.orderNumber}).`,
+                    });
+                }
+            }
 
             const [user] = await db.select().from(users).where(eq(users.id, res.userId)).limit(1);
             if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
@@ -269,6 +284,12 @@ export const workOrdersRouter = router({
             if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Radni nalog nije pronađen." });
 
             if (order.status === "completed") {
+                if (order.reservationId) {
+                    await db
+                        .update(reservations)
+                        .set({ status: "completed", updatedAt: new Date() })
+                        .where(eq(reservations.id, order.reservationId));
+                }
                 return { success: true, alreadyCompleted: true };
             }
 
@@ -364,10 +385,14 @@ export const workOrdersRouter = router({
             }
 
             // Log to craneOperationLog
+            const opType = order.quotaOperationType && order.quotaOperationType !== "none"
+                ? order.quotaOperationType
+                : "lift";
+
             await db.insert(craneOperationLog).values({
                 craneId: order.craneId,
                 reservationId: order.reservationId,
-                operationType: order.quotaOperationType || "lift",
+                operationType: opType,
                 startTime: order.startedAt,
                 endTime: completedAt,
                 durationMinutes: input.actualDurationMin,
