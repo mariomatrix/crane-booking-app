@@ -142,12 +142,12 @@ export async function listAllUsers(
     conditions.push(or(
       ilike(users.firstName, pattern),
       ilike(users.lastName, pattern),
-      ilike(users.email, pattern),
+      ilike(users.name, pattern),
       ilike(users.oib, pattern),
       sql`exists (
         select 1 from vessels 
         where vessels.owner_id = ${users.id} 
-          and (vessels.name ilike ${pattern} or vessels.registration ilike ${pattern})
+          and vessels.registration ilike ${pattern}
       )`
     ) as any);
   }

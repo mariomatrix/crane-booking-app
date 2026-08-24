@@ -19,8 +19,12 @@ import {
 export interface UserOption {
     id: string;
     name: string | null;
-    email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    email?: string | null;
     oib?: string | null;
+    isLegalEntity?: boolean | null;
+    vessels?: Array<{ registration?: string | null; name?: string | null }>;
 }
 
 interface UserSearchComboboxProps {
@@ -37,7 +41,7 @@ export function UserSearchCombobox({
     users,
     value,
     onChange,
-    placeholder = "Traži korisnika...",
+    placeholder = "Traži po imenu, prezimenu, tvrtki, OIB-u ili registraciji...",
     emptyLabel = "Nema rezultata.",
     allLabel = "Svi korisnici",
     className,
@@ -45,8 +49,11 @@ export function UserSearchCombobox({
     const [open, setOpen] = useState(false);
 
     const selectedUser = value !== "all" ? users.find((u) => u.id === value) : null;
+    const selectedVessels = selectedUser?.vessels?.map(v => v.registration).filter(Boolean).join(", ");
     const displayLabel = selectedUser
-        ? (selectedUser.name || selectedUser.email) + (selectedUser.oib ? ` (${selectedUser.oib})` : "")
+        ? (selectedUser.name || "Korisnik") +
+          (selectedUser.oib ? ` (${selectedUser.oib})` : "") +
+          (selectedVessels ? ` · [${selectedVessels}]` : "")
         : allLabel;
 
     return (
@@ -66,7 +73,7 @@ export function UserSearchCombobox({
                         <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
                     </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[280px] p-0" align="start">
+                <PopoverContent className="w-[320px] p-0" align="start">
                     <Command>
                         <CommandInput placeholder={placeholder} />
                         <CommandList>
@@ -88,36 +95,45 @@ export function UserSearchCombobox({
                                     />
                                     {allLabel}
                                 </CommandItem>
-                                {users.map((user) => (
-                                    <CommandItem
-                                        key={user.id}
-                                        value={user.id}
-                                        keywords={[
-                                            user.name || "",
-                                            user.email || "",
-                                            user.oib || "",
-                                        ]}
-                                        onSelect={() => {
-                                            onChange(user.id);
-                                            setOpen(false);
-                                        }}
-                                    >
-                                        <Check
-                                            className={cn(
-                                                "mr-2 h-4 w-4",
-                                                value === user.id ? "opacity-100" : "opacity-0"
-                                            )}
-                                        />
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="truncate text-sm font-medium">
-                                                {user.name || "—"}
-                                            </span>
-                                            <span className="truncate text-xs text-muted-foreground">
-                                                {user.oib ? `${user.oib} · ` : ""}{user.email}
-                                            </span>
-                                        </div>
-                                    </CommandItem>
-                                ))}
+                                {users.map((user) => {
+                                    const vesselRegs = user.vessels?.map(v => v.registration).filter(Boolean) as string[] || [];
+                                    const keywords = [
+                                        user.name || "",
+                                        user.firstName || "",
+                                        user.lastName || "",
+                                        user.oib || "",
+                                        ...vesselRegs,
+                                    ].filter(Boolean);
+
+                                    return (
+                                        <CommandItem
+                                            key={user.id}
+                                            value={user.id}
+                                            keywords={keywords}
+                                            onSelect={() => {
+                                                onChange(user.id);
+                                                setOpen(false);
+                                            }}
+                                        >
+                                            <Check
+                                                className={cn(
+                                                    "mr-2 h-4 w-4 shrink-0",
+                                                    value === user.id ? "opacity-100" : "opacity-0"
+                                                )}
+                                            />
+                                            <div className="flex flex-col min-w-0">
+                                                <span className="truncate text-sm font-medium">
+                                                    {user.name || "—"}
+                                                </span>
+                                                <span className="truncate text-xs text-muted-foreground">
+                                                    {user.oib ? `OIB: ${user.oib}` : ""}
+                                                    {user.oib && vesselRegs.length > 0 ? " · " : ""}
+                                                    {vesselRegs.length > 0 ? `Reg: ${vesselRegs.join(", ")}` : ""}
+                                                </span>
+                                            </div>
+                                        </CommandItem>
+                                    );
+                                })}
                             </CommandGroup>
                         </CommandList>
                     </Command>

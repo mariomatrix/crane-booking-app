@@ -393,7 +393,7 @@ export default function AdminUsers() {
                             <Label className="text-xs font-semibold mb-1 block">Pretraga</Label>
                             <div className="relative">
                                 <Input
-                                    placeholder="Pretraži po korisniku (ime, prezime, email, OIB) ili plovilu (naziv, registracija)..."
+                                    placeholder="Pretraži po imenu, prezimenu, tvrtki, OIB-u ili registraciji plovila..."
                                     value={searchInput}
                                     onChange={(e) => setSearchInput(e.target.value)}
                                     className="pr-8"
