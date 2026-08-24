@@ -9,23 +9,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { processClan03Rows } from "../memberSync/syncEngine";
 import type { LegacyClan03Row } from "../memberSync/types";
 import { getDb } from "../db";
-import {
-    users,
-    vessels,
-    memberLinks,
-    memberMemberships,
-    syncRuns,
-    syncConflicts,
-    berthAssignments,
-    landOccupancies,
-    landWaitingList,
-    waitingList,
-    workOrders,
-    reservations,
-    userCardEntries,
-    memberStatutoryRights,
-} from "../../drizzle/schema";
-import { ne } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 const router = Router();
 
@@ -86,32 +70,35 @@ router.post("/reset-members", requireSyncApiKey, async (req: Request, res: Respo
 
         console.log(`[MemberSync API] Reset members initiated by ${req.ip}`);
 
-        // 1. Obriši povezane podatke
-        await db.delete(berthAssignments);
-        await db.delete(landOccupancies);
-        await db.delete(landWaitingList);
-        await db.delete(waitingList);
-        await db.delete(workOrders);
-        await db.delete(reservations);
-        await db.delete(userCardEntries);
-        await db.delete(memberStatutoryRights);
-        await db.delete(memberMemberships);
-        await db.delete(memberLinks);
-        await db.delete(syncConflicts);
-        await db.delete(syncRuns);
-        await db.delete(vessels);
+        await db.execute(sql`
+            DELETE FROM berth_assignments;
+            DELETE FROM land_occupancies;
+            DELETE FROM land_waiting_list;
+            DELETE FROM waiting_list;
+            DELETE FROM work_orders;
+            DELETE FROM reservations;
+            DELETE FROM user_card_entries;
+            DELETE FROM member_statutory_rights;
+            DELETE FROM member_memberships;
+            DELETE FROM member_links;
+            DELETE FROM sync_conflicts;
+            DELETE FROM sync_runs;
+            DELETE FROM invoice_items;
+            DELETE FROM invoices;
+            DELETE FROM messages;
+            DELETE FROM email_verification_tokens;
+            DELETE FROM operator_cranes WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+            UPDATE audit_log SET actor_id = NULL WHERE actor_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+            UPDATE crane_operation_log SET operator_id = NULL WHERE operator_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+            DELETE FROM vessels;
+            DELETE FROM users WHERE role != 'admin';
+        `);
 
-        // 2. Obriši sve korisnike koji nisu administratori
-        const deletedUsers = await db.delete(users)
-            .where(ne(users.role, "admin"))
-            .returning({ id: users.id, email: users.email });
-
-        console.log(`[MemberSync API] Reset completed. Deleted ${deletedUsers.length} member users.`);
+        console.log(`[MemberSync API] Reset completed successfully.`);
 
         res.json({
             success: true,
-            deletedCount: deletedUsers.length,
-            message: `Uspješno obrisano ${deletedUsers.length} članova i sva pridružena plovila/vezovi. Admin računi su sačuvani.`,
+            message: `Uspješno obrisani svi uvezani članovi i sva pridružena plovila/vezovi. Admin računi su sačuvani.`,
         });
     } catch (err: any) {
         console.error("[MemberSync API] Error resetting members:", err);
@@ -142,21 +129,30 @@ router.post("/push", requireSyncApiKey, async (req: Request, res: Response) => {
             console.log(`[MemberSync API] resetBeforeSync requested by ${req.ip}. Cleaning existing members...`);
             const db = await getDb();
             if (db) {
-                await db.delete(berthAssignments);
-                await db.delete(landOccupancies);
-                await db.delete(landWaitingList);
-                await db.delete(waitingList);
-                await db.delete(workOrders);
-                await db.delete(reservations);
-                await db.delete(userCardEntries);
-                await db.delete(memberStatutoryRights);
-                await db.delete(memberMemberships);
-                await db.delete(memberLinks);
-                await db.delete(syncConflicts);
-                await db.delete(syncRuns);
-                await db.delete(vessels);
-                const deleted = await db.delete(users).where(ne(users.role, "admin")).returning({ id: users.id });
-                console.log(`[MemberSync API] resetBeforeSync completed. Deleted ${deleted.length} member users.`);
+                await db.execute(sql`
+                    DELETE FROM berth_assignments;
+                    DELETE FROM land_occupancies;
+                    DELETE FROM land_waiting_list;
+                    DELETE FROM waiting_list;
+                    DELETE FROM work_orders;
+                    DELETE FROM reservations;
+                    DELETE FROM user_card_entries;
+                    DELETE FROM member_statutory_rights;
+                    DELETE FROM member_memberships;
+                    DELETE FROM member_links;
+                    DELETE FROM sync_conflicts;
+                    DELETE FROM sync_runs;
+                    DELETE FROM invoice_items;
+                    DELETE FROM invoices;
+                    DELETE FROM messages;
+                    DELETE FROM email_verification_tokens;
+                    DELETE FROM operator_cranes WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+                    UPDATE audit_log SET actor_id = NULL WHERE actor_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+                    UPDATE crane_operation_log SET operator_id = NULL WHERE operator_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+                    DELETE FROM vessels;
+                    DELETE FROM users WHERE role != 'admin';
+                `);
+                console.log(`[MemberSync API] resetBeforeSync raw SQL execution completed successfully.`);
             }
         }
 

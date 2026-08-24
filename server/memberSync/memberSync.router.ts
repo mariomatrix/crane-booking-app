@@ -43,27 +43,32 @@ export const memberSyncRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        await db.delete(berthAssignments);
-        await db.delete(landOccupancies);
-        await db.delete(landWaitingList);
-        await db.delete(waitingList);
-        await db.delete(workOrders);
-        await db.delete(reservations);
-        await db.delete(userCardEntries);
-        await db.delete(memberStatutoryRights);
-        await db.delete(memberMemberships);
-        await db.delete(memberLinks);
-        await db.delete(syncConflicts);
-        await db.delete(syncRuns);
-        await db.delete(vessels);
-
-        const deletedUsers = await db.delete(users)
-            .where(ne(users.role, "admin"))
-            .returning({ id: users.id });
+        await db.execute(sql`
+            DELETE FROM berth_assignments;
+            DELETE FROM land_occupancies;
+            DELETE FROM land_waiting_list;
+            DELETE FROM waiting_list;
+            DELETE FROM work_orders;
+            DELETE FROM reservations;
+            DELETE FROM user_card_entries;
+            DELETE FROM member_statutory_rights;
+            DELETE FROM member_memberships;
+            DELETE FROM member_links;
+            DELETE FROM sync_conflicts;
+            DELETE FROM sync_runs;
+            DELETE FROM invoice_items;
+            DELETE FROM invoices;
+            DELETE FROM messages;
+            DELETE FROM email_verification_tokens;
+            DELETE FROM operator_cranes WHERE user_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+            UPDATE audit_log SET actor_id = NULL WHERE actor_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+            UPDATE crane_operation_log SET operator_id = NULL WHERE operator_id NOT IN (SELECT id FROM users WHERE role = 'admin');
+            DELETE FROM vessels;
+            DELETE FROM users WHERE role != 'admin';
+        `);
 
         return {
             success: true,
-            deletedCount: deletedUsers.length,
         };
     }),
 
