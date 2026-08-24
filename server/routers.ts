@@ -1494,7 +1494,7 @@ export const appRouter = router({
             message: "Korisnik nije pronađen.",
           });
 
-        // Get reservations with crane info
+        // Get reservations with crane, operation type and dry berth zone info
         const userReservations = await db
           .select({
             id: reservations.id,
@@ -1507,16 +1507,25 @@ export const appRouter = router({
             durationMin: reservations.durationMin,
             vesselName: reservations.vesselName,
             vesselType: reservations.vesselType,
+            vesselRegistration: reservations.vesselRegistration,
             vesselWeightTons: reservations.vesselWeightTons,
             userNote: reservations.userNote,
             adminNote: reservations.adminNote,
             craneId: reservations.craneId,
+            serviceTypeId: reservations.serviceTypeId,
+            landZoneId: reservations.landZoneId,
             createdAt: reservations.createdAt,
             craneName: cranes.name,
             craneLocation: cranes.location,
+            serviceTypeName: serviceTypes.name,
+            serviceTypeCategory: serviceTypes.operationCategory,
+            landZoneName: landZones.name,
+            landZoneCode: landZones.code,
           })
           .from(reservations)
           .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+          .leftJoin(landZones, eq(reservations.landZoneId, landZones.id))
           .where(eq(reservations.userId, targetId))
           .orderBy(sql`${reservations.createdAt} desc`);
 

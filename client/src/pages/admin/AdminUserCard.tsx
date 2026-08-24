@@ -374,6 +374,8 @@ export default function AdminUserCard() {
                                 <TableRow>
                                     <TableHead>Br.</TableHead>
                                     <TableHead>Datum</TableHead>
+                                    <TableHead>Operacija</TableHead>
+                                    <TableHead>Mjesto na kopnu</TableHead>
                                     <TableHead>Plovilo</TableHead>
                                     <TableHead>Dizalica</TableHead>
                                     <TableHead>Status</TableHead>
@@ -384,15 +386,38 @@ export default function AdminUserCard() {
                                 {filteredReservations.map((r: any) => (
                                     <TableRow key={r.id}>
                                         <TableCell className="font-mono text-xs">{r.reservationNumber || "—"}</TableCell>
-                                        <TableCell>
+                                        <TableCell className="text-xs font-medium whitespace-nowrap">
                                             {r.scheduledStart
                                                 ? formatAppDate(r.scheduledStart, lang as any, true)
                                                 : r.requestedDate
                                                     ? formatAppDate(r.requestedDate, lang as any)
                                                     : "—"}
                                         </TableCell>
-                                        <TableCell>{r.vesselRegistration || "—"}</TableCell>
-                                        <TableCell>{r.craneName || "—"}</TableCell>
+                                        <TableCell>
+                                            <span className="font-semibold text-xs text-foreground block">
+                                                {r.serviceTypeName || (r.isMaintenance ? "Održavanje" : "Dizanje/Spuštanje")}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell>
+                                            {r.landZoneCode || r.landZoneName ? (
+                                                <Badge variant="outline" className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30 text-[11px] font-semibold whitespace-nowrap">
+                                                    {r.landZoneCode ? `${r.landZoneName || "Kopno"} (${r.landZoneCode})` : r.landZoneName}
+                                                </Badge>
+                                            ) : r.serviceTypeCategory === "lift_from_sea" ? (
+                                                <span className="text-xs text-amber-600 font-medium italic">Nije dodijeljeno</span>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground">—</span>
+                                            )}
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-semibold">{r.vesselRegistration || "—"}</span>
+                                                {r.vesselName && r.vesselName !== r.vesselRegistration && (
+                                                    <span className="text-[10px] text-muted-foreground">{r.vesselName}</span>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="text-xs">{r.craneName || "—"}</TableCell>
                                         <TableCell><StatusBadge status={r.status} /></TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-1">
