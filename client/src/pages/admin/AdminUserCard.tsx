@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
 import {
     Loader2, ArrowLeft, CalendarDays, Mail, Phone, Shield, Clock,
     CheckCircle2, XCircle, Hourglass, Ban, Anchor, MessageSquare, Ship,
@@ -41,6 +42,7 @@ export default function AdminUserCard() {
     const { lang } = useLang();
     const [chatResId, setChatResId] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState("all");
+    const [isCreateResOpen, setIsCreateResOpen] = useState(false);
 
     const { data, isLoading } = trpc.user.getCard.useQuery(
         { userId: id },
@@ -208,9 +210,15 @@ export default function AdminUserCard() {
                         </span>
                     </div>
                 </div>
-                <Button variant="outline" onClick={() => setLocation(`/admin/calendar?userId=${user.id}`)}>
-                    <CalendarDays className="h-4 w-4 mr-2" />Kalendar
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button onClick={() => setIsCreateResOpen(true)} className="flex items-center gap-2">
+                        <Plus className="h-4 w-4" />
+                        Nova rezervacija
+                    </Button>
+                    <Button variant="outline" onClick={() => setLocation(`/admin/calendar?userId=${user.id}`)}>
+                        <CalendarDays className="h-4 w-4 mr-2" />Kalendar
+                    </Button>
+                </div>
             </div>
 
             {/* Statutarni Semafor Prava (za članove) */}
@@ -320,10 +328,10 @@ export default function AdminUserCard() {
                                             {entry.serviceItemName}
                                         </TableCell>
                                         <TableCell className="text-xs">
-                                            {entry.vesselName || "—"} ({entry.vesselRegistration || ""})
+                                            {entry.vesselRegistration || "—"}
                                         </TableCell>
                                         <TableCell className="text-xs text-muted-foreground">
-                                            {entry.note || "—"}
+                                            {entry.description || "—"}
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -354,7 +362,7 @@ export default function AdminUserCard() {
 
             {/* Reservations Table */}
             <Card>
-                <CardHeader className="pb-3">
+                <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
                     <CardTitle className="text-base flex items-center gap-2">
                         <CalendarDays className="h-4 w-4" />
                         Rezervacije ({filteredReservations.length})
@@ -364,6 +372,10 @@ export default function AdminUserCard() {
                             </Button>
                         )}
                     </CardTitle>
+                    <Button size="sm" onClick={() => setIsCreateResOpen(true)} className="flex items-center gap-1.5 h-8">
+                        <Plus className="h-4 w-4" />
+                        Nova rezervacija
+                    </Button>
                 </CardHeader>
                 <CardContent className="p-0">
                     {filteredReservations.length === 0 ? (
@@ -372,7 +384,6 @@ export default function AdminUserCard() {
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <TableHead>Br.</TableHead>
                                     <TableHead>Datum</TableHead>
                                     <TableHead>Operacija</TableHead>
                                     <TableHead>Mjesto na kopnu</TableHead>
@@ -385,18 +396,21 @@ export default function AdminUserCard() {
                             <TableBody>
                                 {filteredReservations.map((r: any) => (
                                     <TableRow key={r.id}>
-                                        <TableCell className="font-mono text-xs">{r.reservationNumber || "—"}</TableCell>
-                                        <TableCell className="text-xs font-medium whitespace-nowrap">
-                                            {r.scheduledStart
-                                                ? formatAppDate(r.scheduledStart, lang as any, true)
-                                                : r.requestedDate
-                                                    ? formatAppDate(r.requestedDate, lang as any)
-                                                    : "—"}
+                                        <TableCell className="font-medium text-xs">
+                                            {formatAppDate(r.scheduledDate, lang as any, true)}
                                         </TableCell>
                                         <TableCell>
-                                            <span className="font-semibold text-xs text-foreground block">
-                                                {r.serviceTypeName || (r.isMaintenance ? "Održavanje" : "Dizanje/Spuštanje")}
-                                            </span>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-semibold">{r.serviceTypeName || "Operacija"}</span>
+                                                {r.serviceTypeCategory && (
+                                                    <span className="text-[10px] text-muted-foreground">
+                                                        {r.serviceTypeCategory === "lift_from_sea" ? "Vađenje iz mora" :
+                                                         r.serviceTypeCategory === "lower_to_sea" ? "Spuštanje u more" :
+                                                         r.serviceTypeCategory === "move" ? "Premještanje" :
+                                                         r.serviceTypeCategory === "maintenance" ? "Održavanje" : "Ostalo"}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </TableCell>
                                         <TableCell>
                                             {r.landZoneCode || r.landZoneName ? (
@@ -469,7 +483,7 @@ export default function AdminUserCard() {
                                 <TableRow>
                                     <TableHead>Naziv</TableHead>
                                     <TableHead>Tip</TableHead>
-                                    <TableHead>Težina</TableHead>
+                                    <TableHead>Dužina</TableHead>
                                     <TableHead>Registracija</TableHead>
                                     <TableHead className="text-right">Akcije</TableHead>
                                 </TableRow>
@@ -479,7 +493,7 @@ export default function AdminUserCard() {
                                     <TableRow key={v.id}>
                                         <TableCell className="font-medium">{v.name}</TableCell>
                                         <TableCell>{v.type}</TableCell>
-                                        <TableCell>{v.weightTons ? `${Number(v.weightTons).toFixed(1)} t` : v.weightKg ? `${(v.weightKg / 1000).toFixed(1)} t` : "—"}</TableCell>
+                                        <TableCell>{v.lengthM ? `${Number(v.lengthM).toFixed(1)} m` : "—"}</TableCell>
                                         <TableCell>{v.registration || "—"}</TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-1">
@@ -498,6 +512,27 @@ export default function AdminUserCard() {
                     )}
                 </CardContent>
             </Card>
+
+            {/* Create Reservation Dialog */}
+            <Dialog open={isCreateResOpen} onOpenChange={setIsCreateResOpen}>
+                <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>Nova rezervacija</DialogTitle>
+                        <DialogDescription>
+                            Kreirajte novu rezervaciju za člana {user.name || `${user.firstName} ${user.lastName}`}.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <AdminReservationForm
+                        initialData={{ userId: user.id }}
+                        onSuccess={() => {
+                            setIsCreateResOpen(false);
+                            utils.user.getCard.invalidate();
+                            utils.userCard.getCard.invalidate();
+                        }}
+                        onCancel={() => setIsCreateResOpen(false)}
+                    />
+                </DialogContent>
+            </Dialog>
 
             {/* Chat Modal */}
             <Dialog open={!!chatResId} onOpenChange={(open) => !open && setChatResId(null)}>

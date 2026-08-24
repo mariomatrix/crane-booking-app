@@ -175,7 +175,7 @@ export default function MyCard() {
                                 <TableRow>
                                     <TableHead>Naziv</TableHead>
                                     <TableHead>Tip</TableHead>
-                                    <TableHead>Težina</TableHead>
+                                    <TableHead>Dužina</TableHead>
                                     <TableHead>Registracija</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -184,7 +184,7 @@ export default function MyCard() {
                                     <TableRow key={v.id}>
                                         <TableCell className="font-medium">{v.name}</TableCell>
                                         <TableCell>{v.type}</TableCell>
-                                        <TableCell>{v.weightTons ? `${v.weightTons} t` : "—"}</TableCell>
+                                        <TableCell>{v.lengthM ? `${Number(v.lengthM).toFixed(1)} m` : "—"}</TableCell>
                                         <TableCell>{v.registration || "—"}</TableCell>
                                     </TableRow>
                                 ))}
