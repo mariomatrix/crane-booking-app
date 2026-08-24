@@ -54,6 +54,30 @@ export async function executePushSync(): Promise<{ success: boolean; data?: any;
             console.warn("⚠️  Nema pronađenih članova koji zadovoljavaju filter (VRSTA_C IN ('U','B') AND KLUB > 0).");
         }
 
+        // Ako je zadan --reset flag, prvo očisti stare članove na produkcijskom poslužitelju
+        const shouldReset = process.argv.includes("--reset");
+        if (shouldReset) {
+            const resetUrl = remoteUrl.replace(/\/push$/, "/reset-members");
+            console.log(`🧹 [RESET] Čistim stare članove na udaljenom poslužitelju (${resetUrl})...`);
+            try {
+                const resetRes = await axios.post(
+                    resetUrl,
+                    {},
+                    {
+                        headers: {
+                            "Content-Type": "application/json",
+                            "x-sync-api-key": apiKey,
+                        },
+                        timeout: 30_000,
+                    }
+                );
+                console.log(`✅ [RESET] ${resetRes.data?.message || "Korisnici su uspješno očišćeni."}`);
+            } catch (resetErr: any) {
+                console.error(`❌ [RESET] Greška pri resetiranju: ${resetErr.response?.data?.error || resetErr.message}`);
+                return { success: false, error: resetErr.message };
+            }
+        }
+
         // 3. Slanje paketa na udaljeni Coolify poslužitelj u chunkovima
         const CHUNK_SIZE = 500;
         const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);

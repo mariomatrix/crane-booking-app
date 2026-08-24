@@ -8,6 +8,24 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { processClan03Rows } from "../memberSync/syncEngine";
 import type { LegacyClan03Row } from "../memberSync/types";
+import { getDb } from "../db";
+import {
+    users,
+    vessels,
+    memberLinks,
+    memberMemberships,
+    syncRuns,
+    syncConflicts,
+    berthAssignments,
+    landOccupancies,
+    landWaitingList,
+    waitingList,
+    workOrders,
+    reservations,
+    userCardEntries,
+    memberStatutoryRights,
+} from "../../drizzle/schema";
+import { ne } from "drizzle-orm";
 
 const router = Router();
 
@@ -52,6 +70,56 @@ router.get("/health", (req: Request, res: Response) => {
         service: "Member Sync Ingestion API",
         timestamp: new Date().toISOString(),
     });
+});
+
+/**
+ * @route POST /api/v1/member-sync/reset-members
+ * Sigurno briše sve uvezene korisnike (uloga 'user') i pripadajuće podatke (plovila, vezove, članstva)
+ * Zadržava administratore i operatere
+ */
+router.post("/reset-members", requireSyncApiKey, async (req: Request, res: Response) => {
+    try {
+        const db = await getDb();
+        if (!db) {
+            return res.status(500).json({ success: false, error: "Database not available" });
+        }
+
+        console.log(`[MemberSync API] Reset members initiated by ${req.ip}`);
+
+        // 1. Obriši povezane podatke
+        await db.delete(berthAssignments);
+        await db.delete(landOccupancies);
+        await db.delete(landWaitingList);
+        await db.delete(waitingList);
+        await db.delete(workOrders);
+        await db.delete(reservations);
+        await db.delete(userCardEntries);
+        await db.delete(memberStatutoryRights);
+        await db.delete(memberMemberships);
+        await db.delete(memberLinks);
+        await db.delete(syncConflicts);
+        await db.delete(syncRuns);
+        await db.delete(vessels);
+
+        // 2. Obriši sve korisnike koji nisu administratori
+        const deletedUsers = await db.delete(users)
+            .where(ne(users.role, "admin"))
+            .returning({ id: users.id, email: users.email });
+
+        console.log(`[MemberSync API] Reset completed. Deleted ${deletedUsers.length} member users.`);
+
+        res.json({
+            success: true,
+            deletedCount: deletedUsers.length,
+            message: `Uspješno obrisano ${deletedUsers.length} članova i sva pridružena plovila/vezovi. Admin računi su sačuvani.`,
+        });
+    } catch (err: any) {
+        console.error("[MemberSync API] Error resetting members:", err);
+        res.status(500).json({
+            success: false,
+            error: `Greška pri brisanju članova: ${err?.message || err}`,
+        });
+    }
 });
 
 /**
