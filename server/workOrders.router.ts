@@ -140,11 +140,9 @@ export const workOrdersRouter = router({
             // Check that reservation is not scheduled for a future date
             const targetDate = res.scheduledStart
                 ? new Date(res.scheduledStart)
-                : res.scheduledDate
-                    ? new Date(res.scheduledDate)
-                    : res.requestedDate
-                        ? new Date(res.requestedDate)
-                        : null;
+                : res.requestedDate
+                    ? new Date(res.requestedDate)
+                    : null;
 
             if (targetDate) {
                 const now = new Date();

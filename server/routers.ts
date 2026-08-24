@@ -2823,11 +2823,9 @@ export const appRouter = router({
         // Check that reservation is not scheduled for a future date
         const targetDate = reservation.scheduledStart
           ? new Date(reservation.scheduledStart)
-          : reservation.scheduledDate
-            ? new Date(reservation.scheduledDate)
-            : reservation.requestedDate
-              ? new Date(reservation.requestedDate)
-              : null;
+          : reservation.requestedDate
+            ? new Date(reservation.requestedDate)
+            : null;
 
         if (targetDate) {
           const now = new Date();
