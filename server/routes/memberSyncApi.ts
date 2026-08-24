@@ -138,6 +138,28 @@ router.post("/push", requireSyncApiKey, async (req: Request, res: Response) => {
             });
         }
 
+        if (body?.resetBeforeSync === true) {
+            console.log(`[MemberSync API] resetBeforeSync requested by ${req.ip}. Cleaning existing members...`);
+            const db = await getDb();
+            if (db) {
+                await db.delete(berthAssignments);
+                await db.delete(landOccupancies);
+                await db.delete(landWaitingList);
+                await db.delete(waitingList);
+                await db.delete(workOrders);
+                await db.delete(reservations);
+                await db.delete(userCardEntries);
+                await db.delete(memberStatutoryRights);
+                await db.delete(memberMemberships);
+                await db.delete(memberLinks);
+                await db.delete(syncConflicts);
+                await db.delete(syncRuns);
+                await db.delete(vessels);
+                const deleted = await db.delete(users).where(ne(users.role, "admin")).returning({ id: users.id });
+                console.log(`[MemberSync API] resetBeforeSync completed. Deleted ${deleted.length} member users.`);
+            }
+        }
+
         console.log(`[MemberSync API] Received push payload with ${rows.length} CLAN03 rows from ${req.ip}`);
 
         const result = await processClan03Rows(rows, "push_api");

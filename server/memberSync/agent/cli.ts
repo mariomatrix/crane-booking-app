@@ -111,7 +111,10 @@ export async function executePushSync(): Promise<{ success: boolean; data?: any;
 
             const response = await axios.post(
                 remoteUrl,
-                { members: chunkRows },
+                { 
+                    members: chunkRows,
+                    resetBeforeSync: shouldReset && c === 0,
+                },
                 {
                     headers: {
                         "Content-Type": "application/json",
