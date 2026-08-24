@@ -439,9 +439,31 @@ export default function AdminUserCard() {
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        className="text-green-700 border-green-300 hover:bg-green-50 h-7 text-xs"
+                                                        className="text-green-700 border-green-300 hover:bg-green-50 h-7 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
                                                         onClick={() => completeMutation.mutate({ id: r.id })}
-                                                        disabled={completeMutation.isPending}
+                                                        disabled={
+                                                            completeMutation.isPending ||
+                                                            (() => {
+                                                                const dt = r.scheduledDate || r.scheduledStart || r.requestedDate;
+                                                                if (!dt) return false;
+                                                                const target = new Date(dt);
+                                                                const now = new Date();
+                                                                const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                                                                return target.getTime() > endOfToday.getTime();
+                                                            })()
+                                                        }
+                                                        title={
+                                                            (() => {
+                                                                const dt = r.scheduledDate || r.scheduledStart || r.requestedDate;
+                                                                if (!dt) return "";
+                                                                const target = new Date(dt);
+                                                                const now = new Date();
+                                                                const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                                                                return target.getTime() > endOfToday.getTime()
+                                                                    ? "Završavanje je moguće tek na dan termina ili nakon njega."
+                                                                    : "Označi rezervaciju kao izvršenu.";
+                                                            })()
+                                                        }
                                                     >
                                                         <CheckCircle2 className="h-3 w-3 mr-1" />Završi
                                                     </Button>

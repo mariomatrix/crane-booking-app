@@ -2820,6 +2820,27 @@ export const appRouter = router({
           });
         }
 
+        // Check that reservation is not scheduled for a future date
+        const targetDate = reservation.scheduledStart
+          ? new Date(reservation.scheduledStart)
+          : reservation.scheduledDate
+            ? new Date(reservation.scheduledDate)
+            : reservation.requestedDate
+              ? new Date(reservation.requestedDate)
+              : null;
+
+        if (targetDate) {
+          const now = new Date();
+          const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          if (targetDate.getTime() > endOfToday.getTime()) {
+            const dateStr = targetDate.toLocaleDateString("hr-HR");
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Nije moguće završiti rezervaciju koja je zakazana za budući datum (${dateStr}). Rezervaciju je moguće označiti kao završenu tek na dan termina ili nakon njega.`,
+            });
+          }
+        }
+
         const serviceType = reservation.serviceTypeId
           ? await getServiceTypeById(reservation.serviceTypeId)
           : null;

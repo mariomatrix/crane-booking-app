@@ -775,25 +775,40 @@ export default function AdminReservations() {
                         )}
                         {reservation.status === "approved" && (
                           <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setSelectedWorkOrderRes(reservation)}
-                              className="text-primary border-primary/40 hover:bg-primary/5 font-semibold"
-                            >
-                              <FileText className="h-3.5 w-3.5 mr-1" />
-                              Radni nalog
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => completeMutation.mutate({ id: reservation.id })}
-                              disabled={completeMutation.isPending}
-                              className="text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                              Završeno
-                            </Button>
+                            {(() => {
+                              const dt = reservation.scheduledStart || reservation.scheduledDate || reservation.requestedDate;
+                              const target = dt ? new Date(dt) : null;
+                              const now = new Date();
+                              const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                              const isFuture = target ? target.getTime() > endOfToday.getTime() : false;
+
+                              return (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setSelectedWorkOrderRes(reservation)}
+                                    disabled={isFuture}
+                                    title={isFuture ? "Radni nalog se može pokrenuti tek na dan termina ili nakon njega." : "Pokreni radni nalog"}
+                                    className="text-primary border-primary/40 hover:bg-primary/5 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    <FileText className="h-3.5 w-3.5 mr-1" />
+                                    Radni nalog
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => completeMutation.mutate({ id: reservation.id })}
+                                    disabled={completeMutation.isPending || isFuture}
+                                    title={isFuture ? "Završavanje je moguće tek na dan termina ili nakon njega." : "Označi rezervaciju kao izvršenu."}
+                                    className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                                    Završeno
+                                  </Button>
+                                </>
+                              );
+                            })()}
                             <Button
                               size="sm"
                               variant="outline"

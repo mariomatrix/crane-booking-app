@@ -132,6 +132,15 @@ export function WorkOrderExecutionDialog({
         });
     };
 
+    const resDateVal = (resDetails as any)?.scheduledStart || (resDetails as any)?.scheduledDate || (resDetails as any)?.requestedDate;
+    const isFuture = (() => {
+        if (!resDateVal) return false;
+        const target = new Date(resDateVal);
+        const now = new Date();
+        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        return target.getTime() > endOfToday.getTime();
+    })();
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-xl">
@@ -245,6 +254,14 @@ export function WorkOrderExecutionDialog({
                             </div>
                         ) : (
                             <div className="space-y-4">
+                                {isFuture && (
+                                    <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
+                                        <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
+                                        <span>
+                                            Termin je zakazan za budući datum ({new Date(resDateVal).toLocaleDateString("hr-HR")}). Radni nalog se može pokrenuti tek na dan termina ili nakon njega.
+                                        </span>
+                                    </div>
+                                )}
                                 <div className="p-4 bg-muted rounded-lg text-sm text-muted-foreground space-y-2">
                                     <p>
                                         Klikom na <strong>"Pokreni radni nalog"</strong> stvara se službeni broj naloga (npr. <span className="font-mono font-semibold text-foreground">RN-2026-XXXXX</span>), bilježi se početak operacije dizalice i priprema se obračun prema statusu korisnika.
@@ -281,8 +298,9 @@ export function WorkOrderExecutionDialog({
                     ) : (
                         <Button
                             onClick={handleStart}
-                            disabled={startMutation.isPending}
-                            className="bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5"
+                            disabled={startMutation.isPending || isFuture}
+                            className="bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={isFuture ? "Radni nalog se može pokrenuti tek na dan termina" : "Pokreni radni nalog"}
                         >
                             {startMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                             Pokreni radni nalog

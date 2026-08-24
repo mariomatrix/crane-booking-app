@@ -137,6 +137,27 @@ export const workOrdersRouter = router({
                 throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je otkazana ili odbijena." });
             }
 
+            // Check that reservation is not scheduled for a future date
+            const targetDate = res.scheduledStart
+                ? new Date(res.scheduledStart)
+                : res.scheduledDate
+                    ? new Date(res.scheduledDate)
+                    : res.requestedDate
+                        ? new Date(res.requestedDate)
+                        : null;
+
+            if (targetDate) {
+                const now = new Date();
+                const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                if (targetDate.getTime() > endOfToday.getTime()) {
+                    const dateStr = targetDate.toLocaleDateString("hr-HR");
+                    throw new TRPCError({
+                        code: "BAD_REQUEST",
+                        message: `Nije moguće pokrenuti radni nalog za rezervaciju koja je zakazana za budući datum (${dateStr}). Radni nalog se može pokrenuti tek na dan termina ili nakon njega.`,
+                    });
+                }
+            }
+
             // Check if active or completed work order already exists
             const [existing] = await db
                 .select()
