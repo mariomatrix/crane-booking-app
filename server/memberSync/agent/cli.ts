@@ -9,7 +9,9 @@
  * Pokretanje:
  *   pnpm sync:push
  */
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config();
+dotenv.config({ path: "C:/Users/Administrator/Documents/brod/.env" });
 import axios from "axios";
 import { fetchAllClan03Members } from "../mssqlQueries";
 import { closeMssqlPool, isMssqlConfigured } from "../mssqlClient";
@@ -21,7 +23,7 @@ export async function executePushSync(): Promise<{ success: boolean; data?: any;
     console.log("================================================================================");
 
     // 1. Provjera konfiguracije
-    const remoteUrl = process.env.REMOTE_SYNC_URL || "http://localhost:3000/api/v1/member-sync/push";
+    const remoteUrl = process.env.REMOTE_SYNC_URL || "https://dizalica.imagomatrix.com/api/v1/member-sync/push";
     const apiKey = process.env.SYNC_API_KEY || process.env.BILLING_API_KEY;
 
     if (!apiKey) {
