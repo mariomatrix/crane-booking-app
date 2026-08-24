@@ -54,56 +54,101 @@ export async function executePushSync(): Promise<{ success: boolean; data?: any;
             console.warn("⚠️  Nema pronađenih članova koji zadovoljavaju filter (VRSTA_C IN ('U','B') AND KLUB > 0).");
         }
 
-        // 3. Slanje paketa na udaljeni Coolify poslužitelj
-        console.log(`⏳ [2/2] Šaljem paket od ${rows.length} zapisa na ${remoteUrl}...`);
+        // 3. Slanje paketa na udaljeni Coolify poslužitelj u chunkovima
+        const CHUNK_SIZE = 500;
+        const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
+        console.log(`⏳ [2/2] Šaljem ${rows.length} zapisa u ${totalChunks} paketa (po ${CHUNK_SIZE}) na ${remoteUrl}...`);
+
+        const totalCounters = {
+            membersCreated: 0,
+            membersUpdated: 0,
+            membersDeactivated: 0,
+            vesselsCreated: 0,
+            vesselsUpdated: 0,
+            membershipsCreated: 0,
+            membershipsUpdated: 0,
+            conflictsDetected: 0,
+        };
+        const allErrors: string[] = [];
+        let overallStatus = "completed";
+        let lastSyncRunId = "";
         const pushStartTime = Date.now();
 
-        const response = await axios.post(
-            remoteUrl,
-            { members: rows },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-sync-api-key": apiKey,
-                },
-                timeout: 120_000, // 2 minute timeout za veći paket
-                maxContentLength: 100 * 1024 * 1024,
-                maxBodyLength: 100 * 1024 * 1024,
+        for (let c = 0; c < totalChunks; c++) {
+            const startIdx = c * CHUNK_SIZE;
+            const endIdx = Math.min(startIdx + CHUNK_SIZE, rows.length);
+            const chunkRows = rows.slice(startIdx, endIdx);
+            const percent = Math.round(((c + 1) / totalChunks) * 100);
+
+            process.stdout.write(`   [Paket ${c + 1}/${totalChunks}] Šaljem retke ${startIdx + 1} - ${endIdx} (${percent}%)... `);
+            const chunkStart = Date.now();
+
+            const response = await axios.post(
+                remoteUrl,
+                { members: chunkRows },
+                {
+                    headers: {
+                        "Content-Type": "application/json",
+                        "x-sync-api-key": apiKey,
+                    },
+                    timeout: 60_000,
+                }
+            );
+
+            const chunkDuration = Date.now() - chunkStart;
+            const resData = response.data;
+            lastSyncRunId = resData.syncRunId || lastSyncRunId;
+
+            if (resData.counters) {
+                totalCounters.membersCreated += resData.counters.membersCreated || 0;
+                totalCounters.membersUpdated += resData.counters.membersUpdated || 0;
+                totalCounters.membersDeactivated += resData.counters.membersDeactivated || 0;
+                totalCounters.vesselsCreated += resData.counters.vesselsCreated || 0;
+                totalCounters.vesselsUpdated += resData.counters.vesselsUpdated || 0;
+                totalCounters.membershipsCreated += resData.counters.membershipsCreated || 0;
+                totalCounters.membershipsUpdated += resData.counters.membershipsUpdated || 0;
+                totalCounters.conflictsDetected += resData.counters.conflictsDetected || 0;
             }
-        );
+
+            if (resData.errors && resData.errors.length > 0) {
+                allErrors.push(...resData.errors);
+            }
+            if (resData.status !== "completed") {
+                overallStatus = resData.status || "partial";
+            }
+
+            console.log(`OK (${chunkDuration} ms)`);
+        }
 
         const pushDuration = Date.now() - pushStartTime;
-        const result = response.data;
 
         console.log("");
         console.log("================================================================================");
         console.log("  REZULTAT SINKRONIZACIJE NA POSLUŽITELJU");
         console.log("================================================================================");
-        console.log(`  Status:             ${result.status === "completed" ? "✅ COMPLETED" : "⚠️ " + result.status}`);
-        console.log(`  Sync Run ID:        ${result.syncRunId}`);
-        console.log(`  Vrijeme obrade:     ${result.durationMs} ms (mreža: ${pushDuration} ms)`);
+        console.log(`  Status:             ${overallStatus === "completed" ? "✅ COMPLETED" : "⚠️ " + overallStatus}`);
+        console.log(`  Zadnji Sync Run ID: ${lastSyncRunId}`);
+        console.log(`  Ukupno vrijeme:     ${pushDuration} ms (${Math.round(pushDuration / 1000)}s)`);
         console.log("--------------------------------------------------------------------------------");
-        if (result.counters) {
-            console.log(`  Članovi novi (+):   ${result.counters.membersCreated}`);
-            console.log(`  Članovi ažurirani:  ${result.counters.membersUpdated}`);
-            console.log(`  Članovi neaktivni:  ${result.counters.membersDeactivated}`);
-            console.log(`  Plovila nova (+):   ${result.counters.vesselsCreated}`);
-            console.log(`  Plovila ažurirana:  ${result.counters.vesselsUpdated}`);
-            console.log(`  Članstva u klubu:   +${result.counters.membershipsCreated} / ~${result.counters.membershipsUpdated}`);
-            console.log(`  Konflikti (za pregled): ${result.counters.conflictsDetected}`);
-        }
-        if (result.errors && result.errors.length > 0) {
+        console.log(`  Članovi novi (+):   ${totalCounters.membersCreated}`);
+        console.log(`  Članovi ažurirani:  ${totalCounters.membersUpdated}`);
+        console.log(`  Članovi neaktivni:  ${totalCounters.membersDeactivated}`);
+        console.log(`  Plovila nova (+):   ${totalCounters.vesselsCreated}`);
+        console.log(`  Plovila ažurirana:  ${totalCounters.vesselsUpdated}`);
+        console.log(`  Članstva u klubu:   +${totalCounters.membershipsCreated} / ~${totalCounters.membershipsUpdated}`);
+        console.log(`  Konflikti (pregled): ${totalCounters.conflictsDetected}`);
+        if (allErrors.length > 0) {
             console.log("--------------------------------------------------------------------------------");
-            console.log(`  Uočene greške (${result.errors.length}):`);
-            result.errors.slice(0, 5).forEach((e: string, i: number) => console.log(`   ${i + 1}. ${e}`));
-            if (result.errors.length > 5) {
-                console.log(`   ... i još ${result.errors.length - 5} grešaka.`);
+            console.log(`  Uočene greške (${allErrors.length}):`);
+            allErrors.slice(0, 5).forEach((e: string, i: number) => console.log(`   ${i + 1}. ${e}`));
+            if (allErrors.length > 5) {
+                console.log(`   ... i još ${allErrors.length - 5} grešaka.`);
             }
         }
         console.log("================================================================================");
         console.log("✅ Sinkronizacija uspješno završena.");
 
-        return { success: true, data: result };
+        return { success: true, data: { status: overallStatus, counters: totalCounters } };
     } catch (err: any) {
         console.error("");
         console.error("❌ POGREŠKA TIJEKOM SINKRONIZACIJE:");
