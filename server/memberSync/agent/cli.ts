@@ -66,7 +66,9 @@ export async function executePushSync(): Promise<{ success: boolean; data?: any;
                     {
                         headers: {
                             "Content-Type": "application/json",
+                            "x-api-key": apiKey,
                             "x-sync-api-key": apiKey,
+                            "Authorization": `Bearer ${apiKey}`,
                         },
                         timeout: 30_000,
                     }
@@ -113,7 +115,9 @@ export async function executePushSync(): Promise<{ success: boolean; data?: any;
                 {
                     headers: {
                         "Content-Type": "application/json",
+                        "x-api-key": apiKey,
                         "x-sync-api-key": apiKey,
+                        "Authorization": `Bearer ${apiKey}`,
                     },
                     timeout: 60_000,
                 }
