@@ -111,6 +111,27 @@ router.post("/reset-members", requireSyncApiKey, async (req: Request, res: Respo
 });
 
 /**
+ * @route POST /api/v1/member-sync/seed-akvatorij
+ * Inicijalizira klubove, gatove i svih 811 fizičkih vezova ako nedostaju
+ */
+router.post("/seed-akvatorij", requireSyncApiKey, async (req: Request, res: Response) => {
+    try {
+        const { ensureAkvatorijSeeded } = await import("../memberSync/seedAkvatorijHelper");
+        await ensureAkvatorijSeeded();
+        res.json({
+            success: true,
+            message: "Akvatorij i svih 811 vezova uspješno inicijalizirani.",
+        });
+    } catch (err: any) {
+        console.error("[MemberSync API] Error seeding akvatorij:", err);
+        res.status(500).json({
+            success: false,
+            error: `Greška pri inicijalizaciji akvatorija: ${err?.message || err}`,
+        });
+    }
+});
+
+/**
  * @route POST /api/v1/member-sync/push
  * Prijem paketa CLAN03 redova s lokalnog računala i pokretanje sinkronizacije
  */

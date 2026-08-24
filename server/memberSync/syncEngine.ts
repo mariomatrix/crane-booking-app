@@ -27,6 +27,7 @@ import {
     normalizeName,
 } from "./utils";
 import type { LegacyClan03Row, SyncCounters, FullSyncResult } from "./types";
+import { ensureAkvatorijSeeded } from "./seedAkvatorijHelper";
 
 const BATCH_SIZE = 100;       // Veličina bloka
 const TIME_BREAK_MS = 20;     // Time-break (pauza između blokova za rasterećenje I/O i baze)
@@ -87,8 +88,14 @@ export async function processClan03Rows(
     try {
         // 2. Preload Cache u memoriju za instantno mapiranje bez nepotrebnih upita
         console.log("⚡ [MemberSync] Preloading cache (vezovi, linkovi, OIB-ovi)...");
-        const [allBerths, allLinks, allUsersWithOib, allUsersWithEmail] = await Promise.all([
-            db.select({ id: berths.id, code: berths.code }).from(berths),
+        let allBerths = await db.select({ id: berths.id, code: berths.code }).from(berths);
+        if (allBerths.length < 811) {
+            console.log(`[MemberSync] Pronađeno samo ${allBerths.length} vezova. Pokrećem auto-seed 811 vezova...`);
+            await ensureAkvatorijSeeded(db);
+            allBerths = await db.select({ id: berths.id, code: berths.code }).from(berths);
+        }
+
+        const [allLinks, allUsersWithOib, allUsersWithEmail] = await Promise.all([
             db.select({ legacyMatBroj: memberLinks.legacyMatBroj, userId: memberLinks.userId }).from(memberLinks),
             db.select({ id: users.id, oib: users.oib }).from(users).where(sql`${users.oib} IS NOT NULL`),
             db.select({ id: users.id, email: users.email }).from(users).where(sql`${users.email} IS NOT NULL`),
