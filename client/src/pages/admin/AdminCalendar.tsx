@@ -41,11 +41,11 @@ import { CalendarIcon } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 
 const STATUS_COLORS: Record<string, string> = {
-    pending: "#f59e0b",   // Amber
-    approved: "#059669",  // Emerald 600 (Darker/more vibrant green)
-    completed: "#16a34a", // Green 600
-    rejected: "#dc2626",  // Red 600
-    cancelled: "#4b5563", // Gray 600
+    pending: "#f59e0b",   // Amber (Na čekanju)
+    approved: "#059669",  // Emerald 600 (Odobreno)
+    completed: "#0ea5e9", // Svijetlo plava (Sky 500 - Izvršeno/Završeno)
+    rejected: "#dc2626",  // Red 600 (Odbijeno)
+    cancelled: "#4b5563", // Gray 600 (Otkazano)
 };
 
 const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
@@ -64,7 +64,7 @@ export default function AdminCalendar() {
     // State
     const [viewMode, setViewMode] = useState<'master' | 'timeGridWeek' | 'dayGridMonth'>('master');
     const [viewDate, setViewDate] = useState<Date>(startOfDay(new Date()));
-    const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved"]);
+    const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved", "completed"]);
     const [selectedUser, setSelectedUser] = useState<string>(() => {
         const params = new URLSearchParams(searchString);
         return params.get("userId") || "all";
@@ -1127,6 +1127,7 @@ export default function AdminCalendar() {
                                     <div className="flex items-center justify-between font-bold text-[10px] truncate">
                                         <span className="truncate">{p.user}</span>
                                         {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse shrink-0 ml-0.5" />}
+                                        {p.status === 'completed' && <CheckCircle2 className="h-3 w-3 shrink-0 ml-0.5 text-white/95" />}
                                     </div>
                                     {p.serviceTypeName && (
                                         <div className="text-[9px] font-semibold opacity-95 truncate">

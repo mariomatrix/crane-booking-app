@@ -439,8 +439,8 @@ export async function getReservationsForCalendar(start?: Date, end?: Date, inclu
   const db = await getDb();
   if (!db) return [];
   const statusConditions = includePending
-    ? [or(eq(reservations.status, "approved"), eq(reservations.status, "pending"))]
-    : [eq(reservations.status, "approved")];
+    ? [or(eq(reservations.status, "approved"), eq(reservations.status, "pending"), eq(reservations.status, "completed"))]
+    : [or(eq(reservations.status, "approved"), eq(reservations.status, "completed"))];
 
   const conditions = [...statusConditions];
   if (start) conditions.push(gte(reservations.scheduledStart, start));
