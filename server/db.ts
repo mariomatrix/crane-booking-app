@@ -24,6 +24,8 @@ import {
   memberMemberships,
   syncRuns,
   syncConflicts,
+  berthAssignments,
+  workOrders,
   type InsertUser,
   type InsertCrane,
   type InsertReservation,
@@ -309,10 +311,28 @@ export async function updateVessel(id: string, ownerId: string, data: Partial<In
     .where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
 }
 
-export async function deleteVessel(id: string, ownerId: string) {
+export async function deleteVessel(id: string, ownerId?: string) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
-  await db.delete(vessels).where(and(eq(vessels.id, id), eq(vessels.ownerId, ownerId)));
+
+  // 1. Ukloni dodjele veza u akvatoriju za ovo plovilo
+  await db.delete(berthAssignments).where(eq(berthAssignments.vesselId, id));
+
+  // 2. Postavi vesselId na NULL u povijesnim zapisima (rezervacije i radni nalozi čuvaju snapshot naziva i registracije)
+  await db.update(reservations).set({ vesselId: null }).where(eq(reservations.vesselId, id));
+  await db.update(workOrders).set({ vesselId: null }).where(eq(workOrders.vesselId, id));
+  await db.update(waitingList).set({ vesselId: null }).where(eq(waitingList.vesselId, id));
+
+  // 3. Ukloni suhi vez / evidenciju na kopnu
+  await db.delete(landOccupancies).where(eq(landOccupancies.vesselId, id));
+  await db.delete(landWaitingList).where(eq(landWaitingList.vesselId, id));
+
+  // 4. Izbriši plovilo
+  const condition = ownerId
+    ? and(eq(vessels.id, id), eq(vessels.ownerId, ownerId))
+    : eq(vessels.id, id);
+
+  await db.delete(vessels).where(condition);
 }
 
 // ─── Reservations ─────────────────────────────────────────────────────
