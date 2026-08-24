@@ -8,12 +8,21 @@ import { TRPCError } from "@trpc/server";
 import { getDb } from "../db";
 import {
     users,
+    vessels,
     memberLinks,
     memberMemberships,
     syncRuns,
     syncConflicts,
+    berthAssignments,
+    landOccupancies,
+    landWaitingList,
+    waitingList,
+    workOrders,
+    reservations,
+    userCardEntries,
+    memberStatutoryRights,
 } from "../../drizzle/schema";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and, sql, ne } from "drizzle-orm";
 import { triggerScheduledSync, getMemberSyncStatus } from "./scheduler";
 import { testMssqlConnection } from "./mssqlQueries";
 
@@ -27,6 +36,35 @@ export const memberSyncRouter = router({
     testConnection: adminProcedure.mutation(async () => {
         const result = await testMssqlConnection();
         return result;
+    }),
+
+    // ─── Reset članova ───────────────────────────────────────────────────
+    resetMembers: adminProcedure.mutation(async () => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        await db.delete(berthAssignments);
+        await db.delete(landOccupancies);
+        await db.delete(landWaitingList);
+        await db.delete(waitingList);
+        await db.delete(workOrders);
+        await db.delete(reservations);
+        await db.delete(userCardEntries);
+        await db.delete(memberStatutoryRights);
+        await db.delete(memberMemberships);
+        await db.delete(memberLinks);
+        await db.delete(syncConflicts);
+        await db.delete(syncRuns);
+        await db.delete(vessels);
+
+        const deletedUsers = await db.delete(users)
+            .where(ne(users.role, "admin"))
+            .returning({ id: users.id });
+
+        return {
+            success: true,
+            deletedCount: deletedUsers.length,
+        };
     }),
 
     // ─── Ručno pokretanje sinkronizacije ──────────────────────────────────
