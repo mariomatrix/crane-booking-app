@@ -39,7 +39,7 @@ import { useLang } from "@/contexts/LangContext";
 import { Loader2, Shield, ShieldAlert, Key, Trash2, Edit2, UserX, UserPlus, CalendarDays, Copy, Check, MailCheck, Upload } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { isValidOib } from "@shared/oib";
+import { getOibError, isValidOib } from "@shared/oib";
 
 export default function AdminUsers() {
     const { t } = useLang();
@@ -286,9 +286,12 @@ export default function AdminUsers() {
 
     const handleUpdate = () => {
         if (!editUser) return;
-        if (editOib && editOib.length === 11 && !isValidOib(editOib)) {
-            setEditOibError("OIB nije ispravan.");
-            return;
+        if (editOib) {
+            const err = getOibError(editOib);
+            if (err) {
+                setEditOibError(err);
+                return;
+            }
         }
         adminUpdateUser.mutate({
             id: editUser.id,
@@ -313,9 +316,12 @@ export default function AdminUsers() {
             }
         }
 
-        if (newOib && newOib.length === 11 && !isValidOib(newOib)) {
-            setNewOibError("Unesite ispravan OIB (11 znamenki).");
-            return;
+        if (newOib) {
+            const err = getOibError(newOib);
+            if (err) {
+                setNewOibError(err);
+                return;
+            }
         }
 
         adminCreateUser.mutate({
@@ -684,7 +690,7 @@ export default function AdminUsers() {
                                     const val = e.target.value.replace(/\D/g, "").slice(0, 11);
                                     setEditOib(val);
                                     if (val.length === 11) {
-                                        setEditOibError(isValidOib(val) ? null : "OIB nije ispravan.");
+                                        setEditOibError(getOibError(val));
                                     } else {
                                         setEditOibError(null);
                                     }
@@ -866,7 +872,7 @@ export default function AdminUsers() {
                                         const val = e.target.value.replace(/\D/g, "").slice(0, 11);
                                         setNewOib(val);
                                         if (val.length === 11) {
-                                            setNewOibError(isValidOib(val) ? null : "Neispravna kontrolna znamenka");
+                                            setNewOibError(getOibError(val));
                                         } else {
                                             setNewOibError(null);
                                         }

@@ -206,7 +206,7 @@ export default function AdminUserCard() {
                         </span>
                         <span className="flex items-center gap-1.5">
                             <Clock className="h-3.5 w-3.5" />
-                            Registriran: {user.createdAt ? new Date(user.createdAt).toLocaleDateString("hr-HR") : "—"}
+                            Registriran: {formatAppDate(user.createdAt, lang)}
                         </span>
                     </div>
                 </div>
@@ -238,7 +238,7 @@ export default function AdminUserCard() {
                                     <span className="text-muted-foreground text-sm">Iskorišteno</span>
                                 )}
                                 <span className="text-xs font-normal text-muted-foreground">
-                                    Vrijedi do {new Date(userCardData.rights.liftExpiresAt).toLocaleDateString("hr-HR")}
+                                    Vrijedi do {formatAppDate(userCardData.rights.liftExpiresAt, lang)}
                                 </span>
                             </CardTitle>
                         </CardHeader>
@@ -258,7 +258,7 @@ export default function AdminUserCard() {
                                     <span className="text-muted-foreground text-sm">Iskorišteno</span>
                                 )}
                                 <span className="text-xs font-normal text-muted-foreground">
-                                    Vrijedi do {new Date(userCardData.rights.lowerExpiresAt).toLocaleDateString("hr-HR")}
+                                    Vrijedi do {formatAppDate(userCardData.rights.lowerExpiresAt, lang)}
                                 </span>
                             </CardTitle>
                         </CardHeader>
@@ -307,7 +307,7 @@ export default function AdminUserCard() {
                                 {userCardData.entries.map((entry: any) => (
                                     <TableRow key={entry.id}>
                                         <TableCell className="text-xs font-medium">
-                                            {new Date(entry.eventDate).toLocaleDateString("hr-HR")}
+                                            {formatAppDate(entry.eventDate, lang)}
                                         </TableCell>
                                         <TableCell>
                                             {entry.entryType === "statutory_quota_used" ? (

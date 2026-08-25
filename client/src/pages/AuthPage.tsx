@@ -8,7 +8,7 @@ import { useLang } from "@/contexts/LangContext";
 import { Anchor, Loader2, ArrowLeft } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
-import { isValidOib } from "@shared/oib";
+import { getOibError } from "@shared/oib";
 
 type AuthMode = "login" | "register" | "forgotPassword" | "resetPassword" | "verifyEmail";
 
@@ -104,8 +104,9 @@ export default function AuthPage() {
                 toast.error("Morate prihvatiti Uvjete korištenja i Politiku privatnosti za registraciju.");
                 return;
             }
-            if (!oib || oib.length !== 11 || !isValidOib(oib)) {
-                setOibError("Unesite ispravan OIB (11 znamenki).");
+            const err = getOibError(oib);
+            if (err) {
+                setOibError(err);
                 return;
             }
             registerMutation.mutate({
@@ -231,7 +232,7 @@ export default function AuthPage() {
                                                 const val = e.target.value.replace(/\D/g, "").slice(0, 11);
                                                 setOib(val);
                                                 if (val.length === 11) {
-                                                    setOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
+                                                    setOibError(getOibError(val));
                                                 } else {
                                                     setOibError(null);
                                                 }

@@ -39,6 +39,10 @@ import ReportSchedule from "@/pages/admin/reports/ReportSchedule";
 import ReportUtilization from "@/pages/admin/reports/ReportUtilization";
 import ReportCraneLog from "@/pages/admin/reports/ReportCraneLog";
 import ReportMemberFeeAdjustments from "@/pages/admin/reports/ReportMemberFeeAdjustments";
+import ReportUsers from "@/pages/admin/reports/ReportUsers";
+import ReportOperations from "@/pages/admin/reports/ReportOperations";
+import ReportLandOccupancy from "@/pages/admin/reports/ReportLandOccupancy";
+import ReportWaitingList from "@/pages/admin/reports/ReportWaitingList";
 import AdminWorkOrders from "@/pages/admin/AdminWorkOrders";
 import AdminPriceList from "@/pages/admin/AdminPriceList";
 import AdminAkvatorijMap from "@/pages/admin/AdminAkvatorijMap";
@@ -141,6 +145,18 @@ function Router() {
       </Route>
       <Route path="/admin/reports/member-fee-adjustments">
         <AdminLayout><ReportMemberFeeAdjustments /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/users">
+        <AdminLayout><ReportUsers /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/operations">
+        <AdminLayout><ReportOperations /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/land-occupancy">
+        <AdminLayout><ReportLandOccupancy /></AdminLayout>
+      </Route>
+      <Route path="/admin/reports/waiting-list">
+        <AdminLayout><ReportWaitingList /></AdminLayout>
       </Route>
 
       <Route path="/404" component={NotFound} />

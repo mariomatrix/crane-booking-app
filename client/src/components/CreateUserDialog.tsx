@@ -8,7 +8,7 @@ import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { isValidOib } from "@shared/oib";
+import { getOibError, isValidOib } from "@shared/oib";
 
 interface CreateUserDialogProps {
     open: boolean;
@@ -71,8 +71,9 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
             toast.error("Ime i prezime su obavezni.");
             return;
         }
-        if (!oib || oib.length !== 11 || !isValidOib(oib)) {
-            setOibError("Unesite ispravan OIB (11 znamenki).");
+        const err = getOibError(oib);
+        if (err) {
+            setOibError(err);
             return;
         }
 
@@ -150,7 +151,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                                     const val = e.target.value.replace(/\D/g, "").slice(0, 11);
                                     setOib(val);
                                     if (val.length === 11) {
-                                        setOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
+                                        setOibError(getOibError(val));
                                     } else {
                                         setOibError(null);
                                     }

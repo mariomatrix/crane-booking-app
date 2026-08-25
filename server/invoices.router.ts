@@ -42,7 +42,34 @@ export const invoicesRouter = router({
             const db = await getDb();
             if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
 
-            const query = db
+            const conditions = [];
+
+            if (input?.paymentStatus && input.paymentStatus !== "ALL") {
+                conditions.push(eq(invoices.paymentStatus, input.paymentStatus));
+            }
+
+            if (input?.invoiceType && input.invoiceType !== "ALL") {
+                conditions.push(eq(invoices.invoiceType, input.invoiceType));
+            }
+
+            if (input?.searchQuery?.trim()) {
+                const q = `%${input.searchQuery.trim()}%`;
+                conditions.push(
+                    or(
+                        ilike(invoices.invoiceNumber, q),
+                        ilike(users.name, q),
+                        ilike(users.firstName, q),
+                        ilike(users.lastName, q),
+                        ilike(users.oib, q),
+                        ilike(vessels.registration, q),
+                        ilike(vessels.name, q)
+                    )
+                );
+            }
+
+            const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+            const baseQuery = db
                 .select({
                     id: invoices.id,
                     invoiceNumber: invoices.invoiceNumber,
@@ -76,43 +103,24 @@ export const invoicesRouter = router({
                 })
                 .from(invoices)
                 .innerJoin(users, eq(invoices.userId, users.id))
-                .leftJoin(vessels, eq(invoices.vesselId, vessels.id))
+                .leftJoin(vessels, eq(invoices.vesselId, vessels.id));
+
+            const filteredInvoices = await (whereClause ? baseQuery.where(whereClause) : baseQuery)
                 .orderBy(desc(invoices.issueDate))
                 .limit(input?.limit || 50)
                 .offset(input?.offset || 0);
 
-            const allInvoices = await query;
-
-            // Filtriranje po searchu i statusu ako je primijenjeno
-            let filtered = allInvoices;
-            if (input?.paymentStatus && input.paymentStatus !== "ALL") {
-                filtered = filtered.filter((inv) => inv.paymentStatus === input.paymentStatus);
-            }
-            if (input?.invoiceType && input.invoiceType !== "ALL") {
-                filtered = filtered.filter((inv) => inv.invoiceType === input.invoiceType);
-            }
-            if (input?.searchQuery?.trim()) {
-                const q = input.searchQuery.toLowerCase().trim();
-                filtered = filtered.filter((inv) => 
-                    inv.invoiceNumber.toLowerCase().includes(q) ||
-                    inv.userName?.toLowerCase().includes(q) ||
-                    inv.userOib?.includes(q) ||
-                    inv.vesselRegistration?.toLowerCase().includes(q) ||
-                    inv.vesselName?.toLowerCase().includes(q)
-                );
-            }
-
             // Agregatne statistike
             const stats = {
-                totalCount: filtered.length,
-                totalGrossSum: filtered.reduce((acc, inv) => acc + Number(inv.totalGrossAmount), 0),
-                totalPaidSum: filtered.reduce((acc, inv) => acc + Number(inv.paidAmount), 0),
-                unpaidCount: filtered.filter((inv) => inv.paymentStatus === "unpaid").length,
-                paidCount: filtered.filter((inv) => inv.paymentStatus === "paid").length,
+                totalCount: filteredInvoices.length,
+                totalGrossSum: filteredInvoices.reduce((acc, inv) => acc + Number(inv.totalGrossAmount || 0), 0),
+                totalPaidSum: filteredInvoices.reduce((acc, inv) => acc + Number(inv.paidAmount || 0), 0),
+                unpaidCount: filteredInvoices.filter((inv) => inv.paymentStatus === "unpaid").length,
+                paidCount: filteredInvoices.filter((inv) => inv.paymentStatus === "paid").length,
             };
 
             return {
-                invoices: filtered,
+                invoices: filteredInvoices,
                 stats,
             };
         }),
