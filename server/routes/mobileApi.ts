@@ -221,6 +221,8 @@ router.get("/schedule/today", requireMobileAuth, async (req: AuthenticatedReques
             scheduledStart: r.reservation.scheduledStart,
             scheduledEnd: r.reservation.scheduledEnd,
             durationMin: r.reservation.durationMin,
+            requestedDate: r.reservation.requestedDate,
+            requestedTimeSlot: r.reservation.requestedTimeSlot,
             workOrderId: wOrder?.id || null,
             workOrderNumber: wOrder?.orderNumber || null,
             workOrderStatus: wOrder?.status || null,

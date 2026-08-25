@@ -45,6 +45,8 @@ interface TaskItem {
     scheduledStart: string;
     scheduledEnd: string;
     durationMin: number;
+    requestedDate?: string | null;
+    requestedTimeSlot?: string | null;
     workOrderId?: string | null;
     workOrderNumber?: string | null;
     workOrderStatus?: string | null;
@@ -636,9 +638,22 @@ export default function MobileOperatorApp() {
                                 </div>
                             ) : (
                                 filteredTasks.map(t => {
-                                    const timeStr = t.scheduledStart
-                                        ? new Date(t.scheduledStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                        : "—";
+                                    let timeStr = "—";
+                                    if (t.scheduledStart) {
+                                        try {
+                                            timeStr = new Date(t.scheduledStart).toLocaleTimeString("hr-HR", {
+                                                timeZone: "Europe/Zagreb",
+                                                hour: "2-digit",
+                                                minute: "2-digit",
+                                            });
+                                        } catch {
+                                            timeStr = new Date(t.scheduledStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                        }
+                                    } else if (t.requestedTimeSlot) {
+                                        timeStr = t.requestedTimeSlot;
+                                    } else {
+                                        timeStr = "Termin na čekanju";
+                                    }
 
                                     return (
                                         <div
