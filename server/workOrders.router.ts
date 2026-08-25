@@ -185,8 +185,8 @@ export const workOrdersRouter = router({
             const currentYear = new Date().getFullYear();
             const orderNumber = await generateWorkOrderNumber(db, currentYear);
 
-            // Determine if user is regular member or external
-            const isMember = user.role === "user" && !user.isLegalEntity;
+            // Determine if user is regular club member or external commercial client
+            const isMember = (user.clientCategory || "member") === "member";
             const clientType: "member" | "external" = isMember ? "member" : "external";
 
             // Determine operation type (vađenje ili spuštanje)

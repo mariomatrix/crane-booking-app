@@ -23,10 +23,14 @@ export const userCardRouter = router({
 
             const userVessels = await db.select().from(vessels).where(eq(vessels.ownerId, user.id));
 
-            // Fetch or create statutory rights
+            // Fetch or create statutory rights only for members
+            const isMember = (user.clientCategory || "member") === "member";
             const currentYear = new Date().getFullYear();
-            let [rights] = await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, user.id)).limit(1);
-            if (!rights && user.role === "user" && !user.isLegalEntity) {
+            let [rights] = isMember
+                ? await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, user.id)).limit(1)
+                : [null];
+
+            if (!rights && isMember) {
                 const expiresAt = `${currentYear + 1}-12-31`;
                 [rights] = await db.insert(memberStatutoryRights).values({
                     userId: user.id,
@@ -67,6 +71,7 @@ export const userCardRouter = router({
                     phone: user.phone,
                     oib: user.oib,
                     isLegalEntity: user.isLegalEntity,
+                    clientCategory: user.clientCategory || "member",
                     companyName: user.companyName,
                     address: user.address,
                     city: user.city,
@@ -75,7 +80,7 @@ export const userCardRouter = router({
                     userStatus: user.userStatus,
                     createdAt: user.createdAt,
                 },
-                rights: rights || null,
+                rights: isMember ? (rights || null) : null,
                 vessels: userVessels,
                 entries,
             };

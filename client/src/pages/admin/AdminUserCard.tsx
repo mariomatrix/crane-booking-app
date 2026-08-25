@@ -205,6 +205,17 @@ export default function AdminUserCard() {
                             <Badge variant="secondary">{user.role}</Badge>
                         </span>
                         <span className="flex items-center gap-1.5">
+                            {((user as any).clientCategory || userCardData?.user?.clientCategory) === "commercial" ? (
+                                <Badge className="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300">
+                                    💼 Komercijalni korisnik
+                                </Badge>
+                            ) : (
+                                <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                    ⚓ Član društva
+                                </Badge>
+                            )}
+                        </span>
+                        <span className="flex items-center gap-1.5">
                             <Clock className="h-3.5 w-3.5" />
                             Registriran: {user.createdAt ? new Date(user.createdAt).toLocaleDateString("hr-HR") : "—"}
                         </span>
@@ -221,8 +232,8 @@ export default function AdminUserCard() {
                 </div>
             </div>
 
-            {/* Statutarni Semafor Prava (za članove) */}
-            {(userCardData?.user?.role || user.role) === "user" && !userCardData?.user?.isLegalEntity && userCardData?.rights && (
+            {/* Statutarni Semafor Prava (za članove društva) */}
+            {((user as any).clientCategory || userCardData?.user?.clientCategory || "member") === "member" && userCardData?.rights && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Card className="border-l-4 border-l-emerald-500 bg-emerald-500/5">
                         <CardHeader className="p-4 pb-2">
@@ -275,12 +286,27 @@ export default function AdminUserCard() {
                                         <AlertCircle className="h-5 w-5" /> {userCardData.rights.pendingFeeAdjustmentsCount} stavka zaduženja
                                     </span>
                                 ) : (
-                                    <span className="text-muted-foreground text-sm">Nema zaduženja (0)</span>
+                                    <span className="text-muted-foreground text-sm font-normal">Nema zaduženja</span>
                                 )}
                             </CardTitle>
                         </CardHeader>
                     </Card>
                 </div>
+            )}
+
+            {/* Komercijalni status banner */}
+            {((user as any).clientCategory || userCardData?.user?.clientCategory) === "commercial" && (
+                <Card className="border-l-4 border-l-amber-500 bg-amber-500/5 p-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-100 dark:bg-amber-900/50 rounded-lg text-amber-700 dark:text-amber-300 font-bold text-lg">
+                            💼
+                        </div>
+                        <div>
+                            <h4 className="font-semibold text-sm text-amber-900 dark:text-amber-200">Komercijalni / Vanjski klijent</h4>
+                            <p className="text-xs text-muted-foreground">Korisnik nema pravo na besplatne dizaličke operacije kroz članarinu. Svaka dizalička operacija automatski se obračunava i naplaćuje prema komercijalnom cjeniku u radnom nalogu.</p>
+                        </div>
+                    </div>
+                </Card>
             )}
 
             {/* Kronološki Karton Radnji i Zaduženja */}

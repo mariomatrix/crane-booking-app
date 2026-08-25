@@ -52,6 +52,7 @@ export default function AdminUsers() {
     const [roleFilter, setRoleFilter] = useState("user");
     const [statusFilter, setStatusFilter] = useState("all");
     const [vesselFilter, setVesselFilter] = useState("all");
+    const [clientCategoryFilter, setClientCategoryFilter] = useState("all");
 
     useEffect(() => {
         const handler = setTimeout(() => {
@@ -67,7 +68,8 @@ export default function AdminUsers() {
         search: search.trim() !== "" ? search : undefined,
         role: roleFilter,
         status: statusFilter,
-        vesselFilter: vesselFilter
+        vesselFilter: vesselFilter,
+        clientCategory: clientCategoryFilter !== "all" ? clientCategoryFilter : undefined,
     }, {
         placeholderData: (prev) => prev
     });
@@ -89,10 +91,12 @@ export default function AdminUsers() {
     const [editOib, setEditOib] = useState("");
     const [editOibError, setEditOibError] = useState<string | null>(null);
     const [editRole, setEditRole] = useState<"user" | "admin" | "operator">("user");
+    const [editClientCategory, setEditClientCategory] = useState<"member" | "commercial">("member");
     const [showCreateDialog, setShowCreateDialog] = useState(false);
 
     // Create form state
     const [newIsLegalEntity, setNewIsLegalEntity] = useState(false);
+    const [newClientCategory, setNewClientCategory] = useState<"member" | "commercial">("member");
     const [newCompanyName, setNewCompanyName] = useState("");
     const [newContactPerson, setNewContactPerson] = useState("");
     const [newEmail, setNewEmail] = useState("");
@@ -154,6 +158,7 @@ export default function AdminUsers() {
 
     const resetCreateForm = () => {
         setNewIsLegalEntity(false);
+        setNewClientCategory("member");
         setNewCompanyName("");
         setNewContactPerson("");
         setNewFirstName("");
@@ -254,7 +259,7 @@ export default function AdminUsers() {
 
     const adminCreateUser = trpc.user.create.useMutation({
         onSuccess: () => {
-            toast.success("Korisnik uspješno spremljen!");
+            toast.success("Korisnik je uspješno kreiran.");
             setShowCreateDialog(false);
             resetCreateForm();
             utils.user.list.invalidate();
@@ -266,7 +271,7 @@ export default function AdminUsers() {
 
     const adminVerifyEmail = trpc.user.verifyEmail.useMutation({
         onSuccess: () => {
-            toast.success("Email korisnika je verificiran.");
+            toast.success("Email korisnika je uspješno verificiran.");
             utils.user.list.invalidate();
         },
         onError: (err: any) => {
@@ -282,6 +287,7 @@ export default function AdminUsers() {
         setEditOib(user.oib || "");
         setEditOibError(null);
         setEditRole(user.role);
+        setEditClientCategory(user.clientCategory || "member");
     };
 
     const handleUpdate = () => {
@@ -295,6 +301,7 @@ export default function AdminUsers() {
             firstName: editFirstName,
             lastName: editLastName,
             phone: editPhone,
+            clientCategory: editClientCategory,
             oib: editOib || undefined,
             role: editRole,
         });
@@ -320,6 +327,7 @@ export default function AdminUsers() {
 
         adminCreateUser.mutate({
             isLegalEntity: newIsLegalEntity,
+            clientCategory: newClientCategory,
             companyName: newIsLegalEntity ? newCompanyName.trim() : undefined,
             contactPerson: newIsLegalEntity ? newContactPerson.trim() : undefined,
             firstName: !newIsLegalEntity ? newFirstName.trim() : undefined,
@@ -410,6 +418,25 @@ export default function AdminUsers() {
                             </div>
                         </div>
                         <div className="w-full md:w-[160px]">
+                            <Label className="text-xs font-semibold mb-1 block">Kategorija</Label>
+                            <Select
+                                value={clientCategoryFilter}
+                                onValueChange={(val) => {
+                                    setClientCategoryFilter(val);
+                                    setPage(1);
+                                }}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Sve kategorije</SelectItem>
+                                    <SelectItem value="member">Član društva</SelectItem>
+                                    <SelectItem value="commercial">Komercijala</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="w-full md:w-[150px]">
                             <Label className="text-xs font-semibold mb-1 block">Verifikacija</Label>
                             <Select
                                 value={statusFilter}
@@ -428,7 +455,7 @@ export default function AdminUsers() {
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="w-full md:w-[160px]">
+                        <div className="w-full md:w-[150px]">
                             <Label className="text-xs font-semibold mb-1 block">Plovilo</Label>
                             <Select
                                 value={vesselFilter}
@@ -454,6 +481,7 @@ export default function AdminUsers() {
                             <TableRow>
                                 <TableHead>OIB</TableHead>
                                 <TableHead>{t.admin.userName}</TableHead>
+                                <TableHead>Kategorija</TableHead>
                                 <TableHead>{t.admin.userEmail}</TableHead>
                                 <TableHead>{t.admin.userPhone}</TableHead>
                                 <TableHead>Registracija plovila</TableHead>
@@ -477,6 +505,17 @@ export default function AdminUsers() {
                                         >
                                             {user.name}
                                         </button>
+                                    </TableCell>
+                                    <TableCell>
+                                        {(user as any).clientCategory === "commercial" ? (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                                💼 Komercijala
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                ⚓ Član društva
+                                            </span>
+                                        )}
                                     </TableCell>
                                     <TableCell>
                                         <div className="flex flex-col">
@@ -697,6 +736,21 @@ export default function AdminUsers() {
                             {editOib.length === 11 && !editOibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}
                         </div>
                         <div className="space-y-2">
+                            <Label htmlFor="editClientCategory">Kategorija korisnika / Status članstva *</Label>
+                            <Select
+                                value={editClientCategory}
+                                onValueChange={(val) => setEditClientCategory(val as "member" | "commercial")}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="member">⚓ Član društva (Statutarna prava dizanja/spuštanja)</SelectItem>
+                                    <SelectItem value="commercial">💼 Komercijala (Vanjski klijent - naplata po cjeniku)</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
                             <Label htmlFor="editRole">{t.admin.userRole}</Label>
                             <Select
                                 value={editRole}
@@ -806,6 +860,35 @@ export default function AdminUsers() {
                                     <span>🏢 Pravna osoba / Tvrtka</span>
                                 </button>
                             </div>
+                        </div>
+
+                        {/* Member Category Selector */}
+                        <div className="space-y-1.5 p-2.5 bg-muted/40 rounded-xl border">
+                            <Label className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                                Kategorija korisnika / Status članstva *
+                            </Label>
+                            <Select
+                                value={newClientCategory}
+                                onValueChange={(val) => setNewClientCategory(val as "member" | "commercial")}
+                            >
+                                <SelectTrigger className="bg-white text-xs h-9">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="member">
+                                        <div className="text-left">
+                                            <div className="font-semibold text-xs text-emerald-700 dark:text-emerald-400">⚓ Član društva</div>
+                                            <div className="text-[11px] text-muted-foreground">Pravo na vađenje/spuštanje u sklopu članarine (0,00 €)</div>
+                                        </div>
+                                    </SelectItem>
+                                    <SelectItem value="commercial">
+                                        <div className="text-left">
+                                            <div className="font-semibold text-xs text-amber-700 dark:text-amber-400">💼 Komercijala / Vanjski korisnik</div>
+                                            <div className="text-[11px] text-muted-foreground">Nema besplatnih operacija (sve operacije se naplaćuju po cjeniku)</div>
+                                        </div>
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         {/* Name / Company Details */}

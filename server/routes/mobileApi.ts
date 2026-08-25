@@ -304,7 +304,7 @@ router.post("/reservations/:id/start-work", requireMobileAuth, async (req: Authe
 
     const currentYear = new Date().getFullYear();
     const orderNumber = await generateWorkOrderNumber(db, currentYear);
-    const isMember = clientUser?.role === "user" && !clientUser?.isLegalEntity;
+    const isMember = (clientUser?.clientCategory || "member") === "member";
     const clientType: "member" | "external" = isMember ? "member" : "external";
 
     let quotaOperationType: "lift" | "lower" | "none" = "none";

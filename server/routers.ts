@@ -698,12 +698,13 @@ export const appRouter = router({
             role: z.string().optional(),
             status: z.string().optional(),
             vesselFilter: z.string().optional(),
+            clientCategory: z.string().optional(),
           })
           .optional()
           .default({ page: 1, pageSize: 100 })
       )
       .query(async ({ input }) => {
-        const { page, pageSize, search, role, status, vesselFilter } = input;
+        const { page, pageSize, search, role, status, vesselFilter, clientCategory } = input;
         const offset = (page - 1) * pageSize;
         return listAllUsers(
           pageSize,
@@ -711,7 +712,8 @@ export const appRouter = router({
           search,
           role,
           status,
-          vesselFilter
+          vesselFilter,
+          clientCategory
         );
       }),
 
@@ -719,6 +721,7 @@ export const appRouter = router({
       .input(
         z.object({
           isLegalEntity: z.boolean().default(false),
+          clientCategory: z.enum(["member", "commercial"]).default("member"),
           firstName: z.string().optional(),
           lastName: z.string().optional(),
           companyName: z.string().optional(),
@@ -821,6 +824,7 @@ export const appRouter = router({
           lastName: input.lastName || undefined,
           name: fullName,
           isLegalEntity: input.isLegalEntity,
+          clientCategory: input.clientCategory,
           companyName: input.companyName || undefined,
           contactPerson: input.contactPerson || undefined,
           phone: input.phone || undefined,
@@ -1250,6 +1254,7 @@ export const appRouter = router({
           lastName: z.string().optional(),
           name: z.string().optional(),
           phone: z.string().optional(),
+          clientCategory: z.enum(["member", "commercial"]).optional(),
           oib: z
             .string()
             .length(11)

@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, ShieldCheck, DollarSign } from "lucide-react";
 import { isValidOib } from "@shared/oib";
 
 interface CreateUserDialogProps {
@@ -26,6 +26,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
     const [oib, setOib] = useState("");
     const [oibError, setOibError] = useState<string | null>(null);
     const [role, setRole] = useState<"user" | "admin" | "operator">("user");
+    const [clientCategory, setClientCategory] = useState<"member" | "commercial">("member");
 
     const utils = trpc.useUtils();
 
@@ -33,11 +34,10 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
         onSuccess: (data) => {
             toast.success("Korisnik uspješno kreiran.");
             
-            // Calculate name for local display
             const fullName = `${firstName} ${lastName}`.trim();
             
             onSuccess?.({
-                id: (data as any).userId || "", // or whatever is returned, wait we can invalidate or inspect what is returned
+                id: (data as any).userId || "",
                 name: fullName,
                 email,
                 phone,
@@ -52,6 +52,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
             setOib("");
             setOibError(null);
             setRole("user");
+            setClientCategory("member");
             
             utils.user.list.invalidate();
             onOpenChange(false);
@@ -83,6 +84,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
             phone: phone || undefined,
             oib,
             role,
+            clientCategory,
         });
     };
 
@@ -92,7 +94,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[425px]">
+            <DialogContent className="sm:max-w-[480px]">
                 <DialogHeader>
                     <DialogTitle>{t.admin.addNewUser}</DialogTitle>
                     <DialogDescription>
@@ -101,6 +103,39 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                 </DialogHeader>
                 <form onSubmit={handleCreate}>
                     <div className="py-4 space-y-4">
+                        {/* Member Category Selector */}
+                        <div className="space-y-2 p-3 bg-muted/40 rounded-lg border">
+                            <Label className="text-sm font-semibold">Kategorija korisnika (Status članstva) *</Label>
+                            <Select
+                                value={clientCategory}
+                                onValueChange={(val) => setClientCategory(val as "member" | "commercial")}
+                            >
+                                <SelectTrigger className="bg-background">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="member">
+                                        <div className="flex items-center gap-2">
+                                            <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                                            <div>
+                                                <div className="font-medium">Član društva</div>
+                                                <div className="text-xs text-muted-foreground">Pravo na vađenje/spuštanje u sklopu članarine</div>
+                                            </div>
+                                        </div>
+                                    </SelectItem>
+                                    <SelectItem value="commercial">
+                                        <div className="flex items-center gap-2">
+                                            <DollarSign className="h-4 w-4 text-amber-600" />
+                                            <div>
+                                                <div className="font-medium">Komercijala / Vanjski korisnik</div>
+                                                <div className="text-xs text-muted-foreground">Nema besplatnih operacija (naplata po cjeniku)</div>
+                                            </div>
+                                        </div>
+                                    </SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+
                         <div className="space-y-2">
                             <Label htmlFor="email">{t.auth.email} *</Label>
                             <Input

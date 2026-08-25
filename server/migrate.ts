@@ -21,6 +21,12 @@ async function runMigration() {
     // Ensure new user columns exist prior to ORM queries
     try {
         await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."client_category" AS ENUM('member', 'commercial');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
             ALTER TABLE "users" 
             ADD COLUMN IF NOT EXISTS "is_legal_entity" boolean DEFAULT false NOT NULL,
             ADD COLUMN IF NOT EXISTS "company_name" varchar(255),
@@ -28,6 +34,7 @@ async function runMigration() {
             ADD COLUMN IF NOT EXISTS "address" text,
             ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
             ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL,
+            ADD COLUMN IF NOT EXISTS "client_category" "public"."client_category" DEFAULT 'member' NOT NULL,
             ADD COLUMN IF NOT EXISTS "pin_code" varchar(10)
         `;
         console.log("User table columns verified.");

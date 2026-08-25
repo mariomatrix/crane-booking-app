@@ -74,6 +74,7 @@ export async function createLocalUser(data: {
   address?: string;
   city?: string;
   postalCode?: string;
+  clientCategory?: "member" | "commercial";
   mustChangePassword?: boolean;
 }) {
   const db = await getDb();
@@ -93,6 +94,7 @@ export async function createLocalUser(data: {
     address: data.address || null,
     city: data.city || "Split",
     postalCode: data.postalCode || "21000",
+    clientCategory: data.clientCategory || "member",
     mustChangePassword: data.mustChangePassword ?? false,
     loginMethod: "email",
     lastSignedIn: new Date(),
@@ -132,7 +134,8 @@ export async function listAllUsers(
   search?: string,
   role?: string,
   status?: string,
-  vesselFilter?: string
+  vesselFilter?: string,
+  clientCategory?: string
 ) {
   const db = await getDb();
   if (!db) return { data: [], total: 0 };
@@ -164,6 +167,10 @@ export async function listAllUsers(
     } else {
       conditions.push(eq(users.role, role as any));
     }
+  }
+
+  if (clientCategory && clientCategory !== "all") {
+    conditions.push(eq(users.clientCategory, clientCategory as any));
   }
 
   if (status && status !== "all") {

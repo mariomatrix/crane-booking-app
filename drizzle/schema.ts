@@ -16,6 +16,7 @@ import { sql } from "drizzle-orm";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 export const roleEnum = pgEnum("role", ["user", "operator", "admin"]);
+export const clientCategoryEnum = pgEnum("client_category", ["member", "commercial"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "suspended", "pending_verification"]);
 export const reservationStatusEnum = pgEnum("reservation_status", [
     "pending",
@@ -78,6 +79,7 @@ export const users = pgTable("users", {
     address: text("address"),
     city: varchar("city", { length: 100 }).default("Split").notNull(),
     postalCode: varchar("postal_code", { length: 20 }).default("21000").notNull(),
+    clientCategory: clientCategoryEnum("client_category").default("member").notNull(),
     role: roleEnum("role").default("user").notNull(),
     userStatus: userStatusEnum("user_status").default("active").notNull(),
     emailVerifiedAt: timestamp("email_verified_at"),
