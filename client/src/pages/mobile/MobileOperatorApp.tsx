@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
     Anchor,
     Search,
@@ -17,7 +17,9 @@ import {
     ChevronRight,
     Send,
     User,
-    Ship
+    Ship,
+    Loader2,
+    RefreshCw
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,6 +44,9 @@ interface TaskItem {
     scheduledStart: string;
     scheduledEnd: string;
     durationMin: number;
+    workOrderId?: string | null;
+    workOrderNumber?: string | null;
+    workOrderStatus?: string | null;
     vessel: {
         id: string;
         name: string;
@@ -55,6 +60,7 @@ interface TaskItem {
         id: string;
         name: string;
         phone: string | null;
+        email?: string | null;
     } | null;
     serviceType: {
         id: string;
@@ -66,8 +72,10 @@ interface TaskItem {
         name: string;
     } | null;
     dryBerthPlacement: {
+        zoneId?: string;
         zoneCode: string;
         zoneName: string;
+        spotNumber?: number | null;
     } | null;
 }
 
@@ -78,6 +86,17 @@ interface LandZone {
     totalSpots: number;
     occupiedSpots: number;
     availableSpots: number;
+}
+
+interface ChatMessage {
+    id: string;
+    reservationId: string;
+    senderId: string;
+    senderName: string | null;
+    senderRole: string;
+    body: string;
+    isRead: boolean;
+    createdAt: string;
 }
 
 export default function MobileOperatorApp() {
@@ -104,13 +123,17 @@ export default function MobileOperatorApp() {
     const [landZones, setLandZones] = useState<LandZone[]>([]);
     const [assigningTask, setAssigningTask] = useState<TaskItem | null>(null);
     const [selectedZoneId, setSelectedZoneId] = useState<string>("");
+    const [spotNumberInput, setSpotNumberInput] = useState<string>("");
     const [assignNote, setAssignNote] = useState("");
     const [isSubmittingAssign, setIsSubmittingAssign] = useState(false);
 
     // Chat / Message Dialog State
     const [messagingTask, setMessagingTask] = useState<TaskItem | null>(null);
+    const [taskMessages, setTaskMessages] = useState<ChatMessage[]>([]);
+    const [isLoadingMessages, setIsLoadingMessages] = useState(false);
     const [messageText, setMessageText] = useState("");
     const [isSendingMessage, setIsSendingMessage] = useState(false);
+    const chatScrollRef = useRef<HTMLDivElement>(null);
 
     // Load Profile when token exists
     useEffect(() => {
@@ -124,6 +147,19 @@ export default function MobileOperatorApp() {
         fetchSchedule();
         fetchLandZones();
     }, [token, selectedDate]);
+
+    // Fetch chat history when messaging task is selected
+    useEffect(() => {
+        if (!token || !messagingTask) return;
+        fetchTaskMessages(messagingTask.id);
+    }, [token, messagingTask]);
+
+    // Auto-scroll chat to bottom
+    useEffect(() => {
+        if (chatScrollRef.current) {
+            chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+        }
+    }, [taskMessages.length]);
 
     const fetchProfile = async () => {
         try {
@@ -173,6 +209,23 @@ export default function MobileOperatorApp() {
         }
     };
 
+    const fetchTaskMessages = async (reservationId: string) => {
+        setIsLoadingMessages(true);
+        try {
+            const res = await fetch(`/api/mobile/v1/messages/${reservationId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setTaskMessages(data.messages || []);
+            }
+        } catch (e) {
+            console.error("Failed to load messages", e);
+        } finally {
+            setIsLoadingMessages(false);
+        }
+    };
+
     const handlePinSubmit = async (pinValue: string) => {
         if (pinValue.length < 4) return;
         setIsLoggingIn(true);
@@ -208,19 +261,26 @@ export default function MobileOperatorApp() {
 
     const handleUpdateStatus = async (taskId: string, newStatus: string) => {
         try {
-            const res = await fetch(`/api/mobile/v1/reservations/${taskId}/status`, {
-                method: "PATCH",
+            const url = newStatus === "in_progress"
+                ? `/api/mobile/v1/reservations/${taskId}/start-work`
+                : newStatus === "completed"
+                ? `/api/mobile/v1/reservations/${taskId}/complete-work`
+                : `/api/mobile/v1/reservations/${taskId}/status`;
+
+            const res = await fetch(url, {
+                method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     Authorization: `Bearer ${token}`
                 },
                 body: JSON.stringify({ status: newStatus })
             });
+            const data = await res.json();
             if (res.ok) {
-                toast.success(`Status promijenjen na ${newStatus === "in_progress" ? "U tijeku" : "Završeno"}`);
+                toast.success(`Status posla: ${newStatus === "in_progress" ? "Započeto (U tijeku)" : "Uspješno završeno"}`);
                 fetchSchedule();
             } else {
-                toast.error("Greška pri promjeni statusa");
+                toast.error(data.error || "Greška pri promjeni statusa");
             }
         } catch (e) {
             toast.error("Mrežna greška");
@@ -242,18 +302,22 @@ export default function MobileOperatorApp() {
                 },
                 body: JSON.stringify({
                     vesselId: assigningTask.vessel.id,
+                    reservationId: assigningTask.id,
                     zoneId: selectedZoneId,
+                    spotNumber: spotNumberInput ? Number(spotNumberInput) : undefined,
                     notes: assignNote.trim()
                 })
             });
+            const data = await res.json();
             if (res.ok) {
-                toast.success("Brod uspješno dodijeljen u zonu suhog veza!");
+                toast.success("Mjesto na kopnu uspješno dodijeljeno!");
                 setAssigningTask(null);
                 setAssignNote("");
+                setSpotNumberInput("");
                 fetchSchedule();
                 fetchLandZones();
             } else {
-                toast.error("Greška pri dodjeli zone");
+                toast.error(data.error || "Greška pri dodjeli zone");
             }
         } catch (e) {
             toast.error("Mrežna greška");
@@ -262,8 +326,9 @@ export default function MobileOperatorApp() {
         }
     };
 
-    const handleSendMessage = async () => {
-        if (!messagingTask?.id || !messageText.trim()) return;
+    const handleSendMessage = async (textToSend?: string) => {
+        const bodyText = textToSend || messageText;
+        if (!messagingTask?.id || !bodyText.trim()) return;
         setIsSendingMessage(true);
         try {
             const res = await fetch("/api/mobile/v1/messages/send", {
@@ -274,15 +339,16 @@ export default function MobileOperatorApp() {
                 },
                 body: JSON.stringify({
                     reservationId: messagingTask.id,
-                    content: messageText.trim()
+                    content: bodyText.trim()
                 })
             });
+            const data = await res.json();
             if (res.ok) {
-                toast.success("Poruka poslana korisniku!");
-                setMessagingTask(null);
+                toast.success("Poruka i obavijest poslane vlasniku!");
                 setMessageText("");
+                fetchTaskMessages(messagingTask.id);
             } else {
-                toast.error("Greška pri slanju poruke");
+                toast.error(data.error || "Greška pri slanju poruke");
             }
         } catch (e) {
             toast.error("Mrežna greška");
@@ -308,42 +374,40 @@ export default function MobileOperatorApp() {
 
     // Metric stats
     const totalCount = filteredTasks.length;
-    const approvedCount = filteredTasks.filter(t => t.status === "approved").length;
     const inProgressCount = filteredTasks.filter(t => t.status === "in_progress").length;
     const completedCount = filteredTasks.filter(t => t.status === "completed").length;
 
     // PIN Pad Login View
     if (!token || !operatorUser) {
         return (
-            <div className="min-h-screen bg-indigo-600 flex flex-col justify-between p-6 text-white font-sans">
-                <div className="text-center pt-8 space-y-3">
-                    <div className="inline-flex items-center justify-center h-20 w-20 rounded-3xl bg-white/10 backdrop-blur-md border border-white/20 shadow-2xl mx-auto">
-                        <Anchor className="h-10 w-10 text-white" />
+            <div className="min-h-screen bg-slate-950 text-white flex flex-col justify-between p-6 max-w-md mx-auto">
+                <div className="text-center pt-8 space-y-2">
+                    <div className="inline-flex items-center justify-center p-4 bg-indigo-600/20 text-indigo-400 rounded-3xl mb-2 border border-indigo-500/30">
+                        <Anchor className="h-10 w-10" />
                     </div>
-                    <h1 className="text-3xl font-extrabold tracking-tight">Dizalica Port Manager</h1>
-                    <p className="text-indigo-100 text-sm font-medium">Aplikacija za operatere na terenu</p>
+                    <h1 className="text-2xl font-black tracking-tight text-white">Operater Dizalica</h1>
+                    <p className="text-xs text-slate-400">Lučica Spinut • Mobilni pristup</p>
                 </div>
 
-                <div className="max-w-xs mx-auto w-full space-y-6">
-                    <div className="text-center space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-200">Unesite 4-Znamenkasti PIN</p>
-                        <div className="flex justify-center gap-3 py-2">
-                            {[0, 1, 2, 3].map(idx => (
-                                <div
-                                    key={idx}
-                                    className={`h-4 w-4 rounded-full transition-all duration-200 ${
-                                        pin.length > idx ? "bg-white scale-125 shadow" : "bg-white/25"
-                                    }`}
-                                />
-                            ))}
-                        </div>
+                <div className="space-y-6">
+                    <div className="flex justify-center gap-4 my-2">
+                        {[0, 1, 2, 3].map(i => (
+                            <div
+                                key={i}
+                                className={`w-4 h-4 rounded-full border-2 transition-all ${
+                                    pin.length > i
+                                        ? "bg-indigo-500 border-indigo-500 scale-110 shadow-[0_0_12px_rgba(99,102,241,0.6)]"
+                                        : "border-slate-700 bg-slate-900"
+                                }`}
+                            />
+                        ))}
                     </div>
 
-                    {/* Keypad */}
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-3 gap-3 max-w-xs mx-auto">
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
                             <button
                                 key={num}
+                                disabled={isLoggingIn}
                                 onClick={() => {
                                     if (pin.length < 4) {
                                         const newPin = pin + num;
@@ -351,18 +415,20 @@ export default function MobileOperatorApp() {
                                         if (newPin.length === 4) handlePinSubmit(newPin);
                                     }
                                 }}
-                                className="h-16 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition font-bold text-2xl backdrop-blur-sm border border-white/10"
+                                className="h-16 rounded-2xl bg-slate-900 hover:bg-indigo-600/20 active:bg-indigo-600 active:text-white border border-slate-800 text-2xl font-bold transition flex items-center justify-center shadow-md active:scale-95"
                             >
                                 {num}
                             </button>
                         ))}
                         <button
+                            disabled={isLoggingIn}
                             onClick={() => setPin("")}
-                            className="h-16 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition font-semibold text-xs text-indigo-200 uppercase backdrop-blur-sm border border-white/10"
+                            className="h-16 rounded-2xl bg-slate-900/50 hover:bg-slate-800 text-xs font-bold text-slate-400 transition flex items-center justify-center border border-slate-800/50 active:scale-95"
                         >
-                            Briši
+                            PONIŠTI
                         </button>
                         <button
+                            disabled={isLoggingIn}
                             onClick={() => {
                                 if (pin.length < 4) {
                                     const newPin = pin + "0";
@@ -370,137 +436,143 @@ export default function MobileOperatorApp() {
                                     if (newPin.length === 4) handlePinSubmit(newPin);
                                 }
                             }}
-                            className="h-16 rounded-2xl bg-white/10 hover:bg-white/20 active:scale-95 transition font-bold text-2xl backdrop-blur-sm border border-white/10"
+                            className="h-16 rounded-2xl bg-slate-900 hover:bg-indigo-600/20 active:bg-indigo-600 active:text-white border border-slate-800 text-2xl font-bold transition flex items-center justify-center shadow-md active:scale-95"
                         >
                             0
                         </button>
                         <button
-                            disabled={pin.length < 4 || isLoggingIn}
-                            onClick={() => handlePinSubmit(pin)}
-                            className="h-16 rounded-2xl bg-white text-indigo-600 font-bold text-lg hover:bg-indigo-50 active:scale-95 transition flex items-center justify-center shadow-lg disabled:opacity-50"
+                            disabled={isLoggingIn}
+                            onClick={() => setPin(pin.slice(0, -1))}
+                            className="h-16 rounded-2xl bg-slate-900/50 hover:bg-slate-800 text-xs font-bold text-slate-400 transition flex items-center justify-center border border-slate-800/50 active:scale-95"
                         >
-                            {isLoggingIn ? "..." : "OK"}
+                            ←
                         </button>
                     </div>
                 </div>
 
-                <div className="text-center text-xs text-indigo-200/80 pb-4">
-                    Marina Cranes Mobile v2.0 • Proel Postgres
+                <div className="text-center pb-4 text-[11px] text-slate-500">
+                    Prijavite se 4-znamenkastim operaterskim PIN-om
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-sky-50 flex flex-col font-sans pb-24 text-slate-800">
-            {/* Rich Indigo Header Bar (bg-indigo-600) */}
-            <header className="bg-indigo-600 text-white px-5 pt-6 pb-5 shadow-lg space-y-3">
+        <div className="min-h-screen bg-slate-100 text-slate-900 pb-24 max-w-lg mx-auto select-none font-sans">
+            {/* Top Fixed Header */}
+            <header className="bg-indigo-950 text-white p-4 sticky top-0 z-30 shadow-xl border-b border-indigo-900">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="h-11 w-11 rounded-2xl bg-white text-indigo-600 flex items-center justify-center shadow-md shrink-0">
-                            <Anchor className="h-6 w-6" />
+                        <div className="p-2 bg-indigo-600/30 rounded-xl border border-indigo-500/40">
+                            <Anchor className="h-5 w-5 text-indigo-300" />
                         </div>
                         <div>
-                            <h1 className="text-lg font-bold leading-tight">Dizalica Port Manager</h1>
-                            <p className="text-xs text-indigo-100 font-medium">
-                                Danas: <span className="font-bold text-white">{totalCount} poslova</span>
+                            <h1 className="text-base font-black tracking-tight leading-none text-white">
+                                {operatorUser.name || "Operater dizalice"}
+                            </h1>
+                            <p className="text-[11px] text-indigo-300 font-medium mt-0.5">
+                                {assignedCranes.length > 0
+                                    ? assignedCranes.map(c => c.name).join(", ")
+                                    : "Sve dizalice"}
                             </p>
                         </div>
                     </div>
-                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm tracking-wider border border-white/20">
-                        {operatorUser.role}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={fetchSchedule}
+                            className="p-2 bg-indigo-900/70 hover:bg-indigo-800 rounded-xl border border-indigo-700/50 transition active:scale-95"
+                            title="Osvježi podatke"
+                        >
+                            <RefreshCw className={`h-4 w-4 text-indigo-200 ${isLoadingTasks ? "animate-spin" : ""}`} />
+                        </button>
+                        <button
+                            onClick={handleLogout}
+                            className="p-2 bg-indigo-900/70 hover:bg-indigo-800 rounded-xl border border-indigo-700/50 transition active:scale-95"
+                            title="Odjava"
+                        >
+                            <LogOut className="h-4 w-4 text-indigo-200" />
+                        </button>
+                    </div>
                 </div>
 
-                {/* High Contrast Status Bar */}
-                <div className="flex items-center gap-2 bg-indigo-900/40 backdrop-blur-md px-3 py-1.5 rounded-full border border-indigo-400/30 text-xs font-semibold">
-                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-                    <span className="text-emerald-300 font-bold tracking-wide">SUSTAV AKTIVAN</span>
-                    <span className="text-indigo-200 ml-auto font-normal text-[11px]">{operatorUser.name || operatorUser.email}</span>
-                </div>
-            </header>
-
-            {/* Main Content View */}
-            <main className="p-4 space-y-4 max-w-lg mx-auto w-full">
+                {/* Day Selection Slider & Filter Bar */}
                 {activeTab === "tasks" && (
-                    <>
-                        {/* 3XL Metric Cards (Vibrant Accent Pills) */}
-                        <div className="grid grid-cols-4 gap-2">
-                            <div className="bg-indigo-50 border-2 border-indigo-100 p-2.5 rounded-2xl text-center shadow-xs">
-                                <span className="text-[10px] font-extrabold uppercase text-indigo-600 tracking-tight block">Ukupno</span>
-                                <span className="text-xl font-black text-indigo-700">{totalCount}</span>
+                    <div className="mt-3 pt-3 border-t border-indigo-900/60 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="date"
+                                    value={selectedDate}
+                                    onChange={(e) => setSelectedDate(e.target.value)}
+                                    className="bg-indigo-900/80 text-white font-bold px-3 py-1.5 rounded-xl border border-indigo-700/60 text-xs focus:outline-none"
+                                />
+                                <button
+                                    onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
+                                    className="bg-indigo-600/40 hover:bg-indigo-600 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border border-indigo-500/40 text-indigo-200"
+                                >
+                                    Danas
+                                </button>
                             </div>
-                            <div className="bg-emerald-50 border-2 border-emerald-200 p-2.5 rounded-2xl text-center shadow-xs">
-                                <span className="text-[10px] font-extrabold uppercase text-emerald-700 tracking-tight block">Odobreno</span>
-                                <span className="text-xl font-black text-emerald-700">{approvedCount}</span>
-                            </div>
-                            <div className="bg-amber-50 border-2 border-amber-200 p-2.5 rounded-2xl text-center shadow-xs">
-                                <span className="text-[10px] font-extrabold uppercase text-amber-700 tracking-tight block">U tijeku</span>
-                                <span className="text-xl font-black text-amber-700">{inProgressCount}</span>
-                            </div>
-                            <div className="bg-slate-100 border-2 border-slate-200 p-2.5 rounded-2xl text-center shadow-xs">
-                                <span className="text-[10px] font-extrabold uppercase text-slate-600 tracking-tight block">Završeno</span>
-                                <span className="text-xl font-black text-slate-700">{completedCount}</span>
+
+                            {/* Summary Badge */}
+                            <div className="flex gap-1.5 text-[11px] font-extrabold">
+                                <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-lg border border-amber-500/30">
+                                    ▶ {inProgressCount}
+                                </span>
+                                <span className="bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-lg border border-emerald-500/30">
+                                    ✓ {completedCount}
+                                </span>
                             </div>
                         </div>
 
-                        {/* Controls Bar: Search & Crane Filter */}
-                        <div className="space-y-2">
-                            <div className="relative">
-                                <Search className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                        {/* Search & Crane Filter */}
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-indigo-400" />
                                 <input
                                     type="text"
-                                    placeholder="Pretraži brodicu, registraciju (npr. ST-402) ili vlasnika..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2.5 bg-white border-2 border-indigo-100 rounded-2xl text-xs font-medium shadow-xs focus:outline-none focus:border-indigo-500"
+                                    placeholder="Pretraži plovilo, registraciju ili člana..."
+                                    className="w-full bg-indigo-900/60 text-white placeholder-indigo-400/60 text-xs pl-8 pr-3 py-1.5 rounded-xl border border-indigo-700/40 focus:outline-none"
                                 />
                             </div>
-
-                            {/* Crane Selection (Only assigned cranes for logged operator) */}
-                            {assignedCranes.length > 0 && (
-                                <div className="flex items-center gap-2 bg-white px-3 py-2 border-2 border-indigo-100 rounded-2xl text-xs font-semibold text-slate-700 shadow-xs">
-                                    <Anchor className="h-4 w-4 text-indigo-600 shrink-0" />
-                                    <select
-                                        value={selectedCraneId}
-                                        onChange={(e) => setSelectedCraneId(e.target.value)}
-                                        className="bg-transparent w-full text-xs font-bold text-indigo-900 focus:outline-none cursor-pointer"
-                                    >
-                                        <option value="all">Sve dodijeljene dizalice ({assignedCranes.length})</option>
-                                        {assignedCranes.map(c => (
-                                            <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
                         </div>
+                    </div>
+                )}
+            </header>
 
-                        {/* Task List (3XL Cards with border-4 border-indigo-100) */}
-                        <div className="space-y-3.5 pt-1">
+            {/* Main Content Area */}
+            <main className="p-4 space-y-4">
+                {activeTab === "tasks" && (
+                    <>
+                        {/* Task List */}
+                        <div className="space-y-3">
                             {isLoadingTasks ? (
-                                <div className="text-center py-10 text-slate-400 font-medium text-xs">
-                                    Učitavanje rasporeda...
+                                <div className="flex flex-col items-center justify-center p-12 space-y-2 text-slate-400">
+                                    <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                                    <span className="text-xs font-semibold">Učitavanje rasporeda...</span>
                                 </div>
                             ) : filteredTasks.length === 0 ? (
-                                <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-8 text-center space-y-2 shadow-sm">
-                                    <Clock className="h-10 w-10 text-indigo-300 mx-auto" />
-                                    <p className="font-bold text-slate-700 text-sm">Nema poslova za odabrani dan ili filter</p>
-                                    <p className="text-xs text-slate-500">Provjerite datum ili pretragu registracije.</p>
+                                <div className="bg-white border-2 border-dashed border-slate-300 rounded-3xl p-8 text-center space-y-2">
+                                    <Calendar className="h-8 w-8 text-slate-400 mx-auto" />
+                                    <h3 className="font-bold text-sm text-slate-700">Nema zakazanih operacija</h3>
+                                    <p className="text-xs text-slate-400">Za odabrani datum nema unesenih rezervacija dizalica.</p>
                                 </div>
                             ) : (
                                 filteredTasks.map(t => {
                                     const timeStr = t.scheduledStart
-                                        ? new Date(t.scheduledStart).toLocaleTimeString("hr-HR", { hour: "2-digit", minute: "2-digit" })
-                                        : "--:--";
+                                        ? new Date(t.scheduledStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                        : "—";
 
                                     return (
                                         <div
                                             key={t.id}
-                                            className={`bg-white border-4 rounded-[2rem] p-4 shadow-sm space-y-3 transition-all ${
+                                            className={`bg-white rounded-3xl p-4 shadow-sm border-2 transition-all space-y-3 ${
                                                 t.status === "in_progress"
-                                                    ? "border-amber-400 ring-2 ring-amber-400/20"
+                                                    ? "border-amber-400 ring-2 ring-amber-400/20 bg-amber-50/10"
                                                     : t.status === "completed"
-                                                    ? "border-slate-200 opacity-85"
+                                                    ? "border-slate-200 opacity-80"
                                                     : "border-indigo-100"
                                             }`}
                                         >
@@ -520,11 +592,11 @@ export default function MobileOperatorApp() {
                                                     </p>
                                                 </div>
                                                 <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full shrink-0 ${
-                                                    t.status === "in_progress" ? "bg-amber-100 text-amber-800" :
+                                                    t.status === "in_progress" ? "bg-amber-100 text-amber-800 animate-pulse border border-amber-300" :
                                                     t.status === "completed" ? "bg-slate-100 text-slate-700" :
                                                     "bg-emerald-100 text-emerald-800"
                                                 }`}>
-                                                    {t.status === "in_progress" ? "U tijeku" : t.status === "completed" ? "Završeno" : "Odobreno"}
+                                                    {t.status === "in_progress" ? "▶ U tijeku" : t.status === "completed" ? "✓ Završeno" : "Odobreno"}
                                                 </span>
                                             </div>
 
@@ -533,7 +605,7 @@ export default function MobileOperatorApp() {
                                                 <div>
                                                     <span className="text-[10px] text-slate-400 font-bold block uppercase">Dimenzije plovila</span>
                                                     <span className="font-semibold text-slate-700">
-                                                        {t.vessel?.lengthM || "?"}m × {t.vessel?.beamM || "?"}m | {t.vessel?.weightTons || "?"}t
+                                                        {t.vessel?.lengthM ? `${Number(t.vessel.lengthM).toFixed(1)}m` : "?"} × {t.vessel?.beamM ? `${Number(t.vessel.beamM).toFixed(1)}m` : "?"}
                                                     </span>
                                                 </div>
                                                 <div>
@@ -542,22 +614,27 @@ export default function MobileOperatorApp() {
                                                 </div>
                                             </div>
 
-                                            {/* Dry Berth Placement Info */}
+                                            {/* Dry Berth / Land Placement Box */}
                                             <div className="flex items-center justify-between text-xs bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100">
                                                 <div className="flex items-center gap-1.5">
                                                     <MapPin className="h-4 w-4 text-indigo-600 shrink-0" />
                                                     <span className="font-semibold text-indigo-950">
-                                                        Suhi vez: {t.dryBerthPlacement ? (
-                                                            <strong className="text-indigo-700 font-bold">{t.dryBerthPlacement.zoneCode} ({t.dryBerthPlacement.zoneName})</strong>
+                                                        Mjesto na kopnu:{" "}
+                                                        {t.dryBerthPlacement ? (
+                                                            <strong className="text-indigo-700 font-bold">
+                                                                {t.dryBerthPlacement.zoneCode} ({t.dryBerthPlacement.zoneName})
+                                                                {t.dryBerthPlacement.spotNumber ? ` • Mjesto ${t.dryBerthPlacement.spotNumber}` : ""}
+                                                            </strong>
                                                         ) : (
-                                                            <span className="text-amber-700 font-medium">Nije dodijeljena zona</span>
+                                                            <span className="text-amber-700 font-medium italic">Nije dodijeljena zona</span>
                                                         )}
                                                     </span>
                                                 </div>
                                                 <button
                                                     onClick={() => {
                                                         setAssigningTask(t);
-                                                        setSelectedZoneId("");
+                                                        setSelectedZoneId(t.dryBerthPlacement?.zoneId || "");
+                                                        setSpotNumberInput(t.dryBerthPlacement?.spotNumber ? String(t.dryBerthPlacement.spotNumber) : "");
                                                         setAssignNote("");
                                                     }}
                                                     className="text-[11px] font-bold text-indigo-600 bg-white px-2 py-1 rounded-lg border border-indigo-200 shadow-2xs hover:bg-indigo-50"
@@ -568,7 +645,6 @@ export default function MobileOperatorApp() {
 
                                             {/* Action Buttons Row */}
                                             <div className="flex items-center gap-2 pt-1">
-                                                {/* Click-to-Call */}
                                                 {t.owner?.phone && (
                                                     <a
                                                         href={`tel:${t.owner.phone}`}
@@ -578,39 +654,24 @@ export default function MobileOperatorApp() {
                                                         <span>Pozovi</span>
                                                     </a>
                                                 )}
-
-                                                {/* Status Action Button */}
                                                 {t.status === "approved" && (
                                                     <button
                                                         onClick={() => handleUpdateStatus(t.id, "in_progress")}
                                                         className="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
                                                     >
                                                         <Play className="h-3.5 w-3.5 fill-current" />
-                                                        <span>Započni rad</span>
+                                                        <span>Započni</span>
                                                     </button>
                                                 )}
-
                                                 {t.status === "in_progress" && (
                                                     <button
                                                         onClick={() => handleUpdateStatus(t.id, "completed")}
                                                         className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
                                                     >
                                                         <CheckCircle2 className="h-3.5 w-3.5" />
-                                                        <span>Završi rad</span>
+                                                        <span>Završi</span>
                                                     </button>
                                                 )}
-
-                                                {/* Send Chat / Note */}
-                                                <button
-                                                    onClick={() => {
-                                                        setMessagingTask(t);
-                                                        setMessageText("");
-                                                    }}
-                                                    className="bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold p-2 rounded-xl text-xs flex items-center justify-center active:scale-95 transition"
-                                                    title="Pošalji poruku korisniku"
-                                                >
-                                                    <MessageSquare className="h-4 w-4" />
-                                                </button>
                                             </div>
                                         </div>
                                     );
@@ -625,39 +686,40 @@ export default function MobileOperatorApp() {
                         <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 shadow-sm space-y-3">
                             <h2 className="font-bold text-base text-indigo-950 flex items-center gap-2">
                                 <MessageSquare className="h-5 w-5 text-indigo-600" />
-                                Obavijesti & Chat s korisnicima
+                                Poruke i Obavijesti korisnicima
                             </h2>
                             <p className="text-xs text-slate-500">
-                                Slanje obavijesti i informacija vlasnicima brodova u realnom vremenu.
+                                Slanje izravnih obavijesti i dopisivanje s vlasnicima plovila u realnom vremenu (putem aplikacije, emaila i SMS-a).
                             </p>
                         </div>
 
-                        {/* Preset Notification Shortcuts */}
+                        {/* Active Conversations from Schedule */}
                         <div className="space-y-2">
-                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Brzi predlošci obavijesti</span>
-                            <div className="space-y-2">
-                                <button
-                                    onClick={() => toast.info("Odaberite posao u listi za slanje poruke.")}
-                                    className="w-full text-left bg-white border-2 border-emerald-200 p-3 rounded-2xl text-xs font-semibold text-emerald-900 shadow-2xs hover:bg-emerald-50 flex items-center justify-between"
-                                >
-                                    <span>🟢 "Operacija dizanja brodice je započeta."</span>
-                                    <ChevronRight className="h-4 w-4 text-emerald-600" />
-                                </button>
-                                <button
-                                    onClick={() => toast.info("Odaberite posao u listi za slanje poruke.")}
-                                    className="w-full text-left bg-white border-2 border-indigo-200 p-3 rounded-2xl text-xs font-semibold text-indigo-900 shadow-2xs hover:bg-indigo-50 flex items-center justify-between"
-                                >
-                                    <span>🔵 "Plovilo je uspješno smješteno u zonu suhog veza."</span>
-                                    <ChevronRight className="h-4 w-4 text-indigo-600" />
-                                </button>
-                                <button
-                                    onClick={() => toast.info("Odaberite posao u listi za slanje poruke.")}
-                                    className="w-full text-left bg-white border-2 border-amber-200 p-3 rounded-2xl text-xs font-semibold text-amber-900 shadow-2xs hover:bg-amber-50 flex items-center justify-between"
-                                >
-                                    <span>🟡 "Molimo dođite do dizalice u lučici."</span>
-                                    <ChevronRight className="h-4 w-4 text-amber-600" />
-                                </button>
-                            </div>
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Odaberite korisnika za razgovor</span>
+                            {tasks.length === 0 ? (
+                                <p className="text-xs text-slate-400 italic">Nema aktivnih rezervacija na rasporedu.</p>
+                            ) : (
+                                tasks.map(t => (
+                                    <button
+                                        key={t.id}
+                                        onClick={() => setMessagingTask(t)}
+                                        className="w-full text-left bg-white border-2 border-indigo-100 hover:border-indigo-300 p-3 rounded-2xl text-xs font-semibold text-slate-900 shadow-2xs flex items-center justify-between transition"
+                                    >
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="h-8 w-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                                                {t.owner?.name ? t.owner.name[0].toUpperCase() : "U"}
+                                            </div>
+                                            <div>
+                                                <div className="font-bold text-slate-900">{t.owner?.name || "Član"}</div>
+                                                <div className="text-[10px] text-slate-500 font-normal">
+                                                    [{t.vessel?.registration || "Plovilo"}] • {t.serviceType?.name || "Operacija"}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <ChevronRight className="h-4 w-4 text-indigo-400" />
+                                    </button>
+                                ))
+                            )}
                         </div>
                     </div>
                 )}
@@ -674,23 +736,6 @@ export default function MobileOperatorApp() {
                                     <p className="text-xs text-slate-500">{operatorUser.email}</p>
                                 </div>
                             </div>
-
-                            <div className="space-y-2 text-xs">
-                                <span className="font-bold text-slate-400 uppercase tracking-wider block text-[10px]">Dodijeljene dizalice</span>
-                                {assignedCranes.length === 0 ? (
-                                    <p className="text-slate-600 font-medium">Sve dizalice u lučici (Admin pristup)</p>
-                                ) : (
-                                    <div className="space-y-1">
-                                        {assignedCranes.map(c => (
-                                            <div key={c.id} className="bg-slate-50 p-2 rounded-xl border border-slate-200 font-semibold text-slate-700 flex items-center gap-2">
-                                                <Anchor className="h-3.5 w-3.5 text-indigo-600" />
-                                                <span>{c.name} ({c.type})</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-
                             <button
                                 onClick={handleLogout}
                                 className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold py-3 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 border border-rose-200 transition active:scale-95"
@@ -710,7 +755,7 @@ export default function MobileOperatorApp() {
                         <div className="flex items-center justify-between border-b pb-3">
                             <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
                                 <MapPin className="h-5 w-5 text-indigo-600" />
-                                Dodjela Suhog Veza
+                                Dodjela Mjesta na Kopnu
                             </h3>
                             <button onClick={() => setAssigningTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
                         </div>
@@ -719,33 +764,53 @@ export default function MobileOperatorApp() {
                             <span className="font-bold text-indigo-950 block text-sm">
                                 [{assigningTask.vessel?.registration || "Plovilo"}] {assigningTask.vessel?.name}
                             </span>
-                            <span className="text-slate-600 block">Vlasnik: {assigningTask.owner?.name}</span>
+                            <span className="text-indigo-700 block">Vlasnik: {assigningTask.owner?.name || "—"}</span>
                         </div>
 
+                        {/* Zone selector */}
                         <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-700 block">Odaberite zonu na kopnu:</label>
-                            <select
-                                value={selectedZoneId}
-                                onChange={(e) => setSelectedZoneId(e.target.value)}
-                                className="w-full p-3 bg-slate-50 border-2 border-indigo-100 rounded-xl text-xs font-bold text-slate-800 focus:outline-none"
-                            >
-                                <option value="">-- Odaberite zonu --</option>
+                            <label className="text-xs font-bold text-slate-700 block">Odaberite zonu kopna:</label>
+                            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
                                 {landZones.map(z => (
-                                    <option key={z.id} value={z.id}>
-                                        {z.code} ({z.name}) — Slobodno: {z.availableSpots}/{z.totalSpots}
-                                    </option>
+                                    <button
+                                        key={z.id}
+                                        type="button"
+                                        onClick={() => setSelectedZoneId(z.id)}
+                                        className={`p-2.5 rounded-xl border text-left text-xs transition ${
+                                            selectedZoneId === z.id
+                                                ? "border-indigo-600 bg-indigo-50 text-indigo-950 font-bold ring-2 ring-indigo-500/20"
+                                                : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                                        }`}
+                                    >
+                                        <div className="font-bold">{z.name} ({z.code})</div>
+                                        <div className="text-[10px] text-slate-500 mt-0.5">
+                                            {z.occupiedSpots}/{z.totalSpots} zauzeto ({z.availableSpots} slobodno)
+                                        </div>
+                                    </button>
                                 ))}
-                            </select>
+                            </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-700 block">Napomena operatera (opcionalno):</label>
+                        {/* Spot number input */}
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-700 block">Broj mjesta u zoni (opcionalno):</label>
+                            <input
+                                type="number"
+                                value={spotNumberInput}
+                                onChange={(e) => setSpotNumberInput(e.target.value)}
+                                placeholder="Npr. 12"
+                                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                            />
+                        </div>
+
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-700 block">Napomena (opcionalno):</label>
                             <input
                                 type="text"
                                 value={assignNote}
                                 onChange={(e) => setAssignNote(e.target.value)}
-                                placeholder="npr. Smješteno na stalažu #12"
-                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                                placeholder="Npr. uz ogradu, potpornji osigurani..."
+                                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
                             />
                         </div>
 
@@ -768,55 +833,125 @@ export default function MobileOperatorApp() {
                 </div>
             )}
 
-            {/* Chat / Message Modal Dialog */}
+            {/* Chat / Message Modal Dialog with Full Conversation History */}
             {messagingTask && (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
-                    <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 w-full max-w-md space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200">
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-3">
+                    <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-4 w-full max-w-md flex flex-col max-h-[85vh] shadow-2xl animate-in slide-in-from-bottom duration-200">
+                        {/* Modal Header */}
                         <div className="flex items-center justify-between border-b pb-3">
-                            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                                <MessageSquare className="h-5 w-5 text-indigo-600" />
-                                Pošalji obavijest korisniku
-                            </h3>
-                            <button onClick={() => setMessagingTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+                            <div className="flex items-center gap-2">
+                                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                                    <MessageSquare className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-sm text-slate-900 leading-tight">
+                                        {messagingTask.owner?.name || "Korisnik"}
+                                    </h3>
+                                    <p className="text-[10px] text-slate-500">
+                                        [{messagingTask.vessel?.registration || "Plovilo"}] • Rezervacija {messagingTask.reservationNumber}
+                                    </p>
+                                </div>
+                            </div>
+                            <button onClick={() => setMessagingTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-base px-2">✕</button>
                         </div>
 
-                        <div className="text-xs space-y-1 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                            <span className="font-bold text-slate-900 block">Korisnik: {messagingTask.owner?.name}</span>
-                            <span className="text-slate-500 block">Plovilo: {messagingTask.vessel?.name} ({messagingTask.vessel?.registration})</span>
+                        {/* Chat Messages History */}
+                        <div
+                            ref={chatScrollRef}
+                            className="flex-1 overflow-y-auto p-2 space-y-2.5 my-2 min-h-[160px] max-h-[280px] bg-slate-50/70 rounded-2xl border border-slate-100"
+                        >
+                            {isLoadingMessages ? (
+                                <div className="flex justify-center p-6">
+                                    <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
+                                </div>
+                            ) : taskMessages.length === 0 ? (
+                                <div className="text-center py-6 text-xs text-slate-400 italic">
+                                    Nema prethodnih poruka. Pošaljite obavijest vlasniku.
+                                </div>
+                            ) : (
+                                taskMessages.map(msg => {
+                                    const isOperator = msg.senderRole === "operator" || msg.senderRole === "admin";
+                                    return (
+                                        <div
+                                            key={msg.id}
+                                            className={`flex flex-col ${isOperator ? "items-end" : "items-start"}`}
+                                        >
+                                            <div
+                                                className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed ${
+                                                    isOperator
+                                                        ? "bg-indigo-600 text-white rounded-br-xs"
+                                                        : "bg-white border border-slate-200 text-slate-900 rounded-bl-xs shadow-2xs"
+                                                }`}
+                                            >
+                                                {!isOperator && (
+                                                    <span className="text-[10px] font-bold text-indigo-600 block mb-0.5">
+                                                        {msg.senderName || "Korisnik"}
+                                                    </span>
+                                                )}
+                                                <p className="whitespace-pre-wrap">{msg.body}</p>
+                                            </div>
+                                            <span className="text-[9px] text-slate-400 mt-0.5 px-1">
+                                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                        </div>
+                                    );
+                                })
+                            )}
                         </div>
 
-                        <div className="space-y-2">
-                            <label className="text-xs font-bold text-slate-700 block">Sadržaj poruke / obavijesti:</label>
-                            <textarea
-                                rows={3}
-                                value={messageText}
-                                onChange={(e) => setMessageText(e.target.value)}
-                                placeholder="Napišite obavijest vlasniku plovila..."
-                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
-                            />
-                        </div>
-
-                        <div className="flex gap-2 pt-2">
+                        {/* Quick Presets */}
+                        <div className="flex gap-1 overflow-x-auto pb-1 mb-1 text-[10px]">
                             <button
-                                onClick={() => setMessagingTask(null)}
-                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                                type="button"
+                                onClick={() => setMessageText("Operacija dizanja brodice je započeta.")}
+                                className="whitespace-nowrap bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-1 rounded-lg font-semibold hover:bg-emerald-100"
                             >
-                                Odustani
+                                🟢 Započeto
                             </button>
                             <button
-                                disabled={!messageText.trim() || isSendingMessage}
-                                onClick={handleSendMessage}
-                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-1.5"
+                                type="button"
+                                onClick={() => setMessageText("Plovilo je uspješno smješteno u zonu suhog veza.")}
+                                className="whitespace-nowrap bg-indigo-50 text-indigo-800 border border-indigo-200 px-2 py-1 rounded-lg font-semibold hover:bg-indigo-100"
                             >
-                                <Send className="h-3.5 w-3.5" />
-                                <span>{isSendingMessage ? "Slanje..." : "Pošalji poruku"}</span>
+                                🔵 Smješteno
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setMessageText("Molimo dođite do dizalice u lučici.")}
+                                className="whitespace-nowrap bg-amber-50 text-amber-800 border border-amber-200 px-2 py-1 rounded-lg font-semibold hover:bg-amber-100"
+                            >
+                                🟡 Dođite do dizalice
+                            </button>
+                        </div>
+
+                        {/* Message Input & Send */}
+                        <div className="flex items-center gap-2 pt-1">
+                            <input
+                                type="text"
+                                value={messageText}
+                                onChange={(e) => setMessageText(e.target.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSendMessage();
+                                    }
+                                }}
+                                placeholder="Napišite poruku vlasniku..."
+                                className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-400"
+                            />
+                            <button
+                                disabled={!messageText.trim() || isSendingMessage}
+                                onClick={() => handleSendMessage()}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold p-2.5 rounded-xl text-xs shadow-md disabled:opacity-40 flex items-center justify-center active:scale-95 transition"
+                            >
+                                {isSendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                             </button>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* Bottom Navigation Bar (3 Tabs: Poslovi, Notifikacije, Postavke) */}
+            {/* Bottom Navigation Bar */}
             <nav className="fixed bottom-0 left-0 right-0 bg-indigo-950 text-white border-t border-indigo-900 shadow-2xl z-40">
                 <div className="max-w-lg mx-auto flex items-center justify-around h-16 px-2">
                     <button
@@ -825,14 +960,7 @@ export default function MobileOperatorApp() {
                             activeTab === "tasks" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
                         }`}
                     >
-                        <div className="relative">
-                            <Calendar className="h-5 w-5" />
-                            {totalCount > 0 && (
-                                <span className="absolute -top-1.5 -right-2.5 bg-indigo-600 text-white text-[9px] font-black h-4 w-4 rounded-full flex items-center justify-center border border-indigo-950">
-                                    {totalCount}
-                                </span>
-                            )}
-                        </div>
+                        <Calendar className="h-5 w-5" />
                         <span className="text-[11px]">Poslovi</span>
                     </button>
 
@@ -843,7 +971,7 @@ export default function MobileOperatorApp() {
                         }`}
                     >
                         <MessageSquare className="h-5 w-5" />
-                        <span className="text-[11px]">Notifikacije</span>
+                        <span className="text-[11px]">Poruke</span>
                     </button>
 
                     <button
