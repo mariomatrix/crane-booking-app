@@ -129,14 +129,11 @@ router.get("/schedule/today", requireMobileAuth, async (req: AuthenticatedReques
 
     const assignedCraneIds = await getOperatorCranes(user.id);
 
-    const startOfDay = new Date(`${dateParam}T00:00:00.000Z`);
-    const endOfDay = new Date(`${dateParam}T23:59:59.999Z`);
-
     const dateCondition = sql`(
         ${reservations.requestedDate} = ${dateParam}
         OR to_char(${reservations.scheduledStart} AT TIME ZONE 'Europe/Zagreb', 'YYYY-MM-DD') = ${dateParam}
         OR to_char(${reservations.scheduledStart}, 'YYYY-MM-DD') = ${dateParam}
-        OR (${reservations.scheduledStart} >= ${startOfDay} AND ${reservations.scheduledStart} <= ${endOfDay})
+        OR DATE(${reservations.scheduledStart}) = ${dateParam}::date
     )`;
 
     const rows = await db.select({
