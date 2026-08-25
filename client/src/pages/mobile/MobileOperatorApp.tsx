@@ -41,7 +41,7 @@ interface AssignedCrane {
 interface TaskItem {
     id: string;
     reservationNumber: string;
-    status: "approved" | "in_progress" | "completed" | "cancelled";
+    status: "approved" | "pending" | "in_progress" | "completed" | "cancelled";
     scheduledStart: string;
     scheduledEnd: string;
     durationMin: number;
@@ -669,9 +669,10 @@ export default function MobileOperatorApp() {
                                                 <span className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full shrink-0 ${
                                                     t.status === "in_progress" ? "bg-amber-100 text-amber-800 animate-pulse border border-amber-300" :
                                                     t.status === "completed" ? "bg-slate-100 text-slate-700" :
+                                                    t.status === "pending" ? "bg-sky-100 text-sky-800 border border-sky-300" :
                                                     "bg-emerald-100 text-emerald-800"
                                                 }`}>
-                                                    {t.status === "in_progress" ? "▶ U tijeku" : t.status === "completed" ? "✓ Završeno" : "Odobreno"}
+                                                    {t.status === "in_progress" ? "▶ U tijeku" : t.status === "completed" ? "✓ Završeno" : t.status === "pending" ? "⏳ Na čekanju" : "Odobreno"}
                                                 </span>
                                             </div>
 
@@ -728,6 +729,15 @@ export default function MobileOperatorApp() {
                                                         <Phone className="h-3.5 w-3.5" />
                                                         <span>Pozovi</span>
                                                     </a>
+                                                )}
+                                                {t.status === "pending" && (
+                                                    <button
+                                                        onClick={() => handleUpdateStatus(t.id, "in_progress")}
+                                                        className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
+                                                    >
+                                                        <Play className="h-3.5 w-3.5 fill-current" />
+                                                        <span>Započni</span>
+                                                    </button>
                                                 )}
                                                 {t.status === "approved" && (
                                                     <button
