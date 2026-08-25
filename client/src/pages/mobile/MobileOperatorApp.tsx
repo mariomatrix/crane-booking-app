@@ -14,6 +14,7 @@ import {
     MapPin,
     AlertCircle,
     Calendar,
+    ChevronLeft,
     ChevronRight,
     Send,
     User,
@@ -357,6 +358,51 @@ export default function MobileOperatorApp() {
         }
     };
 
+    const handlePrevDay = () => {
+        const parts = selectedDate.split("-").map(Number);
+        const d = new Date(parts[0], parts[1] - 1, parts[2] - 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        setSelectedDate(`${y}-${m}-${day}`);
+    };
+
+    const handleNextDay = () => {
+        const parts = selectedDate.split("-").map(Number);
+        const d = new Date(parts[0], parts[1] - 1, parts[2] + 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, "0");
+        const day = String(d.getDate()).padStart(2, "0");
+        setSelectedDate(`${y}-${m}-${day}`);
+    };
+
+    const handleToday = () => {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        setSelectedDate(`${y}-${m}-${day}`);
+    };
+
+    const todayStr = useMemo(() => {
+        const now = new Date();
+        const y = now.getFullYear();
+        const m = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+    }, []);
+
+    const isToday = selectedDate === todayStr;
+
+    const formattedDateLabel = useMemo(() => {
+        const parts = selectedDate.split("-").map(Number);
+        const d = new Date(parts[0], parts[1] - 1, parts[2]);
+        const dayName = d.toLocaleDateString("hr-HR", { weekday: "short" }).toUpperCase();
+        const dateFormatted = d.toLocaleDateString("hr-HR", { day: "numeric", month: "numeric", year: "numeric" });
+        if (isToday) return `DANAS (${dateFormatted})`;
+        return `${dayName} • ${dateFormatted}`;
+    }, [selectedDate, isToday]);
+
     // Filtered tasks
     const filteredTasks = useMemo(() => {
         return tasks.filter(t => {
@@ -495,26 +541,55 @@ export default function MobileOperatorApp() {
                     </div>
                 </div>
 
-                {/* Day Selection Slider & Filter Bar */}
+                {/* Day Selection Bar & Filter Bar */}
                 {activeTab === "tasks" && (
-                    <div className="mt-3 pt-3 border-t border-indigo-900/60 space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2">
+                    <div className="mt-3 pt-3 border-t border-indigo-900/60 space-y-2.5">
+                        {/* Day Navigation Row: - Dan | [Date Picker / Label] | Danas | + Dan */}
+                        <div className="flex items-center justify-between gap-1.5 bg-indigo-900/40 p-1.5 rounded-2xl border border-indigo-800/60">
+                            <button
+                                onClick={handlePrevDay}
+                                className="px-2.5 py-1.5 bg-indigo-900/90 hover:bg-indigo-800 text-indigo-100 font-bold rounded-xl border border-indigo-700/60 active:scale-95 transition flex items-center gap-1 text-[11px] shadow-xs shrink-0"
+                                title="Prethodni dan"
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5" />
+                                <span>- Dan</span>
+                            </button>
+
+                            <div className="flex items-center gap-1.5 flex-1 justify-center min-w-0">
                                 <input
                                     type="date"
                                     value={selectedDate}
                                     onChange={(e) => setSelectedDate(e.target.value)}
-                                    className="bg-indigo-900/80 text-white font-bold px-3 py-1.5 rounded-xl border border-indigo-700/60 text-xs focus:outline-none"
+                                    className="bg-indigo-950/90 text-white font-black px-2 py-1 rounded-xl border border-indigo-700 text-xs focus:outline-none cursor-pointer max-w-[125px] text-center"
                                 />
                                 <button
-                                    onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
-                                    className="bg-indigo-600/40 hover:bg-indigo-600 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border border-indigo-500/40 text-indigo-200"
+                                    onClick={handleToday}
+                                    className={`px-2.5 py-1 rounded-xl text-[11px] font-extrabold border transition shadow-xs shrink-0 ${
+                                        isToday
+                                            ? "bg-indigo-600 text-white border-indigo-400"
+                                            : "bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-400 font-black"
+                                    }`}
+                                    title="Povratak na današnji dan"
                                 >
                                     Danas
                                 </button>
                             </div>
 
-                            {/* Summary Badge */}
+                            <button
+                                onClick={handleNextDay}
+                                className="px-2.5 py-1.5 bg-indigo-900/90 hover:bg-indigo-800 text-indigo-100 font-bold rounded-xl border border-indigo-700/60 active:scale-95 transition flex items-center gap-1 text-[11px] shadow-xs shrink-0"
+                                title="Sljedeći dan"
+                            >
+                                <span>+ Dan</span>
+                                <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                        </div>
+
+                        {/* Date label & Counters */}
+                        <div className="flex items-center justify-between px-1 text-xs">
+                            <span className="text-[11px] font-bold text-indigo-200 uppercase tracking-wide">
+                                📅 {formattedDateLabel}
+                            </span>
                             <div className="flex gap-1.5 text-[11px] font-extrabold">
                                 <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-lg border border-amber-500/30">
                                     ▶ {inProgressCount}

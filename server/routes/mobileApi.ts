@@ -148,8 +148,7 @@ router.get("/schedule/today", requireMobileAuth, async (req: AuthenticatedReques
     .leftJoin(landZones, eq(reservations.landZoneId, landZones.id))
     .where(
         and(
-            gte(reservations.scheduledStart, startOfDay),
-            lte(reservations.scheduledStart, endOfDay),
+            sql`(${reservations.scheduledStart} >= ${startOfDay} AND ${reservations.scheduledStart} <= ${endOfDay}) OR (${reservations.scheduledStart} IS NULL AND ${reservations.requestedDate} = ${dateParam})`,
             inArray(reservations.status, ["approved", "completed"])
         )
     )
