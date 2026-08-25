@@ -24,6 +24,7 @@ interface AdminReservationFormProps {
     initialData?: {
         landWaitingId?: string;
         userId?: string;
+        userObj?: any;
         vesselId?: string;
         landZoneId?: string;
         requestedDate?: Date;
@@ -32,6 +33,7 @@ interface AdminReservationFormProps {
         scheduledTime?: string;
         durationMin?: string;
         adminNote?: string;
+        contactPhone?: string;
     };
     onSuccess?: () => void;
     onCancel?: () => void;
@@ -51,14 +53,14 @@ export function AdminReservationForm({
     const { t, lang } = useLang();
 
     // ── Form state ───────────────────────────────────────────────────────
-    const [userId, setUserId] = useState(initialData?.userId || "");
+    const [userId, setUserId] = useState(initialData?.userId || initialData?.userObj?.id || "");
     const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
     const [requestedDate, setRequestedDate] = useState<Date | undefined>(initialData?.requestedDate || new Date());
     const [scheduledTime, setScheduledTime] = useState(initialData?.scheduledTime || "08:00");
     const [durationMin, setDurationMin] = useState<string>(initialData?.durationMin || "30");
     const [craneId, setCraneId] = useState(initialData?.craneId || "");
     const [userNote, setUserNote] = useState("");
-    const [contactPhone, setContactPhone] = useState("");
+    const [contactPhone, setContactPhone] = useState(initialData?.contactPhone || initialData?.userObj?.phone || "");
     const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
     const [landZoneId, setLandZoneId] = useState(initialData?.landZoneId || "");
     const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
@@ -67,7 +69,12 @@ export function AdminReservationForm({
 
     useEffect(() => {
         if (initialData) {
-            if (initialData.userId) setUserId(initialData.userId);
+            if (initialData.userId || initialData.userObj?.id) {
+                setUserId(initialData.userId || initialData.userObj?.id);
+            }
+            if (initialData.contactPhone || initialData.userObj?.phone) {
+                setContactPhone(initialData.contactPhone || initialData.userObj?.phone || "");
+            }
             if (initialData.landZoneId) setLandZoneId(initialData.landZoneId);
             if (initialData.serviceTypeId) setServiceTypeId(initialData.serviceTypeId);
             if (initialData.craneId) setCraneId(initialData.craneId);
@@ -286,6 +293,8 @@ export function AdminReservationForm({
                             users={usersList as any}
                             value={userId}
                             onChange={setUserId}
+                            initialUser={initialData?.userObj}
+                            showAllOption={false}
                             placeholder="Odaberite korisnika..."
                             className="flex-1"
                         />

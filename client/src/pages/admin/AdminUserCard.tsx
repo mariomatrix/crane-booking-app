@@ -545,7 +545,11 @@ export default function AdminUserCard() {
                         </DialogDescription>
                     </DialogHeader>
                     <AdminReservationForm
-                        initialData={{ userId: user.id }}
+                        initialData={{
+                            userId: user.id,
+                            userObj: user,
+                            contactPhone: user.phone || "",
+                        }}
                         onSuccess={() => {
                             setIsCreateResOpen(false);
                             utils.user.getCard.invalidate();

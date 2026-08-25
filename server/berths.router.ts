@@ -522,7 +522,16 @@ export const berthsRouter = router({
             const db = await getDb();
             if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
 
-            const term = `%${input.query.trim()}%`;
+            const tokens = (input?.query || "").trim().split(/\s+/).filter(Boolean);
+            const tokenConditions = tokens.map(token => {
+                const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                return sql`(
+                    ${berths.code} ~* ${`\\m${escaped}`}
+                    OR ${vessels.name} ~* ${`\\m${escaped}`}
+                    OR ${vessels.registration} ~* ${`\\m${escaped}`}
+                    OR concat_ws(' ', ${users.firstName}, ${users.lastName}, ${users.name}, ${users.oib}) ~* ${`\\m${escaped}`}
+                )`;
+            });
 
             const results = await db
                 .select({
@@ -548,17 +557,7 @@ export const berthsRouter = router({
                 )
                 .leftJoin(vessels, eq(berthAssignments.vesselId, vessels.id))
                 .leftJoin(users, eq(berthAssignments.userId, users.id))
-                .where(
-                    or(
-                        ilike(berths.code, term),
-                        ilike(vessels.name, term),
-                        ilike(vessels.registration, term),
-                        ilike(users.name, term),
-                        ilike(users.firstName, term),
-                        ilike(users.lastName, term),
-                        ilike(users.oib, term)
-                    )
-                )
+                .where(tokenConditions.length > 0 ? and(...tokenConditions) : undefined)
                 .limit(20);
 
             return results;
@@ -573,7 +572,15 @@ export const berthsRouter = router({
             const db = await getDb();
             if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna" });
 
-            const searchTerm = input?.search ? `%${input.search.trim()}%` : null;
+            const tokens = (input?.search || "").trim().split(/\s+/).filter(Boolean);
+            const tokenConditions = tokens.map(token => {
+                const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                return sql`(
+                    ${vessels.name} ~* ${`\\m${escaped}`}
+                    OR ${vessels.registration} ~* ${`\\m${escaped}`}
+                    OR concat_ws(' ', ${users.firstName}, ${users.lastName}, ${users.name}, ${users.oib}) ~* ${`\\m${escaped}`}
+                )`;
+            });
 
             const list = await db
                 .select({
@@ -593,16 +600,7 @@ export const berthsRouter = router({
                 })
                 .from(vessels)
                 .innerJoin(users, eq(vessels.ownerId, users.id))
-                .where(
-                    searchTerm
-                        ? or(
-                              ilike(vessels.name, searchTerm),
-                              ilike(vessels.registration, searchTerm),
-                              ilike(users.name, searchTerm),
-                              ilike(users.oib, searchTerm)
-                          )
-                        : undefined
-                )
+                .where(tokenConditions.length > 0 ? and(...tokenConditions) : undefined)
                 .limit(50);
 
             return list;

@@ -139,19 +139,23 @@ export async function listAllUsers(
 
   let conditions = [isNull(users.anonymizedAt)];
 
-  if (search) {
-    const pattern = `%${search}%`;
-    conditions.push(or(
-      ilike(users.firstName, pattern),
-      ilike(users.lastName, pattern),
-      ilike(users.name, pattern),
-      ilike(users.oib, pattern),
-      sql`exists (
-        select 1 from vessels 
-        where vessels.owner_id = ${users.id} 
-          and vessels.registration ilike ${pattern}
-      )`
-    ) as any);
+  if (search && search.trim() !== "") {
+    const tokens = search.trim().split(/\s+/).filter(Boolean);
+    const tokenConditions = tokens.map(token => {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return sql`(
+        concat_ws(' ', ${users.firstName}, ${users.lastName}, ${users.name}, ${users.companyName}, ${users.contactPerson}, ${users.oib}, ${users.email}) ~* ${`\\m${escaped}`}
+        OR exists (
+          select 1 from vessels 
+          where vessels.owner_id = ${users.id} 
+            and (vessels.registration ~* ${`\\m${escaped}`} or vessels.name ~* ${`\\m${escaped}`})
+        )
+      )`;
+    });
+
+    if (tokenConditions.length > 0) {
+      conditions.push(and(...tokenConditions) as any);
+    }
   }
 
   if (role && role !== "all") {
