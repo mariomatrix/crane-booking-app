@@ -41,11 +41,12 @@ import { CalendarIcon } from "lucide-react";
 import { DatePicker } from "@/components/ui/date-picker";
 
 const STATUS_COLORS: Record<string, string> = {
-    pending: "#f59e0b",   // Amber (Na čekanju)
-    approved: "#059669",  // Emerald 600 (Odobreno)
-    completed: "#0ea5e9", // Svijetlo plava (Sky 500 - Izvršeno/Završeno)
-    rejected: "#dc2626",  // Red 600 (Odbijeno)
-    cancelled: "#4b5563", // Gray 600 (Otkazano)
+    pending: "#f59e0b",     // Amber (Žuta - Na čekanju)
+    approved: "#059669",    // Emerald 600 (Zelena - Odobreno)
+    in_progress: "#8b5cf6", // Violet 500 (Ljubičasta - U tijeku)
+    completed: "#2563eb",   // Blue 600 (Plava - Izvršeno / Završeno)
+    rejected: "#dc2626",    // Red 600 (Crvena - Odbijeno)
+    cancelled: "#64748b",   // Slate 500 (Siva - Otkazano)
 };
 
 const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
@@ -53,7 +54,8 @@ const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 const STATUS_LABELS: Record<string, string> = {
     pending: "Na čekanju",
     approved: "Odobreno",
-    completed: "Izvršeno",
+    in_progress: "U tijeku",
+    completed: "Završeno",
     rejected: "Odbijeno",
     cancelled: "Otkazano",
 };
@@ -64,7 +66,7 @@ export default function AdminCalendar() {
     // State
     const [viewMode, setViewMode] = useState<'master' | 'timeGridWeek' | 'dayGridMonth'>('master');
     const [viewDate, setViewDate] = useState<Date>(startOfDay(new Date()));
-    const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved", "completed"]);
+    const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved", "in_progress", "completed"]);
     const [selectedUser, setSelectedUser] = useState<string>(() => {
         const params = new URLSearchParams(searchString);
         return params.get("userId") || "all";

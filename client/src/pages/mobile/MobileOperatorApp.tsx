@@ -91,6 +91,15 @@ interface LandZone {
     availableSpots: number;
 }
 
+interface ResourceItem {
+    id: string;
+    name: string;
+    code: string;
+    unit: string;
+    pricePerUnitEur: string;
+    description?: string | null;
+}
+
 interface ChatMessage {
     id: string;
     reservationId: string;
@@ -122,6 +131,18 @@ export default function MobileOperatorApp() {
     const [selectedCraneId, setSelectedCraneId] = useState<string>("all");
     const [isLoadingTasks, setIsLoadingTasks] = useState(false);
 
+    // Available Resources for Operations
+    const [availableResources, setAvailableResources] = useState<ResourceItem[]>([]);
+
+    // Finish / Complete Work Order Modal State
+    const [finishingTask, setFinishingTask] = useState<TaskItem | null>(null);
+    const [finishDurationMin, setFinishDurationMin] = useState<number>(30);
+    const [finishNotes, setFinishNotes] = useState<string>("");
+    const [selectedResources, setSelectedResources] = useState<Record<string, number>>({});
+    const [finishZoneId, setFinishZoneId] = useState<string>("");
+    const [finishSpotNumber, setFinishSpotNumber] = useState<string>("");
+    const [isSubmittingFinish, setIsSubmittingFinish] = useState(false);
+
     // Land Zones state for Dry Berth Assignment dialog
     const [landZones, setLandZones] = useState<LandZone[]>([]);
     const [assigningTask, setAssigningTask] = useState<TaskItem | null>(null);
@@ -144,11 +165,12 @@ export default function MobileOperatorApp() {
         fetchProfile();
     }, [token]);
 
-    // Load tasks when authenticated and date changes
+    // Load tasks and resources when authenticated and date changes
     useEffect(() => {
         if (!token) return;
         fetchSchedule();
         fetchLandZones();
+        fetchResources();
     }, [token, selectedDate]);
 
     // Fetch chat history when messaging task is selected
@@ -209,6 +231,20 @@ export default function MobileOperatorApp() {
             }
         } catch (e) {
             console.error("Failed to fetch land zones", e);
+        }
+    };
+
+    const fetchResources = async () => {
+        try {
+            const res = await fetch("/api/mobile/v1/resources", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setAvailableResources(data || []);
+            }
+        } catch (e) {
+            console.error("Failed to fetch resources", e);
         }
     };
 
@@ -287,6 +323,53 @@ export default function MobileOperatorApp() {
             }
         } catch (e) {
             toast.error("Mrežna greška");
+        }
+    };
+
+    const handleOpenFinishModal = (task: TaskItem) => {
+        setFinishingTask(task);
+        setFinishDurationMin(task.durationMin || 30);
+        setFinishNotes("");
+        setSelectedResources({});
+        setFinishZoneId(task.dryBerthPlacement?.zoneId || "");
+        setFinishSpotNumber(task.dryBerthPlacement?.spotNumber ? String(task.dryBerthPlacement.spotNumber) : "");
+    };
+
+    const handleCompleteWorkOrder = async () => {
+        if (!finishingTask) return;
+        setIsSubmittingFinish(true);
+        try {
+            const resourcesPayload = Object.entries(selectedResources)
+                .filter(([_, qty]) => qty > 0)
+                .map(([resId, qty]) => ({ resourceId: resId, quantity: qty }));
+
+            const res = await fetch(`/api/mobile/v1/reservations/${finishingTask.id}/complete-work`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    durationMin: finishDurationMin,
+                    operatorNotes: finishNotes.trim(),
+                    zoneId: finishZoneId || undefined,
+                    spotNumber: finishSpotNumber ? Number(finishSpotNumber) : undefined,
+                    resources: resourcesPayload,
+                })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast.success("Operacija uspješno završena! Kalendar je ažuriran (plavo).");
+                setFinishingTask(null);
+                fetchSchedule();
+                fetchLandZones();
+            } else {
+                toast.error(data.error || "Greška pri završetku operacije");
+            }
+        } catch (e) {
+            toast.error("Mrežna greška");
+        } finally {
+            setIsSubmittingFinish(false);
         }
     };
 
@@ -765,7 +848,7 @@ export default function MobileOperatorApp() {
                                                 )}
                                                 {t.status === "in_progress" && (
                                                     <button
-                                                        onClick={() => handleUpdateStatus(t.id, "completed")}
+                                                        onClick={() => handleOpenFinishModal(t)}
                                                         className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
                                                     >
                                                         <CheckCircle2 className="h-3.5 w-3.5" />
@@ -847,6 +930,160 @@ export default function MobileOperatorApp() {
                     </div>
                 )}
             </main>
+
+            {/* Complete Work Order & Resources Modal Dialog */}
+            {finishingTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-3">
+                    <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-4 w-full max-w-md space-y-3 shadow-2xl animate-in slide-in-from-bottom duration-200 max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between border-b pb-2">
+                            <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                <CheckCircle2 className="h-5 w-5 text-indigo-600" />
+                                Završi Operaciju & Zaključi Nalog
+                            </h3>
+                            <button onClick={() => setFinishingTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+                        </div>
+
+                        {/* Vessel & Owner Info */}
+                        <div className="text-xs space-y-0.5 bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100">
+                            <span className="font-bold text-indigo-950 block text-sm">
+                                [{finishingTask.vessel?.registration || "Plovilo"}] {finishingTask.vessel?.name}
+                            </span>
+                            <span className="text-indigo-700 block">Vlasnik: {finishingTask.owner?.name || "—"}</span>
+                            <span className="text-slate-500 block">Usluga: {finishingTask.serviceType?.name || "Dizalica"}</span>
+                        </div>
+
+                        {/* Duration in Minutes */}
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-700 block">Stvarno trajanje operacije (minuta):</label>
+                            <div className="flex gap-2">
+                                {[15, 30, 45, 60].map(m => (
+                                    <button
+                                        key={m}
+                                        type="button"
+                                        onClick={() => setFinishDurationMin(m)}
+                                        className={`flex-1 py-1.5 rounded-lg border text-xs font-bold transition ${
+                                            finishDurationMin === m
+                                                ? "bg-indigo-600 text-white border-indigo-600"
+                                                : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                                        }`}
+                                    >
+                                        {m} min
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Dry berth zone if lift operation */}
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block flex items-center gap-1">
+                                <MapPin className="h-3.5 w-3.5 text-indigo-600" />
+                                Zona suhog veza (za vađenje plovila):
+                            </label>
+                            <select
+                                value={finishZoneId}
+                                onChange={(e) => setFinishZoneId(e.target.value)}
+                                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                            >
+                                <option value="">— Nije na suhom vezu (direktni povrat/ostalo) —</option>
+                                {landZones.map(z => (
+                                    <option key={z.id} value={z.id}>
+                                        {z.name} ({z.code}) — {z.availableSpots} slobodno
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Additional Resources (Dodatni resursi) */}
+                        <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+                            <span className="text-xs font-bold text-slate-800 block flex items-center justify-between">
+                                <span>Dodatni resursi lučice (opcionalno):</span>
+                                <span className="text-[10px] text-slate-500 font-normal">Default: bez resursa</span>
+                            </span>
+                            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                                {availableResources.length === 0 ? (
+                                    <div className="text-[11px] text-slate-400 italic">Nema definiranih resursa</div>
+                                ) : (
+                                    availableResources.map(res => {
+                                        const qty = selectedResources[res.id] || 0;
+                                        return (
+                                            <div
+                                                key={res.id}
+                                                className={`flex items-center justify-between p-2 rounded-lg border text-xs transition ${
+                                                    qty > 0 ? "bg-indigo-50 border-indigo-300 font-semibold" : "bg-white border-slate-200"
+                                                }`}
+                                            >
+                                                <div>
+                                                    <div className="text-slate-900 font-bold">{res.name}</div>
+                                                    <div className="text-[10px] text-slate-500">
+                                                        {Number(res.pricePerUnitEur).toFixed(2)} € / {res.unit}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedResources(prev => ({
+                                                                ...prev,
+                                                                [res.id]: Math.max(0, (prev[res.id] || 0) - 1)
+                                                            }));
+                                                        }}
+                                                        className="w-6 h-6 rounded-md bg-slate-200 text-slate-700 font-bold flex items-center justify-center hover:bg-slate-300 active:scale-95"
+                                                    >
+                                                        -
+                                                    </button>
+                                                    <span className="w-5 text-center font-bold text-xs">{qty}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedResources(prev => ({
+                                                                ...prev,
+                                                                [res.id]: (prev[res.id] || 0) + 1
+                                                            }));
+                                                        }}
+                                                        className="w-6 h-6 rounded-md bg-indigo-600 text-white font-bold flex items-center justify-center hover:bg-indigo-700 active:scale-95"
+                                                    >
+                                                        +
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Notes */}
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-700 block">Napomena operatera:</label>
+                            <input
+                                type="text"
+                                value={finishNotes}
+                                onChange={(e) => setFinishNotes(e.target.value)}
+                                placeholder="Npr. trup očišćen, postolje stabilno..."
+                                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                            />
+                        </div>
+
+                        {/* Buttons */}
+                        <div className="flex gap-2 pt-1">
+                            <button
+                                onClick={() => setFinishingTask(null)}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                            >
+                                Odustani
+                            </button>
+                            <button
+                                disabled={isSubmittingFinish}
+                                onClick={handleCompleteWorkOrder}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-1.5"
+                            >
+                                {isSubmittingFinish ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                                <span>Potvrdi i Završi</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Dry Berth Zone Assignment Modal Dialog */}
             {assigningTask && (

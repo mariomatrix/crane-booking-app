@@ -617,6 +617,38 @@ export const userCardEntries = pgTable("user_card_entries", {
     };
 });
 
+// ─── Resources (Dodatni resursi: Traktor, Pumpa, Oprema) ─────────────
+export const resources = pgTable("resources", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 255 }).notNull(), // npr. 'Traktor', 'Pumpa za ispumpavanje', 'Visokotlačni perač'
+    code: varchar("code", { length: 50 }).notNull().unique(), // npr. 'RES-TRAKTOR', 'RES-PUMPA'
+    unit: varchar("unit", { length: 30 }).default("sat").notNull(), // 'sat', 'kom', 'dan', 'paušal'
+    pricePerUnitEur: decimal("price_per_unit_eur", { precision: 8, scale: 2 }).default("0.00").notNull(),
+    vatRate: decimal("vat_rate", { precision: 5, scale: 2 }).default("25.00").notNull(),
+    description: text("description"),
+    isActive: boolean("is_active").default(true).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ─── Work Order Resources (Resursi korišteni po radnom nalogu) ────────
+export const workOrderResources = pgTable("work_order_resources", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    workOrderId: uuid("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
+    resourceId: uuid("resource_id").notNull().references(() => resources.id),
+    quantity: decimal("quantity", { precision: 8, scale: 2 }).default("1.00").notNull(),
+    unitPriceEur: decimal("unit_price_eur", { precision: 8, scale: 2 }).notNull(),
+    totalPriceEur: decimal("total_price_eur", { precision: 10, scale: 2 }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        workOrderIdIdx: index("work_order_resources_work_order_id_idx").on(table.workOrderId),
+        resourceIdIdx: index("work_order_resources_resource_id_idx").on(table.resourceId),
+    };
+});
+
 export type InsertLandZone = typeof landZones.$inferInsert;
 export type SelectLandZone = typeof landZones.$inferSelect;
 export type LandZone = SelectLandZone;
@@ -640,6 +672,14 @@ export type WorkOrder = SelectWorkOrder;
 export type InsertPriceListItem = typeof priceListItems.$inferInsert;
 export type SelectPriceListItem = typeof priceListItems.$inferSelect;
 export type PriceListItem = SelectPriceListItem;
+
+export type InsertResource = typeof resources.$inferInsert;
+export type SelectResource = typeof resources.$inferSelect;
+export type Resource = SelectResource;
+
+export type InsertWorkOrderResource = typeof workOrderResources.$inferInsert;
+export type SelectWorkOrderResource = typeof workOrderResources.$inferSelect;
+export type WorkOrderResource = SelectWorkOrderResource;
 
 export type InsertMemberStatutoryRights = typeof memberStatutoryRights.$inferInsert;
 export type SelectMemberStatutoryRights = typeof memberStatutoryRights.$inferSelect;

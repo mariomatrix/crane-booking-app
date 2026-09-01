@@ -13,6 +13,8 @@ import {
     memberStatutoryRights,
     userCardEntries,
     priceListItems,
+    resources,
+    workOrderResources,
 } from "../../drizzle/schema";
 import { eq, and, inArray, gte, lte, isNull, desc, asc, count, sql, ne } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
@@ -462,6 +464,28 @@ router.post("/reservations/:id/complete-work", requireMobileAuth, async (req: Au
     // Complete work order if active
     const [activeOrder] = await db.select().from(workOrders).where(and(eq(workOrders.reservationId, id), eq(workOrders.status, "in_progress"))).limit(1);
     if (activeOrder) {
+        // Save any attached resources
+        const { resources: reqResources } = req.body;
+        if (reqResources && Array.isArray(reqResources) && reqResources.length > 0) {
+            await db.delete(workOrderResources).where(eq(workOrderResources.workOrderId, activeOrder.id));
+            for (const rItem of reqResources) {
+                const [rDef] = await db.select().from(resources).where(eq(resources.id, rItem.resourceId)).limit(1);
+                if (rDef) {
+                    const unitPrice = Number(rDef.pricePerUnitEur) || 0;
+                    const qty = Number(rItem.quantity) || 1;
+                    const tot = Number((unitPrice * qty).toFixed(2));
+                    await db.insert(workOrderResources).values({
+                        workOrderId: activeOrder.id,
+                        resourceId: rDef.id,
+                        quantity: qty.toFixed(2),
+                        unitPriceEur: unitPrice.toFixed(2),
+                        totalPriceEur: tot.toFixed(2),
+                        notes: rItem.notes || null,
+                    });
+                }
+            }
+        }
+
         await db.update(workOrders).set({
             status: "completed",
             completedAt,
@@ -559,6 +583,20 @@ router.patch("/reservations/:id/status", requireMobileAuth, async (req: Authenti
 
     await db.update(reservations).set({ status: status as any, updatedAt: new Date() }).where(eq(reservations.id, id));
     return res.json({ success: true, id, status });
+});
+
+// 6b. Get Active Resources: GET /api/mobile/v1/resources
+router.get("/resources", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const activeResources = await db
+        .select()
+        .from(resources)
+        .where(eq(resources.isActive, true))
+        .orderBy(asc(resources.sortOrder), asc(resources.name));
+
+    return res.json(activeResources);
 });
 
 // 7. Get Land Zones & Capacity: GET /api/mobile/v1/land-zones

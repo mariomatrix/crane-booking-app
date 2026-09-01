@@ -125,6 +125,18 @@ async function runMigration() {
                 "updated_at" timestamp DEFAULT now() NOT NULL
             )
         `;
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."land_waiting_status" AS ENUM('waiting', 'offered', 'assigned', 'declined', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "position" integer DEFAULT 0 NOT NULL`;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "admin_note" text`;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "assigned_occupancy_id" uuid REFERENCES "land_occupancies"("id")`;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "offered_at" timestamp`;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "declined_at" timestamp`;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "decline_count" integer DEFAULT 0 NOT NULL`;
         console.log("land_waiting_list table verified.");
     } catch (e: any) {
         console.warn("land_waiting_list table verification warning:", e?.message || e);
@@ -342,6 +354,40 @@ async function runMigration() {
         await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_start_time_idx" ON "crane_operation_log" ("start_time")`;
         await migrationClient`CREATE INDEX IF NOT EXISTS "crane_op_log_reservation_id_idx" ON "crane_operation_log" ("reservation_id")`;
         console.log("crane_operation_log table verified.");
+
+        // ─── Resources and Work Order Resources ─────────────────────────────
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "resources" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "name" varchar(255) NOT NULL,
+                "code" varchar(50) NOT NULL UNIQUE,
+                "unit" varchar(30) DEFAULT 'sat' NOT NULL,
+                "price_per_unit_eur" numeric(8, 2) DEFAULT 0.00 NOT NULL,
+                "vat_rate" numeric(5, 2) DEFAULT 25.00 NOT NULL,
+                "description" text,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        console.log("resources table verified.");
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "work_order_resources" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "work_order_id" uuid NOT NULL REFERENCES "work_orders"("id") ON DELETE CASCADE,
+                "resource_id" uuid NOT NULL REFERENCES "resources"("id"),
+                "quantity" numeric(8, 2) DEFAULT 1.00 NOT NULL,
+                "unit_price_eur" numeric(8, 2) NOT NULL,
+                "total_price_eur" numeric(10, 2) NOT NULL,
+                "notes" text,
+                "created_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_order_resources_work_order_id_idx" ON "work_order_resources" ("work_order_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_order_resources_resource_id_idx" ON "work_order_resources" ("resource_id")`;
+        console.log("work_order_resources table verified.");
     } catch (e: any) {
         console.warn("Work orders tables verification warning:", e?.message || e);
     }
@@ -640,7 +686,7 @@ async function runMigration() {
     }
 
     // ─── Import schema and helpers ────────────────────────────────────
-    const { cranes, users, serviceTypes, holidays, landZones, priceListItems, memberStatutoryRights } = await import("../drizzle/schema");
+    const { cranes, users, serviceTypes, holidays, landZones, priceListItems, memberStatutoryRights, resources } = await import("../drizzle/schema");
     const { eq } = await import("drizzle-orm");
     const bcrypt = await import("bcryptjs");
 
@@ -685,8 +731,81 @@ async function runMigration() {
                 isActive: true,
                 sortOrder: 4,
             },
+            {
+                code: "USL-LEZARINA-DAN",
+                name: "Korištenje suhog veza / ležarina (po danu)",
+                targetType: "external_commercial",
+                fixedPriceEur: "15.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 5,
+            },
         ]);
         console.log("Price list items seeded.");
+    } else {
+        // Ensure USL-LEZARINA-DAN exists
+        const [hasLezarina] = await db.select().from(priceListItems).where(eq(priceListItems.code, "USL-LEZARINA-DAN")).limit(1);
+        if (!hasLezarina) {
+            await db.insert(priceListItems).values({
+                code: "USL-LEZARINA-DAN",
+                name: "Korištenje suhog veza / ležarina (po danu)",
+                targetType: "external_commercial",
+                fixedPriceEur: "15.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 5,
+            });
+            console.log("Added USL-LEZARINA-DAN to price list items.");
+        }
+    }
+
+    // ─── Seed: Resources (Traktor, Pumpa, Oprema) ────────────────────
+    const existingResources = await db.select().from(resources);
+    if (existingResources.length === 0) {
+        console.log("Seeding resources...");
+        await db.insert(resources).values([
+            {
+                name: "Traktor",
+                code: "RES-TRAKTOR",
+                unit: "sat",
+                pricePerUnitEur: "30.00",
+                vatRate: "25.00",
+                description: "Vuča i premještanje plovila na platou",
+                sortOrder: 1,
+                isActive: true,
+            },
+            {
+                name: "Pumpa za ispumpavanje",
+                code: "RES-PUMPA",
+                unit: "sat",
+                pricePerUnitEur: "25.00",
+                vatRate: "25.00",
+                description: "Pražnjenje kaljuže i ispumpavanje vode",
+                sortOrder: 2,
+                isActive: true,
+            },
+            {
+                name: "Visokotlačni perač trupa",
+                code: "RES-PERAC",
+                unit: "paušal",
+                pricePerUnitEur: "30.00",
+                vatRate: "25.00",
+                description: "Pranje podvodnog dijela trupa miniwashem",
+                sortOrder: 3,
+                isActive: true,
+            },
+            {
+                name: "Postolje / Ležaljka za brod",
+                code: "RES-POSTOLJE",
+                unit: "kom",
+                pricePerUnitEur: "10.00",
+                vatRate: "25.00",
+                description: "Korištenje ležaljke / potpora na suhom vezu",
+                sortOrder: 4,
+                isActive: true,
+            },
+        ]);
+        console.log("Resources seeded.");
     }
 
     // ─── Seed: Member Statutory Rights for active users ───────────────

@@ -26,6 +26,7 @@ import { priceListRouter } from "./priceList.router";
 import { memberSyncRouter } from "./memberSync/memberSync.router";
 import { berthsRouter } from "./berths.router";
 import { invoicesRouter } from "./invoices.router";
+import { resourcesRouter } from "./resources.router";
 import {
   listCranes,
   getCraneById,
@@ -292,6 +293,7 @@ export const appRouter = router({
   memberSync: memberSyncRouter,
   berths: berthsRouter,
   invoices: invoicesRouter,
+  resources: resourcesRouter,
 
   // ─── Auth ────────────────────────────────────────────────────────────
   auth: router({
@@ -1599,6 +1601,64 @@ export const appRouter = router({
             message: "Dizalica nije pronađena.",
           });
         return crane;
+      }),
+
+    getProfile: operatorProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .query(async ({ input }) => {
+        const crane = await getCraneById(input.id);
+        if (!crane)
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Dizalica nije pronađena.",
+          });
+
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const { craneOperationLog, users, reservations } = await import("../drizzle/schema");
+
+        const logs = await db
+          .select({
+            id: craneOperationLog.id,
+            operationType: craneOperationLog.operationType,
+            startTime: craneOperationLog.startTime,
+            endTime: craneOperationLog.endTime,
+            durationMinutes: craneOperationLog.durationMinutes,
+            operatorId: craneOperationLog.operatorId,
+            operatorName: users.name,
+            reservationId: craneOperationLog.reservationId,
+            vesselName: reservations.vesselName,
+            vesselRegistration: reservations.vesselRegistration,
+            note: craneOperationLog.note,
+            createdAt: craneOperationLog.createdAt,
+          })
+          .from(craneOperationLog)
+          .leftJoin(users, eq(craneOperationLog.operatorId, users.id))
+          .leftJoin(reservations, eq(craneOperationLog.reservationId, reservations.id))
+          .where(eq(craneOperationLog.craneId, input.id))
+          .orderBy(desc(craneOperationLog.startTime))
+          .limit(100);
+
+        const totalMinutes = logs.reduce((acc, log) => acc + (log.durationMinutes || 0), 0);
+        const totalHours = Number((totalMinutes / 60).toFixed(1));
+        const totalLifts = logs.filter(l => l.operationType === "lift" || l.operationType === "lift_from_sea").length;
+        const totalLowers = logs.filter(l => l.operationType === "lower" || l.operationType === "lower_to_sea").length;
+        const totalMaintenance = logs.filter(l => l.operationType === "maintenance").length;
+
+        return {
+          crane,
+          stats: {
+            totalOperations: logs.length,
+            totalMinutes,
+            totalHours,
+            totalLifts,
+            totalLowers,
+            totalMaintenance,
+            lastOperationAt: logs[0]?.startTime || null,
+          },
+          recentLogs: logs,
+        };
       }),
 
     create: adminProcedure

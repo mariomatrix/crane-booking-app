@@ -308,44 +308,76 @@ export default function AdminLandZones() {
                       <TableHead>{isHr ? "Vlasnik" : "Owner"}</TableHead>
                       <TableHead>{isHr ? "Mjesto br." : "Spot No."}</TableHead>
                       <TableHead>{isHr ? "Podignut" : "Lifted At"}</TableHead>
+                      <TableHead>{isHr ? "Trajanje boravka" : "Stay Duration"}</TableHead>
                       <TableHead className="text-right">{isHr ? "Akcija" : "Action"}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {occupancies.map((occ) => (
-                      <TableRow key={occ.id}>
-                        <TableCell className="font-semibold flex items-center gap-2">
-                          <Ship className="h-4 w-4 text-primary" />
-                          {occ.vessel.name}
-                          <span className="text-xs text-muted-foreground font-normal">
-                            ({occ.vessel.lengthM}m × {occ.vessel.beamM}m)
-                          </span>
-                        </TableCell>
-                        <TableCell><Badge variant="secondary">{occ.vessel.registration}</Badge></TableCell>
-                        <TableCell>{occ.user.name || occ.user.email}</TableCell>
-                        <TableCell className="font-medium">{occ.spotNumber || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground text-xs">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {formatAppDate(occ.liftedAt)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50"
-                            onClick={() => {
-                              if (confirm(isHr ? "Potvrdite spuštanje plovila u more?" : "Confirm vessel launch?")) {
-                                launchMutation.mutate({ id: occ.id });
-                              }
-                            }}
-                          >
-                            {isHr ? "Spusti u more" : "Launch"}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {occupancies.map((occ) => {
+                      const liftedDate = occ.liftedAt ? new Date(occ.liftedAt) : new Date();
+                      const daysOnLand = Math.max(1, Math.ceil((Date.now() - liftedDate.getTime()) / (1000 * 60 * 60 * 24)));
+                      const isMember = (occ.user?.clientCategory || "member") === "member";
+                      const isOverLimit = isMember && daysOnLand > 30;
+
+                      return (
+                        <TableRow key={occ.id}>
+                          <TableCell className="font-semibold flex items-center gap-2">
+                            <Ship className="h-4 w-4 text-primary" />
+                            {occ.vessel.name}
+                            <span className="text-xs text-muted-foreground font-normal">
+                              ({occ.vessel.lengthM}m × {occ.vessel.beamM}m)
+                            </span>
+                          </TableCell>
+                          <TableCell><Badge variant="secondary">{occ.vessel.registration}</Badge></TableCell>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium text-xs">{occ.user.name || occ.user.email}</div>
+                              <span className="text-[10px] text-muted-foreground">
+                                {isMember ? "Stalni član" : "Privremeni korisnik"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium">{occ.spotNumber || "—"}</TableCell>
+                          <TableCell className="text-muted-foreground text-xs">
+                            <span className="flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {formatAppDate(occ.liftedAt)}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {isMember ? (
+                              isOverLimit ? (
+                                <Badge className="bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 font-bold text-[11px]">
+                                  ⚠️ {daysOnLand} dana (+{daysOnLand - 30} d doplata)
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 font-semibold text-[11px]">
+                                  ✓ {daysOnLand} / 30 dana (Uključeno)
+                                </Badge>
+                              )
+                            ) : (
+                              <Badge className="bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 font-bold text-[11px]">
+                                💰 {daysOnLand} dana ({(daysOnLand * 15).toFixed(2)} €)
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50 text-xs font-semibold"
+                              onClick={() => {
+                                if (confirm(isHr ? "Potvrdite spuštanje plovila u more?" : "Confirm vessel launch?")) {
+                                  launchMutation.mutate({ id: occ.id });
+                                }
+                              }}
+                            >
+                              {isHr ? "Spusti u more" : "Launch"}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )
