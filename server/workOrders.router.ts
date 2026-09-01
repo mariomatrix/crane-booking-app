@@ -375,17 +375,28 @@ export const workOrdersRouter = router({
                 })
                 .returning();
 
-            // Insert any attached resources if specified
-            if (input.resources && input.resources.length > 0) {
-                for (const resItem of input.resources) {
+            // Insert any attached resources if specified, or prefill from reservation selectedResources
+            let resourcesToApply = input.resources || [];
+            if (resourcesToApply.length === 0 && res.selectedResources) {
+                try {
+                    const parsed = JSON.parse(res.selectedResources);
+                    if (Array.isArray(parsed)) {
+                        resourcesToApply = parsed;
+                    }
+                } catch {}
+            }
+
+            if (resourcesToApply && resourcesToApply.length > 0) {
+                for (const resItem of resourcesToApply) {
                     const [resDef] = await db.select().from(resources).where(eq(resources.id, resItem.resourceId)).limit(1);
                     if (resDef) {
                         const unitPrice = Number(resDef.pricePerUnitEur) || 0;
-                        const totalPrice = Number((unitPrice * resItem.quantity).toFixed(2));
+                        const qty = Number(resItem.quantity) || 1;
+                        const totalPrice = Number((unitPrice * qty).toFixed(2));
                         await db.insert(workOrderResources).values({
                             workOrderId: newOrder.id,
                             resourceId: resDef.id,
-                            quantity: resItem.quantity.toFixed(2),
+                            quantity: qty.toFixed(2),
                             unitPriceEur: unitPrice.toFixed(2),
                             totalPriceEur: totalPrice.toFixed(2),
                             notes: resItem.notes || null,

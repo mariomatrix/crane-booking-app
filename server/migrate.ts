@@ -672,7 +672,10 @@ async function runMigration() {
         await migrationClient`CREATE INDEX IF NOT EXISTS "user_card_entry_type_event_date_idx" ON "user_card_entries" ("entry_type", "event_date")`;
         await migrationClient`CREATE INDEX IF NOT EXISTS "invoices_issue_date_idx" ON "invoices" ("issue_date")`;
         await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assign_berth_is_active_idx" ON "berth_assignments" ("berth_id", "is_active")`;
-        await migrationClient`CREATE INDEX IF NOT EXISTS "berth_assign_vessel_is_active_idx" ON "berth_assignments" ("vessel_id", "is_active")`;
+        await migrationClient`ALTER TABLE "reservations" ADD COLUMN IF NOT EXISTS "selected_resources" text`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "messages_res_id_is_read_idx" ON "messages" ("reservation_id", "is_read")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_sched_start_end_idx" ON "reservations" ("scheduled_start", "scheduled_end")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "res_crane_sched_start_idx" ON "reservations" ("crane_id", "scheduled_start")`;
         console.log("Performance indexes verified.");
     } catch (e: any) {
         console.warn("Performance indexes verification warning:", e?.message || e);

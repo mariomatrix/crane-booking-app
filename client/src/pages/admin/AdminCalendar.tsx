@@ -79,57 +79,65 @@ export default function AdminCalendar() {
     const draggableRef = useRef<HTMLDivElement>(null);
     const calendarRef = useRef<FullCalendar>(null);
 
-    // Filters and Data
-    const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false });
-    const usersQuery = trpc.user.list.useQuery({ pageSize: 200 });
+    // Filters and Data with optimized caching
+    const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false }, { staleTime: 300000 });
+    const usersQuery = trpc.user.list.useQuery({ pageSize: 50 }, { staleTime: 300000 });
     const usersList = usersQuery.data?.data || [];
-    const { data: holidays = [] } = trpc.holiday.list.useQuery();
+    const { data: holidays = [] } = trpc.holiday.list.useQuery(undefined, { staleTime: 300000 });
+    const { data: seasonsList = [] } = trpc.season.list.useQuery(undefined, { staleTime: 300000 });
+    const { data: sysSettings } = trpc.settings.get.useQuery(undefined, { staleTime: 300000 });
+    const { data: landZones = [] } = trpc.landZone.list.useQuery(undefined, { staleTime: 300000 });
+
+    const viewDateDayKey = useMemo(() => startOfDay(viewDate).getTime(), [viewDate]);
+    const visibleRangeKey = useMemo(() => `${visibleRange?.start?.getTime() || 0}-${visibleRange?.end?.getTime() || 0}`, [visibleRange]);
 
     const fetchRange = useMemo(() => {
         if (viewMode === 'master') {
+            const start = new Date(viewDateDayKey);
             return {
-                start: startOfDay(viewDate),
-                end: endOfDay(addDays(viewDate, cranesList.length || 1))
+                start,
+                end: endOfDay(addDays(start, cranesList.length || 1))
             };
         }
         return visibleRange;
-    }, [viewMode, viewDate, visibleRange, cranesList.length]);
+    }, [viewMode, viewDateDayKey, visibleRangeKey, cranesList.length]);
 
     const reservationsQuery = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
         userId: selectedUser !== "all" ? selectedUser : undefined,
         scheduledStart: fetchRange?.start,
         scheduledEnd: fetchRange?.end,
-        pageSize: 500, // Reduced from 1000, still safe for a month view
+        pageSize: 500,
     }, {
         enabled: !!fetchRange,
-        staleTime: 30000, // 30 seconds
+        staleTime: 60000, // 60 seconds cache
+        refetchOnWindowFocus: false,
     });
     const allReservations = reservationsQuery.data?.data || [];
     const isResLoading = reservationsQuery.isLoading;
-    const landWaitingQuery = trpc.landWaiting.listAll.useQuery();
+    const landWaitingQuery = trpc.landWaiting.listAll.useQuery(undefined, { staleTime: 60000, refetchOnWindowFocus: false });
     const landWaitingList = (landWaitingQuery.data || []).filter((w: any) => w.status === "waiting" || w.status === "offered");
-    const { data: sysSettings } = trpc.settings.get.useQuery();
-    const { data: landZones = [] } = trpc.landZone.list.useQuery();
     const utils = trpc.useUtils();
 
-    // ─── Real-Time Calendar Event Synchronizer (SSE) ───────────────────────
+    // ─── Real-Time Calendar Event Synchronizer (SSE with Debounce) ───────────
     useEffect(() => {
+        let debounceTimer: any = null;
         const eventSource = new EventSource("/api/events/calendar-stream");
 
         eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
                 if (data.type === "CALENDAR_UPDATED") {
-                    // Invalidira tRPC upite za kalendar i listu čekanja
-                    utils.reservation.listAll.invalidate();
-                    utils.waitingList.listAll.invalidate();
-                    utils.landWaiting.listAll.invalidate();
+                    if (debounceTimer) clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => {
+                        utils.reservation.listAll.invalidate();
+                        utils.waitingList.listAll.invalidate();
+                        utils.landWaiting.listAll.invalidate();
+                    }, 500);
 
-                    // Prikazuje obavijest operateru s imenom aktera i radnjom
                     toast.info(`${data.actorName} ${data.actionText}`, {
                         description: "Kalendar je automatski osvježen.",
-                        duration: 4000,
+                        duration: 3000,
                     });
                 }
             } catch (err) {
@@ -142,11 +150,10 @@ export default function AdminCalendar() {
         };
 
         return () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
             eventSource.close();
         };
     }, [utils]);
-
-    const { data: seasonsList = [] } = trpc.season.list.useQuery();
 
     const currentSeasonWorkingHours = useMemo(() => {
         if (!viewDate) return null;

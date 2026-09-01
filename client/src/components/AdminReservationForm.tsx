@@ -105,6 +105,8 @@ export function AdminReservationForm({
     const isLowerToSea = selectedServiceType?.operationCategory === "lower_to_sea";
 
     const { data: landZones = [] } = trpc.landZone.list.useQuery();
+    const { data: availableResources = [] } = trpc.resources.list.useQuery({ onlyActive: true });
+    const [selectedResources, setSelectedResources] = useState<Record<string, number>>({});
 
     const { data: zoneCapacity } = trpc.landZone.checkCapacity.useQuery(
         { zoneId: landZoneId },
@@ -252,6 +254,9 @@ export function AdminReservationForm({
             craneId: craneId || undefined,
             scheduledStart: !isWaitlisted ? scheduledStartDate : undefined,
             durationMin: durationMin ? Number(durationMin) : undefined,
+            resources: Object.entries(selectedResources)
+                .filter(([_, qty]) => qty > 0)
+                .map(([resourceId, quantity]) => ({ resourceId, quantity })),
         };
 
         if (selectedVesselId === "new" && saveToProfile) {
@@ -583,6 +588,73 @@ export function AdminReservationForm({
                                 </div>
                             </div>
                         )}
+
+                        {/* Additional Resources Selection */}
+                        <div className="space-y-2 bg-slate-50/80 p-3 rounded-xl border border-slate-200">
+                            <div className="flex items-center justify-between">
+                                <Label className="text-xs font-bold text-slate-800">
+                                    {lang === "hr" ? "Dodatni resursi lučice (opcionalno)" : "Additional marina resources (optional)"}
+                                </Label>
+                                <span className="text-[10px] text-muted-foreground">
+                                    {lang === "hr" ? "Default: bez resursa" : "Default: none"}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                {availableResources.length === 0 ? (
+                                    <div className="col-span-2 text-[11px] text-muted-foreground italic py-1">
+                                        {lang === "hr" ? "Nema aktivnih resursa u cjeniku." : "No active resources in price list."}
+                                    </div>
+                                ) : (
+                                    availableResources.map((res: any) => {
+                                        const qty = selectedResources[res.id] || 0;
+                                        return (
+                                            <div
+                                                key={res.id}
+                                                className={cn(
+                                                    "p-2 rounded-lg border text-xs flex items-center justify-between transition",
+                                                    qty > 0 ? "bg-indigo-50/80 border-indigo-300 font-semibold" : "bg-white border-slate-200"
+                                                )}
+                                            >
+                                                <div className="min-w-0 pr-1">
+                                                    <div className="truncate font-medium text-slate-900">{res.name}</div>
+                                                    <div className="text-[10px] text-muted-foreground">
+                                                        {Number(res.pricePerUnitEur).toFixed(2)} € / {res.unit}
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedResources(prev => ({
+                                                                ...prev,
+                                                                [res.id]: Math.max(0, (prev[res.id] || 0) - 1)
+                                                            }));
+                                                        }}
+                                                        className="w-5 h-5 rounded bg-slate-200 text-slate-700 font-bold flex items-center justify-center hover:bg-slate-300 text-xs active:scale-95"
+                                                    >
+                                                        -
+                                                    </button>
+                                                    <span className="w-4 text-center font-bold text-xs">{qty}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setSelectedResources(prev => ({
+                                                                ...prev,
+                                                                [res.id]: (prev[res.id] || 0) + 1
+                                                            }));
+                                                        }}
+                                                        className="w-5 h-5 rounded bg-indigo-600 text-white font-bold flex items-center justify-center hover:bg-indigo-700 text-xs active:scale-95"
+                                                    >
+                                                        +
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Napomena" : "Note"}</Label>
                             <Textarea

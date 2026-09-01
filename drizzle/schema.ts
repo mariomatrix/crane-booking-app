@@ -226,6 +226,7 @@ export const reservations = pgTable("reservations", {
     reminderSent: boolean("reminder_sent").default(false).notNull(),
     contactPhone: varchar("contact_phone", { length: 50 }),
     liftPurpose: text("lift_purpose"),
+    selectedResources: text("selected_resources"), // JSON string odabranih resursa kod unosa rezervacije
 
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

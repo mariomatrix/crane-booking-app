@@ -1760,6 +1760,15 @@ export const appRouter = router({
           landWaitingId: z.string().uuid().optional(),
           overrideCapacityCheck: z.boolean().optional(),
           status: z.enum(["pending", "waitlisted"]).optional(),
+          resources: z
+            .array(
+              z.object({
+                resourceId: z.string().uuid(),
+                quantity: z.number().positive().default(1),
+                notes: z.string().optional(),
+              })
+            )
+            .optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -2056,6 +2065,10 @@ export const appRouter = router({
             userNote: input.userNote,
             adminNote: input.adminNote,
             landZoneId: input.landZoneId,
+            selectedResources:
+              input.resources && input.resources.length > 0
+                ? JSON.stringify(input.resources)
+                : undefined,
           })
           .returning({ id: resTable.id });
 
@@ -2437,19 +2450,7 @@ export const appRouter = router({
         }
         const [countRow] = await countQuery;
 
-        // Subquery for unread message counts to avoid N+1
-        const unreadCountSubquery = db
-          .select({
-            reservationId: messages.reservationId,
-            count: sql<number>`count(*)::int`.as("count"),
-          })
-          .from(messages)
-          .innerJoin(users, eq(messages.senderId, users.id))
-          .where(and(eq(messages.isRead, false), eq(users.role, "user")))
-          .groupBy(messages.reservationId)
-          .as("unread_counts");
-
-        // Single optimized query with JOINs to eliminate N+1 problem
+        // Optimized query with correlated unread count seeking via index
         const items = await db
           .select({
             reservation: reservations,
@@ -2481,7 +2482,14 @@ export const appRouter = router({
               name: landZones.name,
               code: landZones.code,
             },
-            unreadCount: sql<number>`COALESCE("unread_counts"."count", 0)`,
+            unreadCount: sql<number>`COALESCE((
+              SELECT count(*)::int
+              FROM "messages" m
+              INNER JOIN "users" u ON m."sender_id" = u."id"
+              WHERE m."reservation_id" = "reservations"."id"
+                AND m."is_read" = false
+                AND u."role" = 'user'
+            ), 0)`,
           })
           .from(reservations)
           .leftJoin(users, eq(reservations.userId, users.id))
@@ -2494,10 +2502,6 @@ export const appRouter = router({
           .leftJoin(
             sql`${users} as approver_users`,
             eq(reservations.approvedBy, sql`approver_users.id`)
-          )
-          .leftJoin(
-            unreadCountSubquery,
-            eq(reservations.id, unreadCountSubquery.reservationId)
           )
           .where(conditions.length > 0 ? and(...conditions) : undefined)
           .orderBy(desc(reservations.createdAt))
