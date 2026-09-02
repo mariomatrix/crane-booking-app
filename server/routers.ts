@@ -2859,6 +2859,19 @@ export const appRouter = router({
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
 
+        if (reservation.status === "completed") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Završena rezervacija je zaključena i ne može se premještati.",
+          });
+        }
+        if (reservation.status === "cancelled" || reservation.status === "rejected") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Otkazana ili odbijena rezervacija se ne može premještati.",
+          });
+        }
+
         const targetCraneId = input.craneId ?? reservation.craneId;
 
         const sysSettings = await getAllSettings();

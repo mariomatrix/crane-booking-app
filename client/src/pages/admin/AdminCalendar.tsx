@@ -418,6 +418,8 @@ export default function AdminCalendar() {
                 const end = addDays(viewDate, actualCraneIdx);
                 end.setHours(rawEnd.getHours(), rawEnd.getMinutes(), 0, 0);
 
+                const isLocked = r.isMaintenance || r.status === 'completed' || r.status === 'cancelled' || r.status === 'rejected';
+
                 return {
                     id: String(r.id),
                     title: r.isMaintenance
@@ -427,7 +429,9 @@ export default function AdminCalendar() {
                     end,
                     backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
                     borderColor: "transparent",
-                    editable: !r.isMaintenance,
+                    editable: !isLocked,
+                    startEditable: !isLocked,
+                    durationEditable: !isLocked,
                     extendedProps: {
                         reservationId: r.id,
                         status: r.status,
@@ -451,6 +455,8 @@ export default function AdminCalendar() {
                 const start = rawDate;
                 const end = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
 
+                const isLocked = r.isMaintenance || r.status === 'completed' || r.status === 'cancelled' || r.status === 'rejected';
+
                 return {
                     id: String(r.id),
                     title: r.isMaintenance
@@ -460,7 +466,9 @@ export default function AdminCalendar() {
                     end,
                     backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
                     borderColor: "transparent",
-                    editable: !r.isMaintenance,
+                    editable: !isLocked,
+                    startEditable: !isLocked,
+                    durationEditable: !isLocked,
                     extendedProps: {
                         reservationId: r.id,
                         status: r.status,
@@ -529,6 +537,18 @@ export default function AdminCalendar() {
             return;
         }
 
+        const status = info.event.extendedProps.status;
+        if (status === 'completed') {
+            info.revert();
+            toast.warning(lang === 'hr' ? 'Završena rezervacija je zaključena i ne može se premještati.' : 'Completed reservation is locked and cannot be moved.');
+            return;
+        }
+        if (status === 'cancelled' || status === 'rejected') {
+            info.revert();
+            toast.warning(lang === 'hr' ? 'Otkazana ili odbijena rezervacija se ne može premještati.' : 'Cancelled or rejected reservation cannot be moved.');
+            return;
+        }
+
         const id = String(info.event.extendedProps.reservationId || info.event.id);
 
         if (viewMode !== 'master') {
@@ -590,6 +610,18 @@ export default function AdminCalendar() {
     const handleEventResize = (info: any) => {
         if (info.event.extendedProps.isMaintenance) {
             info.revert();
+            return;
+        }
+
+        const status = info.event.extendedProps.status;
+        if (status === 'completed') {
+            info.revert();
+            toast.warning(lang === 'hr' ? 'Završena rezervacija je zaključena i ne može se mijenjati.' : 'Completed reservation is locked and cannot be changed.');
+            return;
+        }
+        if (status === 'cancelled' || status === 'rejected') {
+            info.revert();
+            toast.warning(lang === 'hr' ? 'Otkazana ili odbijena rezervacija se ne može mijenjati.' : 'Cancelled or rejected reservation cannot be changed.');
             return;
         }
         const id = String(info.event.extendedProps.reservationId || info.event.id);
