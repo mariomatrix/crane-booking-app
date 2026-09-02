@@ -712,7 +712,7 @@ export default function AdminCalendar() {
                         <span>Nova rezervacija</span>
                     </Button>
                     <Dialog open={isCreateResOpen} onOpenChange={setIsCreateResOpen}>
-                        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto overflow-x-hidden p-6 sm:p-8">
                             <DialogHeader>
                                 <DialogTitle>Nova rezervacija</DialogTitle>
                                 <DialogDescription>
@@ -936,7 +936,7 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <Dialog open={isWaitingEditOpen} onOpenChange={setIsWaitingEditOpen}>
-                        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+                        <DialogContent className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto overflow-x-hidden p-6 sm:p-8">
                             <DialogHeader>
                                 <DialogTitle>Definiranje suhog veza i termina dizalice za zahtjev</DialogTitle>
                                 <DialogDescription>

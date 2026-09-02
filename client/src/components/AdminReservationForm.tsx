@@ -631,9 +631,9 @@ export function AdminReservationForm({
                                     {lang === "hr" ? "Default: bez resursa" : "Default: none"}
                                 </span>
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                            <div className="flex flex-col gap-2 pt-1">
                                 {availableResources.length === 0 ? (
-                                    <div className="col-span-2 text-[11px] text-muted-foreground italic py-1">
+                                    <div className="text-[11px] text-muted-foreground italic py-1">
                                         {lang === "hr" ? "Nema aktivnih resursa u cjeniku." : "No active resources in price list."}
                                     </div>
                                 ) : (
@@ -643,17 +643,18 @@ export function AdminReservationForm({
                                             <div
                                                 key={res.id}
                                                 className={cn(
-                                                    "p-2 rounded-lg border text-xs flex items-center justify-between transition",
-                                                    qty > 0 ? "bg-indigo-50/80 border-indigo-300 font-semibold" : "bg-white border-slate-200"
+                                                    "p-2.5 px-3 rounded-lg border text-xs flex items-center justify-between transition gap-3",
+                                                    qty > 0 ? "bg-indigo-50/90 border-indigo-300 font-semibold shadow-xs" : "bg-white border-slate-200 hover:border-slate-300"
                                                 )}
                                             >
-                                                <div className="min-w-0 pr-1">
-                                                    <div className="truncate font-medium text-slate-900">{res.name}</div>
-                                                    <div className="text-[10px] text-muted-foreground">
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="font-semibold text-slate-900 text-sm">{res.name}</div>
+                                                    <div className="text-xs text-muted-foreground mt-0.5">
                                                         {Number(res.pricePerUnitEur).toFixed(2)} € / {res.unit}
+                                                        {Number(res.vatRate) > 0 && ` (+${res.vatRate}% PDV)`}
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                <div className="flex items-center gap-1.5 shrink-0 bg-slate-100 p-1 rounded-md border border-slate-200">
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -662,11 +663,12 @@ export function AdminReservationForm({
                                                                 [res.id]: Math.max(0, (prev[res.id] || 0) - 1)
                                                             }));
                                                         }}
-                                                        className="w-5 h-5 rounded bg-slate-200 text-slate-700 font-bold flex items-center justify-center hover:bg-slate-300 text-xs active:scale-95"
+                                                        className="w-7 h-7 rounded bg-white text-slate-700 font-bold flex items-center justify-center hover:bg-slate-200 text-base shadow-xs active:scale-95 transition"
+                                                        title="Smanji"
                                                     >
                                                         -
                                                     </button>
-                                                    <span className="w-4 text-center font-bold text-xs">{qty}</span>
+                                                    <span className="w-6 text-center font-bold text-sm text-slate-900">{qty}</span>
                                                     <button
                                                         type="button"
                                                         onClick={() => {
@@ -675,7 +677,8 @@ export function AdminReservationForm({
                                                                 [res.id]: (prev[res.id] || 0) + 1
                                                             }));
                                                         }}
-                                                        className="w-5 h-5 rounded bg-indigo-600 text-white font-bold flex items-center justify-center hover:bg-indigo-700 text-xs active:scale-95"
+                                                        className="w-7 h-7 rounded bg-primary text-primary-foreground font-bold flex items-center justify-center hover:bg-primary/90 text-base shadow-xs active:scale-95 transition"
+                                                        title="Povećaj"
                                                     >
                                                         +
                                                     </button>
