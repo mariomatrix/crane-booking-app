@@ -54,6 +54,7 @@ export function AdminReservationForm({
 
     // ── Form state ───────────────────────────────────────────────────────
     const [userId, setUserId] = useState(initialData?.userId || initialData?.userObj?.id || "");
+    const isEditingWaitlist = !!initialData?.landWaitingId;
     const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
     const [requestedDate, setRequestedDate] = useState<Date | undefined>(initialData?.requestedDate || new Date());
     const [scheduledTime, setScheduledTime] = useState(initialData?.scheduledTime || "08:00");
@@ -316,7 +317,14 @@ export function AdminReservationForm({
         <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-4">
                 <div className="space-y-2">
-                    <Label>Korisnik (Vlasnik rezervacije) *</Label>
+                    <div className="flex items-center justify-between">
+                        <Label className="text-xs font-semibold">{lang === "hr" ? "Korisnik (Vlasnik rezervacije)" : "Client"} *</Label>
+                        {isEditingWaitlist && (
+                            <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center gap-1">
+                                🔒 {lang === "hr" ? "Korisnik je fiksiran za ovaj zahtjev s liste čekanja" : "Fixed user for waitlist request"}
+                            </span>
+                        )}
+                    </div>
                     <div className="flex items-center gap-2">
                         <UserSearchCombobox
                             users={usersList as any}
@@ -326,21 +334,24 @@ export function AdminReservationForm({
                             showAllOption={false}
                             placeholder="Odaberite korisnika..."
                             className="flex-1"
+                            disabled={isEditingWaitlist}
                         />
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="icon"
-                            onClick={() => setIsCreateUserOpen(true)}
-                            title="Novi korisnik"
-                            className="h-9 w-9 shrink-0"
-                        >
-                            <UserPlus className="h-4 w-4" />
-                        </Button>
+                        {!isEditingWaitlist && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setIsCreateUserOpen(true)}
+                                title="Novi korisnik"
+                                className="h-9 w-9 shrink-0"
+                            >
+                                <UserPlus className="h-4 w-4" />
+                            </Button>
+                        )}
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <div className={cn("grid gap-4 items-end", isEditingWaitlist ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2")}>
                     <div className="space-y-2">
                         <Label>{t.form.contactPhone}</Label>
                         <Input
@@ -349,26 +360,28 @@ export function AdminReservationForm({
                             placeholder="npr. 0912345678"
                         />
                     </div>
-                    <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800/40 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 h-[42px]">
-                        <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none text-gray-700 dark:text-gray-300">
-                            <input
-                                type="checkbox"
-                                checked={isWaitlisted}
-                                onChange={(e) => {
-                                    setIsWaitlisted(e.target.checked);
-                                    if (e.target.checked) {
-                                        setOverrideCapacityCheck(false);
-                                    }
-                                }}
-                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
-                            />
-                            <span>
-                                {lang === "hr"
-                                    ? "Stavi klijenta na listu čekanja za suhi vez"
-                                    : "Place client on dry berth waiting list"}
-                            </span>
-                        </label>
-                    </div>
+                    {!isEditingWaitlist && (
+                        <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800/40 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 h-[42px]">
+                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none text-gray-700 dark:text-gray-300">
+                                <input
+                                    type="checkbox"
+                                    checked={isWaitlisted}
+                                    onChange={(e) => {
+                                        setIsWaitlisted(e.target.checked);
+                                        if (e.target.checked) {
+                                            setOverrideCapacityCheck(false);
+                                        }
+                                    }}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                                />
+                                <span>
+                                    {lang === "hr"
+                                        ? "Stavi klijenta na listu čekanja za suhi vez"
+                                        : "Place client on dry berth waiting list"}
+                                </span>
+                            </label>
+                        </div>
+                    )}
                 </div>
 
                 <CreateUserDialog

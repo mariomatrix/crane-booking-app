@@ -38,6 +38,7 @@ interface UserSearchComboboxProps {
     allLabel?: string;
     showAllOption?: boolean;
     className?: string;
+    disabled?: boolean;
 }
 
 export function UserSearchCombobox({
@@ -50,6 +51,7 @@ export function UserSearchCombobox({
     allLabel = "Svi korisnici",
     showAllOption = true,
     className,
+    disabled = false,
 }: UserSearchComboboxProps) {
     const [open, setOpen] = useState(false);
     const [searchValue, setSearchValue] = useState("");
@@ -87,19 +89,27 @@ export function UserSearchCombobox({
 
     return (
         <div className={cn("flex items-center gap-1.5", className)}>
-            <Popover open={open} onOpenChange={setOpen}>
+            <Popover open={disabled ? false : open} onOpenChange={(val) => !disabled && setOpen(val)}>
                 <PopoverTrigger asChild>
                     <Button
                         variant="outline"
                         role="combobox"
                         aria-expanded={open}
-                        className="w-full h-9 justify-between text-sm font-normal bg-background"
+                        disabled={disabled}
+                        className={cn(
+                            "w-full h-9 justify-between text-sm font-normal bg-background",
+                            disabled && "opacity-80 bg-muted/40 cursor-not-allowed border-dashed"
+                        )}
                     >
                         <span className="flex items-center gap-2 truncate">
                             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             <span className="truncate">{displayLabel}</span>
                         </span>
-                        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                        {!disabled ? (
+                            <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                        ) : (
+                            <span className="text-xs text-muted-foreground shrink-0">🔒</span>
+                        )}
                     </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[340px] p-0" align="start">

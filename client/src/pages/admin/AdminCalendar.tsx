@@ -948,6 +948,8 @@ export default function AdminCalendar() {
                                     initialData={{
                                         landWaitingId: editingWaiting.id,
                                         userId: editingWaiting.userId,
+                                        userObj: editingWaiting.user,
+                                        contactPhone: editingWaiting.user?.phone || "",
                                         vesselId: editingWaiting.vesselId,
                                         landZoneId: editingWaiting.preferredZoneId || "none",
                                         requestedDate: viewDate || new Date(),
