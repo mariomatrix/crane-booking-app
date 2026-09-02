@@ -142,16 +142,32 @@ export function AdminReservationForm({
         return null;
     }, [seasonsList, requestedDate]);
 
+    const allowedTimeSlots = useMemo(() => {
+        const fromStr = activeSeasonForSelectedDate?.from || "08:00";
+        const toStr = activeSeasonForSelectedDate?.to || "16:00";
+        const [fH, fM] = fromStr.split(":").map(Number);
+        const [tH, tM] = toStr.split(":").map(Number);
+        const fromMinutes = fH * 60 + fM;
+        const toMinutes = tH * 60 + tM;
+        const duration = Number(durationMin) || 30;
+
+        const slots: string[] = [];
+        for (let m = fromMinutes; m + duration <= toMinutes; m += 30) {
+            const hh = Math.floor(m / 60);
+            const mm = m % 60;
+            slots.push(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
+        }
+        return slots;
+    }, [activeSeasonForSelectedDate, durationMin]);
+
     // Update default scheduled time to match active season start time
     useEffect(() => {
-        if (requestedDate && activeSeasonForSelectedDate?.from) {
-            if (!scheduledTime || scheduledTime === "08:00") {
-                setScheduledTime(activeSeasonForSelectedDate.from);
+        if (allowedTimeSlots.length > 0) {
+            if (!scheduledTime || !allowedTimeSlots.includes(scheduledTime)) {
+                setScheduledTime(allowedTimeSlots[0]);
             }
-        } else if (!scheduledTime) {
-            setScheduledTime("07:00");
         }
-    }, [requestedDate, activeSeasonForSelectedDate]);
+    }, [allowedTimeSlots, scheduledTime]);
 
     const { data: userVessels = [], isLoading: userVesselsLoading } =
         trpc.vessel.listByUser.useQuery({ userId }, { enabled: !!userId });
@@ -232,6 +248,10 @@ export function AdminReservationForm({
 
         let scheduledStartDate: Date | undefined = undefined;
         if (!isWaitlisted && requestedDate) {
+            if (!allowedTimeSlots.includes(scheduledTime)) {
+                toast.error(`Odabrani termin (${scheduledTime}) mora biti unutar radnog vremena sezone (${activeSeasonForSelectedDate?.from || "08:00"} - ${activeSeasonForSelectedDate?.to || "16:00"}).`);
+                return;
+            }
             const [hours, minutes] = scheduledTime.split(":").map(Number);
             scheduledStartDate = new Date(requestedDate);
             scheduledStartDate.setHours(hours, minutes, 0, 0);
@@ -545,14 +565,22 @@ export function AdminReservationForm({
                             {!isWaitlisted && (
                                 <div className="space-y-1.5">
                                     <Label className="text-xs font-semibold">{lang === "hr" ? "Točno vrijeme *" : "Exact Time *"}</Label>
-                                    <Input
-                                        type="time"
-                                        step="1800"
-                                        value={scheduledTime}
-                                        onChange={(e) => setScheduledTime(e.target.value)}
-                                        className="h-9 text-xs"
-                                        required
-                                    />
+                                    <Select value={scheduledTime} onValueChange={setScheduledTime}>
+                                        <SelectTrigger className="h-9 text-xs">
+                                            <SelectValue placeholder="Odaberi vrijeme" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {allowedTimeSlots.length === 0 ? (
+                                                <SelectItem value="none" disabled>Nema termina unutar radnog vremena</SelectItem>
+                                            ) : (
+                                                allowedTimeSlots.map((slot) => (
+                                                    <SelectItem key={slot} value={slot}>
+                                                        {slot}
+                                                    </SelectItem>
+                                                ))
+                                            )}
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             )}
                         </div>

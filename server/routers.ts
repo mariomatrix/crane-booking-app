@@ -2052,6 +2052,14 @@ export const appRouter = router({
             input.scheduledStart.getTime() + input.durationMin * 60000
           );
 
+          // Strictly validate slot against season working hours
+          const sysSettings = await getAllSettings();
+          await validateSlotAgainstSettings(
+            input.scheduledStart,
+            finalScheduledEnd,
+            sysSettings
+          );
+
           if (
             vesselSnapshot.vesselWeightTons &&
             Number(vesselSnapshot.vesselWeightTons) * 10 >
@@ -2854,6 +2862,12 @@ export const appRouter = router({
         const targetCraneId = input.craneId ?? reservation.craneId;
 
         const sysSettings = await getAllSettings();
+        await validateSlotAgainstSettings(
+          input.scheduledStart,
+          input.scheduledEnd,
+          sysSettings
+        );
+
         const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
         const effectiveEnd = new Date(
           input.scheduledEnd.getTime() + bufferMin * 60000
@@ -4653,6 +4667,14 @@ export const appRouter = router({
         const scheduledEnd = new Date(
           input.scheduledStart.getTime() + input.durationMin * 60000
         );
+
+        const sysSettings = await getAllSettings();
+        await validateSlotAgainstSettings(
+          input.scheduledStart,
+          scheduledEnd,
+          sysSettings
+        );
+
         const hasOverlap = await checkOverlap(
           input.craneId,
           input.scheduledStart,

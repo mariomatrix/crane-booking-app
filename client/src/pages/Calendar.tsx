@@ -61,8 +61,27 @@ export default function Calendar() {
     { refetchInterval: 30000 }
   );
   const { data: sysSettings } = trpc.settings.get.useQuery();
-  const workStart = sysSettings?.workdayStart ?? "08:00";
-  const workEnd = sysSettings?.workdayEnd ?? "16:00";
+  const { data: seasonsList = [] } = trpc.season.list.useQuery();
+
+  const currentSeasonWorkingHours = useMemo(() => {
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const activeSeason = (seasonsList as any[]).find((s: any) =>
+      s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
+    );
+    if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
+      const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const dayKey = dayKeys[today.getDay()];
+      const dayHours = (activeSeason.workingHours as any)[dayKey];
+      if (dayHours?.from && dayHours?.to) {
+        return { from: dayHours.from, to: dayHours.to };
+      }
+    }
+    return null;
+  }, [seasonsList]);
+
+  const workStart = currentSeasonWorkingHours?.from ?? sysSettings?.workdayStart ?? "08:00";
+  const workEnd = currentSeasonWorkingHours?.to ?? sysSettings?.workdayEnd ?? "16:00";
 
   const craneColorMap = useMemo(() => {
     const map: Record<string, string> = {};

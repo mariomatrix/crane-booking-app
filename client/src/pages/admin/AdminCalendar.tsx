@@ -66,7 +66,7 @@ export default function AdminCalendar() {
     // State
     const [viewMode, setViewMode] = useState<'master' | 'timeGridWeek' | 'dayGridMonth'>('master');
     const [viewDate, setViewDate] = useState<Date>(startOfDay(new Date()));
-    const [statusFilters, setStatusFilters] = useState<string[]>(["pending", "approved", "in_progress", "completed"]);
+    const [statusFilters, setStatusFilters] = useState<string[]>([]); // Default: prazno znači SVI statusi
     const [selectedUser, setSelectedUser] = useState<string>(() => {
         const params = new URLSearchParams(searchString);
         return params.get("userId") || "all";
@@ -400,30 +400,29 @@ export default function AdminCalendar() {
             const rawDate = r.scheduledStart ? new Date(r.scheduledStart) : (r.requestedDate ? new Date(`${r.requestedDate}T08:00:00`) : null);
             if (!rawDate || isNaN(rawDate.getTime())) return null;
 
-            const craneIdx = activeCranes.findIndex(c => String(c.id) === String(r.craneId));
+            const craneIdx = activeCranes.findIndex(c => String(c.id).toLowerCase() === String(r.craneId || "").toLowerCase());
 
             if (viewMode === 'master') {
-                if (craneIdx === -1) return null;
-
                 const eventDateStr = format(rawDate, "yyyy-MM-dd");
                 const viewDateStr = format(viewDate, "yyyy-MM-dd");
                 if (eventDateStr !== viewDateStr) {
                     return null;
                 }
 
+                const actualCraneIdx = craneIdx >= 0 ? craneIdx : 0;
                 const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
 
-                const start = addDays(viewDate, craneIdx);
+                const start = addDays(viewDate, actualCraneIdx);
                 start.setHours(rawDate.getHours(), rawDate.getMinutes(), 0, 0);
 
-                const end = addDays(viewDate, craneIdx);
+                const end = addDays(viewDate, actualCraneIdx);
                 end.setHours(rawEnd.getHours(), rawEnd.getMinutes(), 0, 0);
 
                 return {
                     id: String(r.id),
                     title: r.isMaintenance
                         ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                        : `${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
+                        : `${craneIdx === -1 ? "⚠️ " : ""}${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
                     start,
                     end,
                     backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
@@ -445,7 +444,7 @@ export default function AdminCalendar() {
                     },
                 };
             } else {
-                if (selectedCrane !== "all" && String(r.craneId) !== String(selectedCrane)) {
+                if (selectedCrane !== "all" && String(r.craneId).toLowerCase() !== String(selectedCrane).toLowerCase()) {
                     return null;
                 }
 
@@ -975,8 +974,16 @@ export default function AdminCalendar() {
                     <div className="flex items-center gap-2">
                         <Filter className="h-4 w-4 text-muted-foreground mr-1" />
                         <span className="text-sm font-medium">Statusi:</span>
-                        <div className="flex bg-background border rounded-md p-1">
-                            {["pending", "approved", "completed", "rejected", "cancelled"].map(s => (
+                        <div className="flex bg-background border rounded-md p-1 items-center gap-1">
+                            <Button
+                                variant={statusFilters.length === 0 ? "secondary" : "ghost"}
+                                size="sm"
+                                onClick={() => setStatusFilters([])}
+                                className="h-7 text-xs px-2.5 rounded-sm font-semibold"
+                            >
+                                Svi
+                            </Button>
+                            {["pending", "approved", "in_progress", "completed", "rejected", "cancelled"].map(s => (
                                 <Button
                                     key={s}
                                     variant={statusFilters.includes(s) ? "secondary" : "ghost"}
@@ -988,7 +995,7 @@ export default function AdminCalendar() {
                                         className="h-2 w-2 rounded-full mr-1.5"
                                         style={{ backgroundColor: STATUS_COLORS[s] }}
                                     />
-                                    {s === "pending" ? "Na čekanju" : s === "approved" ? "Odobreno" : s === "completed" ? "Izvršeno" : s === "rejected" ? "Odbijeno" : "Otkazano"}
+                                    {s === "pending" ? "Na čekanju" : s === "approved" ? "Odobreno" : s === "in_progress" ? "U tijeku" : s === "completed" ? "Izvršeno" : s === "rejected" ? "Odbijeno" : "Otkazano"}
                                 </Button>
                             ))}
                         </div>
@@ -1065,7 +1072,7 @@ export default function AdminCalendar() {
                         .fc-v-event .fc-event-main { padding: 4px; }
                     `}} />
                     <FullCalendar
-                        key={`${viewMode}-${selectedCrane}-${activeCranes.length}`}
+                        key={`${viewMode}-${selectedCrane}-${activeCranes.length}-${workStart}-${workEnd}`}
                         ref={calendarRef}
                         plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
                         initialView={viewMode === 'master' ? 'timeGrid' : viewMode}
@@ -1078,6 +1085,7 @@ export default function AdminCalendar() {
                         allDaySlot={viewMode !== 'master'}
                         slotMinTime={workStart + ":00"}
                         slotMaxTime={workEnd + ":00"}
+                        scrollTime={workStart + ":00"}
                         height="100%"
                         editable={true}
                         droppable={true}
