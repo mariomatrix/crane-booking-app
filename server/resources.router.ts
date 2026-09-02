@@ -43,10 +43,10 @@ export const resourcesRouter = router({
                 name: z.string().min(1, "Naziv je obavezan"),
                 code: z.string().min(1, "Šifra je obavezna"),
                 unit: z.string().default("sat"),
-                pricePerUnitEur: z.number().nonnegative().default(0),
-                vatRate: z.number().nonnegative().default(25),
+                pricePerUnitEur: z.coerce.number().nonnegative().default(0),
+                vatRate: z.coerce.number().nonnegative().default(25),
                 description: z.string().optional(),
-                sortOrder: z.number().int().default(0),
+                sortOrder: z.coerce.number().int().default(0),
                 isActive: z.boolean().default(true),
             })
         )
@@ -92,10 +92,10 @@ export const resourcesRouter = router({
                 name: z.string().min(1).optional(),
                 code: z.string().min(1).optional(),
                 unit: z.string().optional(),
-                pricePerUnitEur: z.number().nonnegative().optional(),
-                vatRate: z.number().nonnegative().optional(),
+                pricePerUnitEur: z.coerce.number().nonnegative().optional(),
+                vatRate: z.coerce.number().nonnegative().optional(),
                 description: z.string().optional(),
-                sortOrder: z.number().int().optional(),
+                sortOrder: z.coerce.number().int().optional(),
                 isActive: z.boolean().optional(),
             })
         )

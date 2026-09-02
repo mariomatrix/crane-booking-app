@@ -90,6 +90,7 @@ export function AdminReservationForm({
     // Vessel state
     const [selectedVesselId, setSelectedVesselId] = useState<string>(initialData?.vesselId || "new");
     const [saveToProfile, setSaveToProfile] = useState(true);
+    const [vesselName, setVesselName] = useState("");
     const [vesselType, setVesselType] = useState("jedrilica");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
@@ -168,6 +169,7 @@ export function AdminReservationForm({
                 setVesselRegistration(first.registration || "");
             } else {
                 setSelectedVesselId("new");
+                setVesselName("");
                 setVesselType("jedrilica");
                 setVesselLength("");
                 setVesselWidth("");
@@ -177,23 +179,25 @@ export function AdminReservationForm({
         }
     }, [userId, userVessels, userVesselsLoading, initialData?.vesselId]);
 
-    const handleVesselSelect = (vesselId: string) => {
-        setSelectedVesselId(vesselId);
-        if (vesselId === "new") {
+    const handleVesselSelect = (id: string) => {
+        setSelectedVesselId(id);
+        if (id === "new") {
+            setVesselName("");
             setVesselType("jedrilica");
             setVesselLength("");
             setVesselWidth("");
             setVesselWeight("");
             setVesselRegistration("");
-        } else {
-            const v = userVessels.find(x => x.id === vesselId);
-            if (v) {
-                setVesselType(v.type || "");
-                setVesselLength(v.lengthM ? String(v.lengthM) : "");
-                setVesselWidth(v.beamM ? String(v.beamM) : "");
-                setVesselWeight(v.weightTons ? String(v.weightTons) : "");
-                setVesselRegistration(v.registration || "");
-            }
+            return;
+        }
+        const vessel = (userVessels as any[]).find(v => v.id === id);
+        if (vessel) {
+            setVesselName(vessel.name || "");
+            setVesselType(vessel.type);
+            setVesselLength(vessel.lengthM ? String(vessel.lengthM) : "");
+            setVesselWidth(vessel.beamM ? String(vessel.beamM) : "");
+            setVesselWeight(vessel.weightTons ? String(vessel.weightTons) : "");
+            setVesselRegistration(vessel.registration || "");
         }
     };
 
@@ -262,12 +266,12 @@ export function AdminReservationForm({
         if (selectedVesselId === "new" && saveToProfile) {
             // Save vessel to profile first
             vesselCreateMutation.mutate({
-                name: vesselRegistration || "Plovilo",
+                name: vesselName.trim() || vesselRegistration.trim() || "Plovilo",
                 type: vesselType as any,
                 lengthM: vesselLength ? Number(vesselLength) : undefined,
                 beamM: vesselWidth ? Number(vesselWidth) : undefined,
                 weightTons: vesselWeight ? Number(vesselWeight) : undefined,
-                registration: vesselRegistration || undefined,
+                registration: vesselRegistration.trim() || undefined,
                 ownerId: userId,
             }, {
                 onSuccess: (newVessel) => {
@@ -736,6 +740,15 @@ export function AdminReservationForm({
                                         <SelectItem value="ostalo">{t.form.vesselTypeOther}</SelectItem>
                                     </SelectContent>
                                 </Select>
+                            </div>
+                            <div className="space-y-2">
+                                <Label>{lang === "hr" ? "Ime plovila (opcionalno)" : "Vessel Name"}</Label>
+                                <Input
+                                    value={vesselName}
+                                    onChange={(e) => setVesselName(e.target.value)}
+                                    placeholder={lang === "hr" ? "npr. Maestral" : "e.g. Sea Star"}
+                                    disabled={selectedVesselId !== "new"}
+                                />
                             </div>
                         </div>
 

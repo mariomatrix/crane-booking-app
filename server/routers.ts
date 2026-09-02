@@ -579,27 +579,71 @@ export const appRouter = router({
     create: protectedProcedure
       .input(
         z.object({
-          name: z.string().min(1).max(255),
-          type: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]),
+          name: z.string().optional().default("Plovilo"),
+          type: z.enum(["jedrilica", "motorni", "katamaran", "ostalo"]).default("jedrilica"),
           lengthM: z.number().positive().optional(),
           beamM: z.number().positive().optional(),
           draftM: z.number().positive().optional(),
           weightTons: z.number().positive().optional(),
-          registration: z.string().optional(),
+          registration: z.string().optional().nullable(),
           ownerId: z.string().uuid().optional(),
         })
       )
       .mutation(async ({ input, ctx }: any) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
         const targetOwnerId =
           input.ownerId &&
           (ctx.user.role === "admin" || ctx.user.role === "operator")
             ? input.ownerId
             : ctx.user.id;
 
+        const cleanReg = input.registration?.trim() ? input.registration.trim().toUpperCase() : null;
+        const vesselName = input.name?.trim() || cleanReg || "Plovilo";
+
+        if (cleanReg) {
+          const [existing] = await db
+            .select()
+            .from(vessels)
+            .where(eq(vessels.registration, cleanReg))
+            .limit(1);
+
+          if (existing) {
+            if (existing.ownerId === targetOwnerId || ctx.user.role === "admin" || ctx.user.role === "operator") {
+              await db
+                .update(vessels)
+                .set({
+                  ownerId: targetOwnerId,
+                  name: vesselName,
+                  type: input.type,
+                  lengthM: input.lengthM ? input.lengthM.toFixed(2) : existing.lengthM,
+                  beamM: input.beamM ? input.beamM.toFixed(2) : existing.beamM,
+                  draftM: input.draftM ? input.draftM.toFixed(2) : existing.draftM,
+                  weightTons: input.weightTons ? input.weightTons.toFixed(2) : existing.weightTons,
+                  updatedAt: new Date(),
+                })
+                .where(eq(vessels.id, existing.id));
+              return { id: existing.id };
+            }
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Plovilo s registracijom ${cleanReg} već je registrirano na drugog korisnika.`,
+            });
+          }
+        }
+
         const id = await createVessel({
-          ...input,
+          name: vesselName,
+          type: input.type,
+          lengthM: input.lengthM ? (input.lengthM.toFixed(2) as any) : undefined,
+          beamM: input.beamM ? (input.beamM.toFixed(2) as any) : undefined,
+          draftM: input.draftM ? (input.draftM.toFixed(2) as any) : undefined,
+          weightTons: input.weightTons ? (input.weightTons.toFixed(2) as any) : undefined,
+          registration: cleanReg || undefined,
           ownerId: targetOwnerId,
         } as any);
+
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "vessel_created",

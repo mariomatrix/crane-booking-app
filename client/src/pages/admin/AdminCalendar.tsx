@@ -95,11 +95,18 @@ export default function AdminCalendar() {
         if (viewMode === 'master') {
             const start = new Date(viewDateDayKey);
             return {
-                start,
-                end: endOfDay(addDays(start, cranesList.length || 1))
+                start: startOfDay(start),
+                end: endOfDay(addDays(start, Math.max(1, cranesList.length)))
             };
         }
-        return visibleRange;
+        if (visibleRange) {
+            return visibleRange;
+        }
+        const start = new Date(viewDateDayKey);
+        return {
+            start: startOfWeek(start, { weekStartsOn: 1 }),
+            end: endOfWeek(addWeeks(start, 5), { weekStartsOn: 1 })
+        };
     }, [viewMode, viewDateDayKey, visibleRangeKey, cranesList.length]);
 
     const reservationsQuery = trpc.reservation.listAll.useQuery({
@@ -390,56 +397,87 @@ export default function AdminCalendar() {
 
     const calendarEvents = useMemo(() => {
         const resEvents = allReservations.map((r: any) => {
-            const craneIdx = activeCranes.findIndex(c => c.id === r.craneId);
-            if (craneIdx === -1) return null;
+            const rawDate = r.scheduledStart ? new Date(r.scheduledStart) : (r.requestedDate ? new Date(`${r.requestedDate}T08:00:00`) : null);
+            if (!rawDate || isNaN(rawDate.getTime())) return null;
 
-            let start = new Date(r.scheduledStart);
-            let end = new Date(r.scheduledEnd);
+            const craneIdx = activeCranes.findIndex(c => String(c.id) === String(r.craneId));
 
             if (viewMode === 'master') {
-                const originalStart = new Date(r.scheduledStart);
-                const currentViewStart = startOfDay(viewDate);
-                const eventStartDay = startOfDay(originalStart);
+                if (craneIdx === -1) return null;
 
-                if (eventStartDay.getTime() !== currentViewStart.getTime()) {
+                const eventDateStr = format(rawDate, "yyyy-MM-dd");
+                const viewDateStr = format(viewDate, "yyyy-MM-dd");
+                if (eventDateStr !== viewDateStr) {
                     return null;
                 }
 
-                // Offset the date by crane index to show in correct column
-                const originalEnd = new Date(r.scheduledEnd);
+                const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
 
-                start = addDays(viewDate, craneIdx);
-                start.setHours(originalStart.getHours(), originalStart.getMinutes(), 0);
+                const start = addDays(viewDate, craneIdx);
+                start.setHours(rawDate.getHours(), rawDate.getMinutes(), 0, 0);
 
-                end = addDays(viewDate, craneIdx);
-                end.setHours(originalEnd.getHours(), originalEnd.getMinutes(), 0);
+                const end = addDays(viewDate, craneIdx);
+                end.setHours(rawEnd.getHours(), rawEnd.getMinutes(), 0, 0);
+
+                return {
+                    id: String(r.id),
+                    title: r.isMaintenance
+                        ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
+                        : `${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
+                    start,
+                    end,
+                    backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
+                    borderColor: "transparent",
+                    editable: !r.isMaintenance,
+                    extendedProps: {
+                        reservationId: r.id,
+                        status: r.status,
+                        isMaintenance: r.isMaintenance,
+                        user: r.user?.name || r.user?.email || "Nepoznat",
+                        craneId: r.craneId,
+                        originalStart: r.scheduledStart,
+                        cancelReason: r.cancelReason,
+                        vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
+                        landZoneCode: r.landZone?.code || r.landZone?.name || "",
+                        operationCategory: r.serviceType?.operationCategory || "",
+                        serviceTypeName: r.serviceType?.name || "",
+                        adminNote: r.adminNote || "",
+                    },
+                };
+            } else {
+                if (selectedCrane !== "all" && String(r.craneId) !== String(selectedCrane)) {
+                    return null;
+                }
+
+                const start = rawDate;
+                const end = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
+
+                return {
+                    id: String(r.id),
+                    title: r.isMaintenance
+                        ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
+                        : `${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}`,
+                    start,
+                    end,
+                    backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
+                    borderColor: "transparent",
+                    editable: !r.isMaintenance,
+                    extendedProps: {
+                        reservationId: r.id,
+                        status: r.status,
+                        isMaintenance: r.isMaintenance,
+                        user: r.user?.name || r.user?.email || "Nepoznat",
+                        craneId: r.craneId,
+                        originalStart: r.scheduledStart,
+                        cancelReason: r.cancelReason,
+                        vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
+                        landZoneCode: r.landZone?.code || r.landZone?.name || "",
+                        operationCategory: r.serviceType?.operationCategory || "",
+                        serviceTypeName: r.serviceType?.name || "",
+                        adminNote: r.adminNote || "",
+                    },
+                };
             }
-
-            return {
-                id: String(r.id),
-                title: r.isMaintenance
-                    ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                    : `${r.vesselRegistration || "Plovilo"}${r.landZone ? ` (${r.landZone.code})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
-                start,
-                end,
-                backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
-                borderColor: "transparent",
-                editable: !r.isMaintenance,
-                extendedProps: {
-                    reservationId: r.id,
-                    status: r.status,
-                    isMaintenance: r.isMaintenance,
-                    user: r.user?.name || r.user?.email || "Nepoznat",
-                    craneId: r.craneId,
-                    originalStart: r.scheduledStart,
-                    cancelReason: r.cancelReason,
-                    vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
-                    landZoneCode: r.landZone?.code || r.landZone?.name || "",
-                    operationCategory: r.serviceType?.operationCategory || "",
-                    serviceTypeName: r.serviceType?.name || "",
-                    adminNote: r.adminNote || "",
-                },
-            };
         }).filter(Boolean);
 
         const holidayEvents = holidays.map((h: any) => {
@@ -1027,14 +1065,14 @@ export default function AdminCalendar() {
                         .fc-v-event .fc-event-main { padding: 4px; }
                     `}} />
                     <FullCalendar
-                        key={`${viewMode}-${selectedCrane}`}
+                        key={`${viewMode}-${selectedCrane}-${activeCranes.length}`}
                         ref={calendarRef}
                         plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
                         initialView={viewMode === 'master' ? 'timeGrid' : viewMode}
                         initialDate={viewDate}
                         visibleRange={viewMode === 'master' ? {
                             start: viewDate,
-                            end: addDays(viewDate, activeCranes.length || 1)
+                            end: addDays(viewDate, Math.max(1, activeCranes.length))
                         } : undefined}
                         headerToolbar={false}
                         allDaySlot={viewMode !== 'master'}

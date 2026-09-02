@@ -123,27 +123,22 @@ export default function AdminPriceList() {
     };
 
     const handleSaveResource = () => {
+        const payload = {
+            name: resourceForm.name,
+            code: resourceForm.code,
+            unit: resourceForm.unit,
+            pricePerUnitEur: Number(resourceForm.pricePerUnitEur) || 0,
+            vatRate: Number(resourceForm.vatRate) || 25.00,
+            description: resourceForm.description,
+            isActive: resourceForm.isActive,
+        };
         if (editingResource) {
             updateResourceMutation.mutate({
                 id: editingResource.id,
-                name: resourceForm.name,
-                code: resourceForm.code,
-                unit: resourceForm.unit,
-                pricePerUnitEur: resourceForm.pricePerUnitEur,
-                vatRate: resourceForm.vatRate,
-                description: resourceForm.description,
-                isActive: resourceForm.isActive,
+                ...payload,
             });
         } else {
-            createResourceMutation.mutate({
-                name: resourceForm.name,
-                code: resourceForm.code,
-                unit: resourceForm.unit,
-                pricePerUnitEur: resourceForm.pricePerUnitEur,
-                vatRate: resourceForm.vatRate,
-                description: resourceForm.description,
-                isActive: resourceForm.isActive,
-            });
+            createResourceMutation.mutate(payload);
         }
     };
 
