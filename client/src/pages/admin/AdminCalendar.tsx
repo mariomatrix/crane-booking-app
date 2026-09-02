@@ -29,7 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
-import { addDays, addMonths, addWeeks, startOfDay, endOfDay, format, parseISO, setHours, setMinutes } from "date-fns";
+import { addDays, addMonths, addWeeks, startOfDay, endOfDay, startOfWeek, endOfWeek, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { Calendar } from "@/components/ui/calendar";
