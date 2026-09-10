@@ -1554,8 +1554,10 @@ export const appRouter = router({
             requestedDate: reservations.requestedDate,
             requestedTimeSlot: reservations.requestedTimeSlot,
             scheduledStart: reservations.scheduledStart,
+            scheduledDate: reservations.scheduledStart,
             scheduledEnd: reservations.scheduledEnd,
             durationMin: reservations.durationMin,
+            vesselId: reservations.vesselId,
             vesselName: reservations.vesselName,
             vesselType: reservations.vesselType,
             vesselRegistration: reservations.vesselRegistration,
@@ -1580,20 +1582,71 @@ export const appRouter = router({
           .where(eq(reservations.userId, targetId))
           .orderBy(sql`${reservations.createdAt} desc`);
 
+        // Get land occupancies for this user to enrich dry berth information
+        const occupancies = await db
+          .select({
+            id: landOccupancies.id,
+            reservationId: landOccupancies.reservationId,
+            returnReservationId: landOccupancies.returnReservationId,
+            vesselId: landOccupancies.vesselId,
+            zoneId: landOccupancies.zoneId,
+            spotNumber: landOccupancies.spotNumber,
+            zoneName: landZones.name,
+            zoneCode: landZones.code,
+            returnedAt: landOccupancies.returnedAt,
+          })
+          .from(landOccupancies)
+          .leftJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+          .where(eq(landOccupancies.userId, targetId));
+
+        const enrichedReservations = userReservations.map(r => {
+          let landZoneName = r.landZoneName;
+          let landZoneCode = r.landZoneCode;
+          let spotNumber: number | null = null;
+
+          // Check if linked directly in landOccupancies by reservationId or returnReservationId
+          const directOcc = occupancies.find(
+            o => o.reservationId === r.id || o.returnReservationId === r.id
+          );
+          if (directOcc) {
+            landZoneName = landZoneName || directOcc.zoneName;
+            landZoneCode = landZoneCode || directOcc.zoneCode;
+            spotNumber = directOcc.spotNumber;
+          } else if (r.vesselId && (!landZoneName || !landZoneCode)) {
+            // Check active occupancy for that vessel
+            const activeOcc = occupancies.find(
+              o => o.vesselId === r.vesselId && !o.returnedAt
+            );
+            if (activeOcc) {
+              landZoneName = landZoneName || activeOcc.zoneName;
+              landZoneCode = landZoneCode || activeOcc.zoneCode;
+              spotNumber = activeOcc.spotNumber;
+            }
+          }
+
+          return {
+            ...r,
+            scheduledDate: r.scheduledStart,
+            landZoneName,
+            landZoneCode,
+            spotNumber,
+          };
+        });
+
         // Get vessels
         const userVessels = await listVesselsByUser(targetId);
 
         // Calculate stats
         const stats = {
-          total: userReservations.length,
-          pending: userReservations.filter(r => r.status === "pending").length,
-          approved: userReservations.filter(r => r.status === "approved")
+          total: enrichedReservations.length,
+          pending: enrichedReservations.filter(r => r.status === "pending").length,
+          approved: enrichedReservations.filter(r => r.status === "approved")
             .length,
-          completed: userReservations.filter(r => r.status === "completed")
+          completed: enrichedReservations.filter(r => r.status === "completed")
             .length,
-          rejected: userReservations.filter(r => r.status === "rejected")
+          rejected: enrichedReservations.filter(r => r.status === "rejected")
             .length,
-          cancelled: userReservations.filter(r => r.status === "cancelled")
+          cancelled: enrichedReservations.filter(r => r.status === "cancelled")
             .length,
         };
 
@@ -1610,7 +1663,7 @@ export const appRouter = router({
             lastSignedIn: userRecord.lastSignedIn,
           },
           stats,
-          reservations: userReservations,
+          reservations: enrichedReservations,
           vessels: userVessels,
         };
       }),

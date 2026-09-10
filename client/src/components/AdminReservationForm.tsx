@@ -34,7 +34,9 @@ interface AdminReservationFormProps {
         durationMin?: string;
         adminNote?: string;
         contactPhone?: string;
+        lockUser?: boolean;
     };
+    lockUser?: boolean;
     onSuccess?: () => void;
     onCancel?: () => void;
     onRejectWaitlist?: () => void;
@@ -44,6 +46,7 @@ interface AdminReservationFormProps {
 
 export function AdminReservationForm({
     initialData,
+    lockUser,
     onSuccess,
     onCancel,
     onRejectWaitlist,
@@ -55,6 +58,7 @@ export function AdminReservationForm({
     // ── Form state ───────────────────────────────────────────────────────
     const [userId, setUserId] = useState(initialData?.userId || initialData?.userObj?.id || "");
     const isEditingWaitlist = !!initialData?.landWaitingId;
+    const isUserLocked = isEditingWaitlist || !!lockUser || !!initialData?.lockUser;
     const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
     const [requestedDate, setRequestedDate] = useState<Date | undefined>(initialData?.requestedDate || new Date());
     const [scheduledTime, setScheduledTime] = useState(initialData?.scheduledTime || "08:00");
@@ -119,6 +123,13 @@ export function AdminReservationForm({
         { vesselId: selectedVesselId },
         { enabled: !!selectedVesselId && selectedVesselId !== "new" && isLowerToSea }
     );
+
+    // Auto-fill landZoneId for launch operations (lower_to_sea) from active land occupancy
+    useEffect(() => {
+        if (isLowerToSea && activeOccupancy?.zone?.id && (!landZoneId || landZoneId === "none")) {
+            setLandZoneId(activeOccupancy.zone.id);
+        }
+    }, [isLowerToSea, activeOccupancy, landZoneId]);
 
 
     const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
@@ -319,11 +330,15 @@ export function AdminReservationForm({
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
                         <Label className="text-xs font-semibold">{lang === "hr" ? "Korisnik (Vlasnik rezervacije)" : "Client"} *</Label>
-                        {isEditingWaitlist && (
+                        {isEditingWaitlist ? (
                             <span className="text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center gap-1">
                                 🔒 {lang === "hr" ? "Korisnik je fiksiran za ovaj zahtjev s liste čekanja" : "Fixed user for waitlist request"}
                             </span>
-                        )}
+                        ) : isUserLocked ? (
+                            <span className="text-[11px] font-semibold text-blue-800 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded flex items-center gap-1">
+                                🔒 {lang === "hr" ? "Korisnik je fiksiran za ovaj karton" : "Fixed user for this card"}
+                            </span>
+                        ) : null}
                     </div>
                     <div className="flex items-center gap-2">
                         <UserSearchCombobox
@@ -334,9 +349,9 @@ export function AdminReservationForm({
                             showAllOption={false}
                             placeholder="Odaberite korisnika..."
                             className="flex-1"
-                            disabled={isEditingWaitlist}
+                            disabled={isUserLocked}
                         />
-                        {!isEditingWaitlist && (
+                        {!isUserLocked && (
                             <Button
                                 type="button"
                                 variant="outline"

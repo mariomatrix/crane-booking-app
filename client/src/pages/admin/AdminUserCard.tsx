@@ -422,8 +422,12 @@ export default function AdminUserCard() {
                             <TableBody>
                                 {filteredReservations.map((r: any) => (
                                     <TableRow key={r.id}>
-                                        <TableCell className="font-medium text-xs">
-                                            {formatAppDate(r.scheduledDate, lang as any, true)}
+                                        <TableCell className="font-medium text-xs whitespace-nowrap">
+                                            {r.scheduledStart
+                                                ? formatAppDate(r.scheduledStart, lang as any, true)
+                                                : r.requestedDate
+                                                    ? formatAppDate(r.requestedDate, lang as any)
+                                                    : (r.scheduledDate ? formatAppDate(r.scheduledDate, lang as any, true) : "—")}
                                         </TableCell>
                                         <TableCell>
                                             <div className="flex flex-col">
@@ -442,6 +446,7 @@ export default function AdminUserCard() {
                                             {r.landZoneCode || r.landZoneName ? (
                                                 <Badge variant="outline" className="bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/30 text-[11px] font-semibold whitespace-nowrap">
                                                     {r.landZoneCode ? `${r.landZoneName || "Kopno"} (${r.landZoneCode})` : r.landZoneName}
+                                                    {r.spotNumber ? ` · Mj. ${r.spotNumber}` : ""}
                                                 </Badge>
                                             ) : r.serviceTypeCategory === "lift_from_sea" ? (
                                                 <span className="text-xs text-amber-600 font-medium italic">Nije dodijeljeno</span>
@@ -576,6 +581,7 @@ export default function AdminUserCard() {
                             userObj: user,
                             contactPhone: user.phone || "",
                         }}
+                        lockUser={true}
                         onSuccess={() => {
                             setIsCreateResOpen(false);
                             utils.user.getCard.invalidate();

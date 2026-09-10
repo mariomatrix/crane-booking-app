@@ -46,7 +46,7 @@ export function UserSearchCombobox({
     value,
     onChange,
     initialUser,
-    placeholder = "Traži po imenu, prezimenu, tvrtki, OIB-u ili registraciji...",
+    placeholder = "Traži po imenu, prezimenu, tvrtki ili OIB-u...",
     emptyLabel = "Nema rezultata.",
     allLabel = "Svi korisnici",
     showAllOption = true,
@@ -62,11 +62,9 @@ export function UserSearchCombobox({
         return users.find((u) => u.id === value) || (initialUser?.id === value ? initialUser : null);
     }, [users, value, initialUser]);
 
-    const selectedVessels = selectedUser?.vessels?.map(v => v.registration).filter(Boolean).join(", ");
     const displayLabel = selectedUser
         ? (selectedUser.name || `${selectedUser.firstName || ""} ${selectedUser.lastName || ""}`.trim() || "Korisnik") +
-          (selectedUser.oib ? ` (${selectedUser.oib})` : "") +
-          (selectedVessels ? ` · [${selectedVessels}]` : "")
+          (selectedUser.oib ? ` (${selectedUser.oib})` : "")
         : (showAllOption ? allLabel : "Odaberite korisnika...");
 
     // Filter users using word-boundary prefix match for all typed tokens
@@ -77,9 +75,7 @@ export function UserSearchCombobox({
         const tokens = query.split(/\s+/).filter(Boolean);
 
         return users.filter((user) => {
-            const vesselRegs = user.vessels?.map(v => v.registration || "").join(" ") || "";
-            const vesselNames = user.vessels?.map(v => v.name || "").join(" ") || "";
-            const combined = `${user.name || ""} ${user.firstName || ""} ${user.lastName || ""} ${user.oib || ""} ${user.email || ""} ${vesselRegs} ${vesselNames}`.toLowerCase();
+            const combined = `${user.name || ""} ${user.firstName || ""} ${user.lastName || ""} ${user.oib || ""} ${user.email || ""} ${user.phone || ""}`.toLowerCase();
             const words = combined.split(/[\s,.-]+/).filter(Boolean);
 
             // Every token must match the beginning of at least one word
@@ -141,8 +137,8 @@ export function UserSearchCombobox({
                                     </CommandItem>
                                 )}
                                 {filteredUsers.map((user) => {
-                                    const vesselRegs = user.vessels?.map(v => v.registration).filter(Boolean) as string[] || [];
                                     const userName = user.name || `${user.firstName || ""} ${user.lastName || ""}`.trim() || "—";
+                                    const subInfo = [user.oib ? `OIB: ${user.oib}` : null, user.phone || user.email || null].filter(Boolean).join(" · ");
 
                                     return (
                                         <CommandItem
@@ -164,11 +160,11 @@ export function UserSearchCombobox({
                                                 <span className="truncate text-sm font-medium">
                                                     {userName}
                                                 </span>
-                                                <span className="truncate text-xs text-muted-foreground">
-                                                    {user.oib ? `OIB: ${user.oib}` : ""}
-                                                    {user.oib && vesselRegs.length > 0 ? " · " : ""}
-                                                    {vesselRegs.length > 0 ? `Reg: ${vesselRegs.join(", ")}` : ""}
-                                                </span>
+                                                {subInfo && (
+                                                    <span className="truncate text-xs text-muted-foreground">
+                                                        {subInfo}
+                                                    </span>
+                                                )}
                                             </div>
                                         </CommandItem>
                                     );
