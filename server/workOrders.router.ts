@@ -1,7 +1,7 @@
 import { router, publicProcedure, operatorProcedure, adminProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { getDb, createAuditEntry } from "./db";
+import { getDb, createAuditEntry, createLandOccupancy, completeLandOccupancy, getActiveOccupancyByVessel } from "./db";
 import {
     workOrders,
     workOrderResources,
@@ -212,6 +212,7 @@ export const workOrdersRouter = router({
             z.object({
                 reservationId: z.string().uuid(),
                 craneId: z.string().uuid(),
+                startTime: z.date().optional(),
                 operatorNotes: z.string().optional(),
                 resources: z.array(
                     z.object({
@@ -369,7 +370,7 @@ export const workOrdersRouter = router({
                     commercialPricePerMeter,
                     commercialTotal,
                     vatRate: "25.00",
-                    startedAt: new Date(),
+                    startedAt: input.startTime || new Date(),
                     operatorNotes: input.operatorNotes || null,
                     erpSyncStatus: "pending",
                 })
@@ -422,6 +423,7 @@ export const workOrdersRouter = router({
             z.object({
                 workOrderId: z.string().uuid(),
                 actualDurationMin: z.number().int().positive().default(30),
+                zoneId: z.string().uuid().nullable().optional(),
                 operatorNotes: z.string().optional(),
                 resources: z.array(
                     z.object({
@@ -485,13 +487,62 @@ export const workOrdersRouter = router({
                 })
                 .where(eq(workOrders.id, order.id));
 
-            // Fetch Vessel Details for Card Record
+            // Fetch Reservation & Vessel Details
+            const [resRow] = order.reservationId
+                ? await db.select().from(reservations).where(eq(reservations.id, order.reservationId)).limit(1)
+                : [null];
+
             const [vessel] = order.vesselId
                 ? await db.select().from(vessels).where(eq(vessels.id, order.vesselId)).limit(1)
                 : [null];
 
             const vesselName = vessel?.name || "Plovilo";
             const vesselRegistration = vessel?.registration || "";
+
+            // Handle Dry Berth Occupancy (Kopno)
+            if (resRow && resRow.vesselId) {
+                let opCategory: string | null = null;
+                if (resRow.serviceTypeId) {
+                    const [st] = await db.select().from(serviceTypes).where(eq(serviceTypes.id, resRow.serviceTypeId)).limit(1);
+                    opCategory = st?.operationCategory || null;
+                }
+
+                const isLift = opCategory === "lift_from_sea";
+                const isLower = opCategory === "lower_to_sea";
+                const isMove = opCategory === "move";
+
+                if ((isLift || isMove) && resRow.userId) {
+                    const targetZoneId = input.zoneId || resRow.landZoneId;
+                    if (targetZoneId) {
+                        const activeOcc = await getActiveOccupancyByVessel(resRow.vesselId);
+                        if (activeOcc) {
+                            if (activeOcc.zoneId !== targetZoneId) {
+                                await db.update(landOccupancies).set({
+                                    zoneId: targetZoneId,
+                                    updatedAt: new Date(),
+                                    note: input.operatorNotes ? `${activeOcc.note || ''} | Premješteno: ${input.operatorNotes}`.trim() : activeOcc.note,
+                                }).where(eq(landOccupancies.id, activeOcc.id));
+                            }
+                        } else {
+                            await createLandOccupancy({
+                                vesselId: resRow.vesselId,
+                                userId: resRow.userId,
+                                zoneId: targetZoneId,
+                                reservationId: resRow.id,
+                                liftedAt: completedAt,
+                                createdBy: ctx.user.id,
+                                note: input.operatorNotes || "Smješteno na kopno putem radnog naloga",
+                            });
+                        }
+                        await db.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, resRow.id));
+                    }
+                } else if (isLower) {
+                    const activeOcc = await getActiveOccupancyByVessel(resRow.vesselId);
+                    if (activeOcc) {
+                        await completeLandOccupancy(activeOcc.id, resRow.id, completedAt);
+                    }
+                }
+            }
 
             // Apply statutory rights or fee adjustments
             if (order.clientType === "member") {
@@ -595,6 +646,341 @@ export const workOrdersRouter = router({
             });
 
             return { success: true, alreadyCompleted: false };
+        }),
+
+    // ─── Direct / Retroactive Complete Work Order (Jednostepeni unos na kraju dana) ───
+    completeDirectly: operatorProcedure
+        .input(
+            z.object({
+                reservationId: z.string().uuid(),
+                craneId: z.string().uuid().optional(),
+                startTime: z.date().optional(),
+                actualDurationMin: z.number().int().positive().default(30),
+                zoneId: z.string().uuid().nullable().optional(),
+                operatorNotes: z.string().optional(),
+                resources: z.array(
+                    z.object({
+                        resourceId: z.string().uuid(),
+                        quantity: z.number().positive().default(1),
+                        notes: z.string().optional(),
+                    })
+                ).optional().default([]),
+            })
+        )
+        .mutation(async ({ input, ctx }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+            const [res] = await db.select().from(reservations).where(eq(reservations.id, input.reservationId)).limit(1);
+            if (!res) throw new TRPCError({ code: "NOT_FOUND", message: "Rezervacija nije pronađena." });
+
+            if (res.status === "completed") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je već zaključena." });
+            }
+            if (res.status === "cancelled" || res.status === "rejected") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je otkazana ili odbijena." });
+            }
+
+            // Check that reservation is not scheduled for a future date
+            const targetDate = res.scheduledStart
+                ? new Date(res.scheduledStart)
+                : res.requestedDate
+                    ? new Date(res.requestedDate)
+                    : null;
+
+            if (targetDate) {
+                const now = new Date();
+                const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                if (targetDate.getTime() > endOfToday.getTime()) {
+                    const dateStr = targetDate.toLocaleDateString("hr-HR");
+                    throw new TRPCError({
+                        code: "BAD_REQUEST",
+                        message: `Nije moguće pokrenuti/zaključiti radni nalog za rezervaciju koja je zakazana za budući datum (${dateStr}). Radni nalog se može evidentirati tek na dan termina ili nakon njega.`,
+                    });
+                }
+            }
+
+            const effectiveStartTime = input.startTime || (res.scheduledStart ? new Date(res.scheduledStart) : new Date());
+            const durationMs = input.actualDurationMin * 60 * 1000;
+            const effectiveCompletedAt = new Date(effectiveStartTime.getTime() + durationMs);
+
+            // Check if active work order already exists
+            const [existing] = await db
+                .select()
+                .from(workOrders)
+                .where(and(eq(workOrders.reservationId, input.reservationId), ne(workOrders.status, "cancelled")))
+                .limit(1);
+
+            let order = existing;
+
+            if (existing && existing.status === "completed") {
+                throw new TRPCError({ code: "BAD_REQUEST", message: `Za ovu rezervaciju već postoji zaključeni radni nalog (${existing.orderNumber}).` });
+            }
+
+            const [user] = await db.select().from(users).where(eq(users.id, res.userId)).limit(1);
+            if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
+
+            const [vessel] = res.vesselId
+                ? await db.select().from(vessels).where(eq(vessels.id, res.vesselId)).limit(1)
+                : [null];
+
+            const currentYear = new Date().getFullYear();
+            const isMember = (user.clientCategory || "member") === "member";
+            const clientType: "member" | "external" = isMember ? "member" : "external";
+
+            let quotaOperationType: "lift" | "lower" | "none" = "none";
+            let opCategory: string | null = null;
+            if (res.serviceTypeId) {
+                const [st] = await db.select().from(serviceTypes).where(eq(serviceTypes.id, res.serviceTypeId)).limit(1);
+                opCategory = st?.operationCategory || null;
+                if (st?.operationCategory === "lift_from_sea") quotaOperationType = "lift";
+                else if (st?.operationCategory === "lower_to_sea") quotaOperationType = "lower";
+            }
+
+            let isStatutoryCovered = false;
+            let chargeItemCode: string | null = null;
+            let chargeItemName: string | null = null;
+            let commercialPricePerMeter: string | null = null;
+            let commercialTotal: string | null = null;
+            const vesselLengthM = res.vesselLengthM || (vessel?.lengthM ? String(vessel.lengthM) : "8.00");
+
+            if (isMember) {
+                let [rights] = await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, user.id)).limit(1);
+                if (!rights) {
+                    const expiresAt = `${currentYear + 1}-12-31`;
+                    [rights] = await db.insert(memberStatutoryRights).values({
+                        userId: user.id,
+                        liftAvailable: true,
+                        liftAcquiredYear: currentYear,
+                        liftExpiresAt: expiresAt,
+                        lowerAvailable: true,
+                        lowerAcquiredYear: currentYear,
+                        lowerExpiresAt: expiresAt,
+                        pendingFeeAdjustmentsCount: 0,
+                    }).returning();
+                }
+
+                if (quotaOperationType === "lift" && rights.liftAvailable) {
+                    isStatutoryCovered = true;
+                } else if (quotaOperationType === "lower" && rights.lowerAvailable) {
+                    isStatutoryCovered = true;
+                } else {
+                    isStatutoryCovered = false;
+                    chargeItemCode = "USL-D9T";
+                    chargeItemName = "Korištenje dizalice 9T (Doplata članarine)";
+                }
+            } else {
+                const [priceItem] = await db
+                    .select()
+                    .from(priceListItems)
+                    .where(and(eq(priceListItems.code, "USL-VANJSKI-M"), eq(priceListItems.isActive, true)))
+                    .limit(1);
+
+                const ratePerMeter = priceItem?.pricePerMeterEur ? Number(priceItem.pricePerMeterEur) : 12.00;
+                const length = Number(vesselLengthM) || 8.0;
+                const baseAmount = length * ratePerMeter;
+                const totalWithVat = baseAmount * 1.25;
+
+                commercialPricePerMeter = ratePerMeter.toFixed(2);
+                commercialTotal = totalWithVat.toFixed(2);
+                isStatutoryCovered = false;
+            }
+
+            const chosenCraneId = input.craneId || res.craneId;
+            if (!chosenCraneId) {
+                throw new TRPCError({ code: "BAD_REQUEST", message: "Dizalica mora biti odabrana." });
+            }
+
+            if (existing && existing.status === "in_progress") {
+                // Update existing order
+                await db.update(workOrders).set({
+                    status: "completed",
+                    startedAt: effectiveStartTime,
+                    completedAt: effectiveCompletedAt,
+                    actualDurationMin: input.actualDurationMin,
+                    operatorNotes: input.operatorNotes || existing.operatorNotes,
+                    craneId: chosenCraneId,
+                    updatedAt: new Date(),
+                }).where(eq(workOrders.id, existing.id));
+
+                const [freshOrder] = await db.select().from(workOrders).where(eq(workOrders.id, existing.id)).limit(1);
+                order = freshOrder;
+            } else {
+                // Create directly in completed status
+                const orderNumber = await generateWorkOrderNumber(db, currentYear);
+                const [created] = await db.insert(workOrders).values({
+                    orderNumber,
+                    reservationId: res.id,
+                    userId: user.id,
+                    vesselId: res.vesselId || null,
+                    craneId: chosenCraneId,
+                    operatorId: ctx.user.id,
+                    status: "completed",
+                    clientType,
+                    isStatutoryCovered,
+                    quotaOperationType,
+                    chargeItemCode,
+                    chargeItemName,
+                    vesselLengthM,
+                    commercialPricePerMeter,
+                    commercialTotal,
+                    vatRate: "25.00",
+                    startedAt: effectiveStartTime,
+                    completedAt: effectiveCompletedAt,
+                    actualDurationMin: input.actualDurationMin,
+                    operatorNotes: input.operatorNotes || null,
+                    erpSyncStatus: "pending",
+                }).returning();
+                order = created;
+            }
+
+            // Resources
+            if (input.resources && input.resources.length > 0) {
+                await db.delete(workOrderResources).where(eq(workOrderResources.workOrderId, order.id));
+                for (const resItem of input.resources) {
+                    const [resDef] = await db.select().from(resources).where(eq(resources.id, resItem.resourceId)).limit(1);
+                    if (resDef) {
+                        const unitPrice = Number(resDef.pricePerUnitEur) || 0;
+                        const totalPrice = Number((unitPrice * resItem.quantity).toFixed(2));
+                        await db.insert(workOrderResources).values({
+                            workOrderId: order.id,
+                            resourceId: resDef.id,
+                            quantity: resItem.quantity.toFixed(2),
+                            unitPriceEur: unitPrice.toFixed(2),
+                            totalPriceEur: totalPrice.toFixed(2),
+                            notes: resItem.notes || null,
+                        });
+                    }
+                }
+            }
+
+            // Land occupancy management (Kopno)
+            if (res.vesselId) {
+                const isLift = opCategory === "lift_from_sea";
+                const isLower = opCategory === "lower_to_sea";
+                const isMove = opCategory === "move";
+
+                if ((isLift || isMove) && res.userId) {
+                    const targetZoneId = input.zoneId || res.landZoneId;
+                    if (targetZoneId) {
+                        const activeOcc = await getActiveOccupancyByVessel(res.vesselId);
+                        if (activeOcc) {
+                            if (activeOcc.zoneId !== targetZoneId) {
+                                await db.update(landOccupancies).set({
+                                    zoneId: targetZoneId,
+                                    updatedAt: new Date(),
+                                    note: input.operatorNotes ? `${activeOcc.note || ''} | Premješteno: ${input.operatorNotes}`.trim() : activeOcc.note,
+                                }).where(eq(landOccupancies.id, activeOcc.id));
+                            }
+                        } else {
+                            await createLandOccupancy({
+                                vesselId: res.vesselId,
+                                userId: res.userId,
+                                zoneId: targetZoneId,
+                                reservationId: res.id,
+                                liftedAt: effectiveCompletedAt,
+                                createdBy: ctx.user.id,
+                                note: input.operatorNotes || "Smješteno na kopno putem radnog naloga",
+                            });
+                        }
+                        await db.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, res.id));
+                    }
+                } else if (isLower) {
+                    const activeOcc = await getActiveOccupancyByVessel(res.vesselId);
+                    if (activeOcc) {
+                        await completeLandOccupancy(activeOcc.id, res.id, effectiveCompletedAt);
+                    }
+                }
+            }
+
+            // Vessel name & reg for user card
+            const vesselName = vessel?.name || "Plovilo";
+            const vesselRegistration = vessel?.registration || "";
+
+            // Statutory rights and card entry
+            if (clientType === "member") {
+                if (isStatutoryCovered) {
+                    if (quotaOperationType === "lift") {
+                        await db.update(memberStatutoryRights).set({ liftAvailable: false, updatedAt: new Date() }).where(eq(memberStatutoryRights.userId, user.id));
+                    } else if (quotaOperationType === "lower") {
+                        await db.update(memberStatutoryRights).set({ lowerAvailable: false, updatedAt: new Date() }).where(eq(memberStatutoryRights.userId, user.id));
+                    }
+
+                    await db.insert(userCardEntries).values({
+                        userId: user.id,
+                        workOrderId: order.id,
+                        entryType: "statutory_quota_used",
+                        serviceItemCode: quotaOperationType === "lift" ? "STAT-LIFT" : "STAT-LOWER",
+                        serviceItemName: quotaOperationType === "lift" ? "Statutarno pravo: Vađenje iz mora (0,00 €)" : "Statutarno pravo: Spuštanje u more (0,00 €)",
+                        vesselName,
+                        vesselRegistration,
+                        eventDate: effectiveCompletedAt,
+                        note: `Radni nalog ${order.orderNumber} - Pokriveno godišnjom članarinom`,
+                        erpStatus: "pending",
+                    });
+                } else {
+                    await db.update(memberStatutoryRights).set({
+                        pendingFeeAdjustmentsCount: sql`${memberStatutoryRights.pendingFeeAdjustmentsCount} + 1`,
+                        updatedAt: new Date(),
+                    }).where(eq(memberStatutoryRights.userId, user.id));
+
+                    await db.insert(userCardEntries).values({
+                        userId: user.id,
+                        workOrderId: order.id,
+                        entryType: "fee_adjustment_charge",
+                        serviceItemCode: chargeItemCode || "USL-D9T",
+                        serviceItemName: chargeItemName || "Korištenje dizalice 9T (Doplata članarine)",
+                        vesselName,
+                        vesselRegistration,
+                        eventDate: effectiveCompletedAt,
+                        note: `Radni nalog ${order.orderNumber} - Prekoračenje statutarne kvote (Evidentirano zaduženje za uvećanje članarine)`,
+                        erpStatus: "pending",
+                    });
+                }
+            } else {
+                await db.insert(userCardEntries).values({
+                    userId: user.id,
+                    workOrderId: order.id,
+                    entryType: "commercial_service",
+                    serviceItemCode: "USL-VANJSKI-M",
+                    serviceItemName: `Komercijalno korištenje dizalice (${vesselLengthM}m)`,
+                    vesselName,
+                    vesselRegistration,
+                    eventDate: effectiveCompletedAt,
+                    note: `Radni nalog ${order.orderNumber} - Iznos za fakturiranje: ${commercialTotal || '0.00'} EUR`,
+                    erpStatus: "pending",
+                });
+            }
+
+            // Log crane operation
+            const opType = quotaOperationType && quotaOperationType !== "none" ? quotaOperationType : "lift";
+            await db.insert(craneOperationLog).values({
+                craneId: chosenCraneId,
+                reservationId: res.id,
+                operationType: opType,
+                startTime: effectiveStartTime,
+                endTime: effectiveCompletedAt,
+                durationMinutes: input.actualDurationMin,
+                operatorId: ctx.user.id,
+                note: `Radni nalog ${order.orderNumber} završen (retroaktivno).`,
+            });
+
+            // Update reservation status to completed
+            await db.update(reservations).set({
+                status: "completed",
+                completedAt: effectiveCompletedAt,
+                updatedAt: new Date(),
+            }).where(eq(reservations.id, res.id));
+
+            await createAuditEntry({
+                actorId: ctx.user.id,
+                action: "work_order_completed_retroactive",
+                entityType: "work_orders",
+                entityId: order.id,
+                payload: { orderNumber: order.orderNumber, actualDurationMin: input.actualDurationMin, effectiveStartTime, effectiveCompletedAt },
+            });
+
+            return { success: true, workOrder: order };
         }),
 
     // ─── Get Unified Cycle Summary (Sažetak ciklusa: Vađenje + Suhi vez + Spuštanje) ─────

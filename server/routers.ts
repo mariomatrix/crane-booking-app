@@ -2409,9 +2409,20 @@ export const appRouter = router({
           }
         }
 
+        const serviceType = reservation.serviceTypeId
+          ? await getServiceTypeById(reservation.serviceTypeId)
+          : null;
+
         return {
           ...reservation,
           crane,
+          serviceType: serviceType
+            ? {
+                id: serviceType.id,
+                name: serviceType.name,
+                operationCategory: serviceType.operationCategory,
+              }
+            : null,
           user: user
             ? {
                 id: user.id,

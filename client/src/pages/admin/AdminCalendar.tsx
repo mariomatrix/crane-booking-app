@@ -22,13 +22,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus } from "lucide-react";
+import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus, ClipboardList } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
+import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { addDays, addMonths, addWeeks, startOfDay, endOfDay, startOfWeek, endOfWeek, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
@@ -201,6 +202,7 @@ export default function AdminCalendar() {
     const [editEnd, setEditEnd] = useState("");
     const [editCraneId, setEditCraneId] = useState("");
     const [editLandZoneId, setEditLandZoneId] = useState("none");
+    const [workOrderRes, setWorkOrderRes] = useState<any>(null);
 
     const updateLandZoneMutation = trpc.reservation.updateLandZone.useMutation();
 
@@ -924,12 +926,30 @@ export default function AdminCalendar() {
                                             </Select>
                                         </div>
                                     </div>
-                                    <DialogFooter className="px-6 pb-6">
-                                        <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
-                                        <Button type="submit" disabled={rescheduleMutation.isPending}>
-                                            {rescheduleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                            Spremi promjene
-                                        </Button>
+                                    <DialogFooter className="px-6 pb-6 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
+                                        <div>
+                                            {editingRes && (editingRes.status === "approved" || editingRes.status === "in_progress") && (
+                                                <Button
+                                                    type="button"
+                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 w-full sm:w-auto"
+                                                    onClick={() => {
+                                                        const target = editingRes;
+                                                        setIsEditOpen(false);
+                                                        setWorkOrderRes(target);
+                                                    }}
+                                                >
+                                                    <ClipboardList className="h-4 w-4" />
+                                                    Radni nalog
+                                                </Button>
+                                            )}
+                                        </div>
+                                        <div className="flex gap-2 justify-end w-full sm:w-auto">
+                                            <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
+                                            <Button type="submit" disabled={rescheduleMutation.isPending}>
+                                                {rescheduleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                Spremi promjene
+                                            </Button>
+                                        </div>
                                     </DialogFooter>
                                 </div>
                             </form>
@@ -1256,6 +1276,22 @@ export default function AdminCalendar() {
                                             </button>
                                         </div>
                                     )}
+                                    {!p.isMaintenance && (p.status === 'approved' || p.status === 'in_progress') && (
+                                        <div className="mt-auto flex gap-1 pt-1 border-t border-white/20">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    const res = allReservations.find((r: any) => r.id === p.reservationId);
+                                                    if (res) setWorkOrderRes(res);
+                                                }}
+                                                className="hover:bg-white/25 rounded px-1 py-0.5 flex items-center gap-1 text-[9px] font-semibold text-white bg-black/20"
+                                                title="Otvori radni nalog"
+                                            >
+                                                <ClipboardList className="h-3 w-3 text-emerald-200" />
+                                                <span>Radni nalog</span>
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             );
                         }}
@@ -1346,6 +1382,26 @@ export default function AdminCalendar() {
                     </Card>
                 </div>
             </div>
+
+            {/* Work Order Execution Dialog */}
+            {workOrderRes && (
+                <WorkOrderExecutionDialog
+                    open={!!workOrderRes}
+                    onOpenChange={(open) => !open && setWorkOrderRes(null)}
+                    reservationId={workOrderRes.id}
+                    craneId={workOrderRes.craneId || workOrderRes.crane?.id || ""}
+                    craneName={workOrderRes.crane?.name || workOrderRes.craneName}
+                    userName={workOrderRes.user?.name || (workOrderRes.user?.firstName ? `${workOrderRes.user.firstName} ${workOrderRes.user.lastName || ''}`.trim() : null) || workOrderRes.userName}
+                    userOib={workOrderRes.user?.oib || workOrderRes.userOib}
+                    isMember={workOrderRes.user ? (!workOrderRes.user.isLegalEntity && workOrderRes.user.role === "user") : !workOrderRes.isLegalEntity}
+                    vesselName={workOrderRes.vesselName || workOrderRes.vessel?.name}
+                    vesselLengthM={workOrderRes.vesselLengthM || workOrderRes.vessel?.lengthM}
+                    onSuccess={() => {
+                        utils.reservation.listAll.invalidate();
+                        utils.calendar.events.invalidate();
+                    }}
+                />
+            )}
         </div>
     );
 }

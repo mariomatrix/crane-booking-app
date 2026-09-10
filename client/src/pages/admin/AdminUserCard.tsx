@@ -21,11 +21,12 @@ import { AdminReservationForm } from "@/components/AdminReservationForm";
 import {
     Loader2, ArrowLeft, CalendarDays, Mail, Phone, Shield, Clock,
     CheckCircle2, XCircle, Hourglass, Ban, Anchor, MessageSquare, Ship,
-    Plus, Trash2, Edit2, AlertCircle,
+    Plus, Trash2, Edit2, AlertCircle, ClipboardList,
 } from "lucide-react";
 import { useState } from "react";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
+import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 
 const STAT_CARDS = [
     { key: "total", label: "Ukupno", icon: CalendarDays, color: "text-foreground" },
@@ -43,6 +44,7 @@ export default function AdminUserCard() {
     const [chatResId, setChatResId] = useState<string | null>(null);
     const [statusFilter, setStatusFilter] = useState("all");
     const [isCreateResOpen, setIsCreateResOpen] = useState(false);
+    const [workOrderRes, setWorkOrderRes] = useState<any>(null);
 
     const { data, isLoading } = trpc.user.getCard.useQuery(
         { userId: id },
@@ -467,37 +469,48 @@ export default function AdminUserCard() {
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-1">
                                                 {r.status === "approved" && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        className="text-green-700 border-green-300 hover:bg-green-50 h-7 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
-                                                        onClick={() => completeMutation.mutate({ id: r.id })}
-                                                        disabled={
-                                                            completeMutation.isPending ||
-                                                            (() => {
-                                                                const dt = r.scheduledDate || r.scheduledStart || r.requestedDate;
-                                                                if (!dt) return false;
-                                                                const target = new Date(dt);
-                                                                const now = new Date();
-                                                                const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                                                                return target.getTime() > endOfToday.getTime();
-                                                            })()
-                                                        }
-                                                        title={
-                                                            (() => {
-                                                                const dt = r.scheduledDate || r.scheduledStart || r.requestedDate;
-                                                                if (!dt) return "";
-                                                                const target = new Date(dt);
-                                                                const now = new Date();
-                                                                const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                                                                return target.getTime() > endOfToday.getTime()
-                                                                    ? "Završavanje je moguće tek na dan termina ili nakon njega."
-                                                                    : "Označi rezervaciju kao izvršenu.";
-                                                            })()
-                                                        }
-                                                    >
-                                                        <CheckCircle2 className="h-3 w-3 mr-1" />Završi
-                                                    </Button>
+                                                    <>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 h-7 text-xs font-medium"
+                                                            onClick={() => setWorkOrderRes(r)}
+                                                            title="Otvori radni nalog za evidenciju rada i mjesta na kopnu"
+                                                        >
+                                                            <ClipboardList className="h-3 w-3 mr-1" />Radni nalog
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="text-green-700 border-green-300 hover:bg-green-50 h-7 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                                                            onClick={() => completeMutation.mutate({ id: r.id })}
+                                                            disabled={
+                                                                completeMutation.isPending ||
+                                                                (() => {
+                                                                    const dt = r.scheduledDate || r.scheduledStart || r.requestedDate;
+                                                                    if (!dt) return false;
+                                                                    const target = new Date(dt);
+                                                                    const now = new Date();
+                                                                    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                                                                    return target.getTime() > endOfToday.getTime();
+                                                                })()
+                                                            }
+                                                            title={
+                                                                (() => {
+                                                                    const dt = r.scheduledDate || r.scheduledStart || r.requestedDate;
+                                                                    if (!dt) return "";
+                                                                    const target = new Date(dt);
+                                                                    const now = new Date();
+                                                                    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+                                                                    return target.getTime() > endOfToday.getTime()
+                                                                        ? "Završavanje je moguće tek na dan termina ili nakon njega."
+                                                                        : "Označi rezervaciju kao izvršenu.";
+                                                                })()
+                                                            }
+                                                        >
+                                                            <CheckCircle2 className="h-3 w-3 mr-1" />Završi
+                                                        </Button>
+                                                    </>
                                                 )}
                                                 <Button
                                                     size="sm"
@@ -700,6 +713,26 @@ export default function AdminUserCard() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Work Order Execution Dialog */}
+            {workOrderRes && (
+                <WorkOrderExecutionDialog
+                    open={!!workOrderRes}
+                    onOpenChange={(open) => !open && setWorkOrderRes(null)}
+                    reservationId={workOrderRes.id}
+                    craneId={workOrderRes.craneId || workOrderRes.crane?.id || ""}
+                    craneName={workOrderRes.craneName || workOrderRes.crane?.name}
+                    userName={workOrderRes.userName || workOrderRes.user?.name || (data as any)?.user?.name}
+                    userOib={workOrderRes.userOib || workOrderRes.user?.oib || (data as any)?.user?.oib}
+                    isMember={(data as any)?.user ? (!(data as any).user.isLegalEntity && (data as any).user.role === "user") : true}
+                    vesselName={workOrderRes.vesselName || workOrderRes.vessel?.name}
+                    vesselLengthM={workOrderRes.vesselLengthM || workOrderRes.vessel?.lengthM}
+                    onSuccess={() => {
+                        utils.user.getCard.invalidate();
+                        utils.userCard.getCard.invalidate();
+                    }}
+                />
+            )}
         </div>
     );
 }
