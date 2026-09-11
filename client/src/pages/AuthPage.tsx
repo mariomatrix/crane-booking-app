@@ -104,9 +104,12 @@ export default function AuthPage() {
                 toast.error("Morate prihvatiti Uvjete korištenja i Politiku privatnosti za registraciju.");
                 return;
             }
-            if (!oib || oib.length !== 11 || !isValidOib(oib)) {
-                setOibError("Unesite ispravan OIB (11 znamenki).");
-                return;
+            const cleanOib = oib.trim();
+            if (cleanOib) {
+                if (cleanOib.length !== 11 || !isValidOib(cleanOib)) {
+                    setOibError("Unesite ispravan OIB (11 znamenki).");
+                    return;
+                }
             }
             registerMutation.mutate({
                 email,
@@ -115,7 +118,7 @@ export default function AuthPage() {
                 lastName,
                 username: username || undefined,
                 phone,
-                oib,
+                oib: cleanOib || undefined,
             });
         } else if (mode === "forgotPassword") {
             forgotPasswordMutation.mutate({ email });
@@ -224,22 +227,23 @@ export default function AuthPage() {
                                         <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+385 91 234 5678" required />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>OIB *</Label>
+                                        <Label>OIB (opcionalno)</Label>
                                         <Input
                                             value={oib}
                                             onChange={(e) => {
                                                 const val = e.target.value.replace(/\D/g, "").slice(0, 11);
                                                 setOib(val);
-                                                if (val.length === 11) {
+                                                if (val.length > 0 && val.length < 11) {
+                                                    setOibError("OIB mora imati 11 znamenki.");
+                                                } else if (val.length === 11) {
                                                     setOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
                                                 } else {
                                                     setOibError(null);
                                                 }
                                             }}
-                                            placeholder="12345678901"
+                                            placeholder="12345678901 (nije obavezno)"
                                             maxLength={11}
                                             inputMode="numeric"
-                                            required
                                         />
                                         {oibError && <p className="text-xs text-destructive">{oibError}</p>}
                                         {oib.length === 11 && !oibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}

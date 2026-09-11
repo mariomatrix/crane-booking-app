@@ -59,7 +59,7 @@ const PAYMENT_STATUS_CONFIG: Record<
         dot: "bg-emerald-500",
     },
     unpaid: {
-        label: "Nenaplaćeno",
+        label: "Neplaćeno",
         bg: "bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800",
         text: "text-amber-700",
         dot: "bg-amber-500",
@@ -103,7 +103,7 @@ export default function AdminInvoices() {
     const [userSearchQuery, setUserSearchQuery] = useState("");
     const [invoiceType, setInvoiceType] = useState<"crane_operation" | "annual_berth_fee" | "transit_berth" | "membership_fee" | "other">("crane_operation");
     const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash" | "card" | "compensation">("bank_transfer");
-    
+
     // Stavka računa
     const [productCode, setProductCode] = useState("USL-DIZ");
     const [itemDescription, setItemDescription] = useState("Dizanje plovila iz mora");
@@ -257,7 +257,7 @@ export default function AdminInvoices() {
 
                 <Card className="shadow-sm border-l-4 border-l-amber-500">
                     <CardHeader className="p-4 pb-1">
-                        <CardDescription className="text-xs font-semibold">Nenaplaćeno / Dospjelo</CardDescription>
+                        <CardDescription className="text-xs font-semibold">Neplaćeno / Dospjelo</CardDescription>
                         <CardTitle className="text-2xl font-bold text-amber-600">
                             {(stats.totalGrossSum - stats.totalPaidSum).toLocaleString("hr-HR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                         </CardTitle>
@@ -312,7 +312,7 @@ export default function AdminInvoices() {
                             <SelectContent>
                                 <SelectItem value="ALL">Svi statusi plaćanja</SelectItem>
                                 <SelectItem value="paid">🟩 Plaćeno</SelectItem>
-                                <SelectItem value="unpaid">🟨 Nenaplaćeno</SelectItem>
+                                <SelectItem value="unpaid">🟨 Neplaćeno</SelectItem>
                                 <SelectItem value="partially_paid">🟦 Djelomično plaćeno</SelectItem>
                                 <SelectItem value="cancelled">⬛ Stornirano</SelectItem>
                             </SelectContent>
@@ -543,9 +543,8 @@ export default function AdminInvoices() {
                                             <div
                                                 key={u.id}
                                                 onClick={() => setSelectedUserId(u.id)}
-                                                className={`p-2 cursor-pointer flex items-center justify-between transition-colors ${
-                                                    isSelected ? "bg-blue-100 dark:bg-blue-950 font-bold border-l-4 border-blue-600" : "hover:bg-accent"
-                                                }`}
+                                                className={`p-2 cursor-pointer flex items-center justify-between transition-colors ${isSelected ? "bg-blue-100 dark:bg-blue-950 font-bold border-l-4 border-blue-600" : "hover:bg-accent"
+                                                    }`}
                                             >
                                                 <div>
                                                     <span className="font-semibold">{u.name || `${u.firstName || ""} ${u.lastName || ""}`}</span>

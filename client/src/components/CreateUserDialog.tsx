@@ -72,9 +72,12 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
             toast.error("Ime i prezime su obavezni.");
             return;
         }
-        if (!oib || oib.length !== 11 || !isValidOib(oib)) {
-            setOibError("Unesite ispravan OIB (11 znamenki).");
-            return;
+        const cleanOib = oib.trim();
+        if (cleanOib) {
+            if (cleanOib.length !== 11 || !isValidOib(cleanOib)) {
+                setOibError("Unesite ispravan OIB (11 znamenki).");
+                return;
+            }
         }
 
         createMutation.mutate({
@@ -82,7 +85,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
             firstName,
             lastName,
             phone: phone || undefined,
-            oib,
+            oib: cleanOib || undefined,
             role,
             clientCategory,
         });
@@ -177,23 +180,24 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="oib">OIB *</Label>
+                            <Label htmlFor="oib">OIB (opcionalno)</Label>
                             <Input
                                 id="oib"
                                 value={oib}
                                 onChange={(e) => {
                                     const val = e.target.value.replace(/\D/g, "").slice(0, 11);
                                     setOib(val);
-                                    if (val.length === 11) {
+                                    if (val.length > 0 && val.length < 11) {
+                                        setOibError("OIB mora imati 11 znamenki.");
+                                    } else if (val.length === 11) {
                                         setOibError(isValidOib(val) ? null : "OIB nije ispravan (pogrešna kontrolna znamenka).");
                                     } else {
                                         setOibError(null);
                                     }
                                 }}
-                                placeholder="12345678901"
+                                placeholder="12345678901 (nije obavezno)"
                                 maxLength={11}
                                 inputMode="numeric"
-                                required
                             />
                             {oibError && <p className="text-xs text-destructive">{oibError}</p>}
                             {oib.length === 11 && !oibError && <p className="text-xs text-green-600">OIB je ispravan ✓</p>}

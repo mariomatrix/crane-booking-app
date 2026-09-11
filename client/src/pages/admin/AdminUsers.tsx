@@ -320,7 +320,7 @@ export default function AdminUsers() {
             }
         }
 
-        if (newOib && newOib.length === 11 && !isValidOib(newOib)) {
+        if (newOib.trim() && (newOib.trim().length !== 11 || !isValidOib(newOib.trim()))) {
             setNewOibError("Unesite ispravan OIB (11 znamenki).");
             return;
         }

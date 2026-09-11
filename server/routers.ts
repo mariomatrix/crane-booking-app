@@ -333,7 +333,9 @@ export const appRouter = router({
           oib: z
             .string()
             .length(11)
-            .refine(isValidOib, { message: "OIB nije ispravan." }),
+            .refine(isValidOib, { message: "OIB nije ispravan." })
+            .optional()
+            .nullable(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -344,19 +346,22 @@ export const appRouter = router({
             message: "Email je već registriran.",
           });
         }
-        // Check OIB uniqueness
-        const db = await getDb();
-        if (db) {
-          const oibExists = await db
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.oib, input.oib))
-            .limit(1);
-          if (oibExists.length > 0) {
-            throw new TRPCError({
-              code: "CONFLICT",
-              message: "Korisnik s tim OIB-om već postoji.",
-            });
+        // Check OIB uniqueness if provided
+        const cleanOib = input.oib ? input.oib.trim() : null;
+        if (cleanOib) {
+          const db = await getDb();
+          if (db) {
+            const oibExists = await db
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.oib, cleanOib))
+              .limit(1);
+            if (oibExists.length > 0) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Korisnik s tim OIB-om već postoji.",
+              });
+            }
           }
         }
         const passwordHash = await bcrypt.hash(input.password, 12);
@@ -367,7 +372,7 @@ export const appRouter = router({
           lastName: input.lastName,
           username: input.username,
           phone: input.phone,
-          oib: input.oib,
+          oib: cleanOib || undefined,
         });
         if (!userId) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
