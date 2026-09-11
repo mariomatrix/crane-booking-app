@@ -48,13 +48,14 @@ import {
   Pencil,
   FileText,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { parseISO } from "date-fns";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { useLang } from "@/contexts/LangContext";
-import { formatAppDate } from "@/lib/date-utils";
+import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -132,8 +133,55 @@ export default function AdminReservations() {
   const totalPages = Math.ceil(totalReservations / pageSize);
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
+  const { data: seasonsList = [] } = trpc.season.list.useQuery();
   const usersQuery = trpc.user.list.useQuery();
   const usersList = usersQuery.data?.data || [];
+
+  const approveSlotsQuery = trpc.calendar.availableSlots.useQuery(
+    {
+      craneId: approveCraneId || undefined,
+      date: approveDate ? formatToSqlDate(approveDate) : "",
+      durationMin: Number(approveDuration) || 30,
+      excludeReservationId: selectedId || undefined,
+    },
+    {
+      enabled: !!approveDate && approveOpen,
+      refetchOnWindowFocus: false,
+    }
+  );
+  const approveSlotData = approveSlotsQuery.data;
+  const approveAllSlots = approveSlotData?.slots || [];
+  const approveFreeSlots = approveSlotData?.availableSlots || [];
+  const approveIsWorkingDay = approveSlotData?.isWorkingDay ?? true;
+  const approveWorkingHours = approveSlotData?.workingHours;
+
+  const approveSeasonForSelectedDate = useMemo(() => {
+    if (approveWorkingHours && approveSlotData?.seasonName) {
+      return { from: approveWorkingHours.from, to: approveWorkingHours.to, seasonName: approveSlotData.seasonName };
+    }
+    if (!approveDate) return null;
+    const dateStr = formatToSqlDate(approveDate);
+    const activeSeason = (seasonsList as any[]).find((s: any) =>
+      s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
+    );
+    if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
+      const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+      const dayKey = dayKeys[approveDate.getDay()];
+      const dayHours = (activeSeason.workingHours as any)[dayKey];
+      if (dayHours?.from && dayHours?.to) {
+        return { from: dayHours.from, to: dayHours.to, seasonName: activeSeason.name };
+      }
+    }
+    return null;
+  }, [approveWorkingHours, approveSlotData, seasonsList, approveDate]);
+
+  useEffect(() => {
+    if (approveOpen && approveFreeSlots.length > 0) {
+      if (!approveTime || !approveFreeSlots.includes(approveTime)) {
+        setApproveTime(approveFreeSlots[0]);
+      }
+    }
+  }, [approveOpen, approveFreeSlots, approveTime]);
 
   // Group reservations for Kanban board
   const pendingReservations = reservationsList.filter((r: any) => r.status === "pending");
@@ -212,7 +260,7 @@ export default function AdminReservations() {
         setApproveDuration(String(reservation.durationMin));
       }
       if (reservation.requestedDate) {
-        const rDate = new Date(reservation.requestedDate);
+        const rDate = typeof reservation.requestedDate === "string" ? parseISO(reservation.requestedDate) : new Date(reservation.requestedDate);
         setApproveDate(rDate < startOfToday ? new Date() : rDate);
       } else {
         setApproveDate(new Date());
@@ -256,9 +304,14 @@ export default function AdminReservations() {
       toast.error("Molimo popunite sve obavezne podatke (dizalicu, datum i sat).");
       return;
     }
+    if (approveFreeSlots.length > 0 && !approveFreeSlots.includes(approveTime)) {
+      toast.error(`Odabrani termin (${approveTime}) je zauzet. Molimo odaberite slobodan termin.`);
+      return;
+    }
     const [hours, minutes] = approveTime.split(":").map(Number);
-    const scheduledStart = new Date(approveDate);
-    scheduledStart.setHours(hours, minutes, 0, 0);
+    const dateStr = formatToSqlDate(approveDate);
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const scheduledStart = new Date(y, m - 1, d, hours, minutes, 0, 0);
 
     approveMutation.mutate({
       id: selectedId,
@@ -963,27 +1016,77 @@ export default function AdminReservations() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Sat *</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Sat *</Label>
+                  {approveSlotsQuery.isFetching && (
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Provjera...
+                    </span>
+                  )}
+                </div>
                 <Select value={approveTime} onValueChange={setApproveTime}>
                   <SelectTrigger>
-                    <SelectValue placeholder="08:00" />
+                    <SelectValue placeholder="Odaberite sat" />
                   </SelectTrigger>
-                  <SelectContent className="max-h-[200px]">
-                    {Array.from({ length: 15 * 2 }).map((_, i) => {
-                      const h = Math.floor(i / 2) + 6; // 06:00 to 20:00
-                      const hour = h.toString().padStart(2, '0');
-                      const min = (i % 2 === 0 ? "00" : "30");
-                      const time = `${hour}:${min}`;
-                      return (
-                        <SelectItem key={time} value={time}>
-                          {time}
+                  <SelectContent className="max-h-[220px]">
+                    {!approveIsWorkingDay ? (
+                      <SelectItem value="none" disabled>Neradni dan</SelectItem>
+                    ) : approveAllSlots.length === 0 ? (
+                      <SelectItem value="none" disabled>Nema termina unutar radnog vremena</SelectItem>
+                    ) : (
+                      approveAllSlots.map((slot) => (
+                        <SelectItem
+                          key={slot.time}
+                          value={slot.time}
+                          disabled={!slot.available}
+                          className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
+                        >
+                          {slot.available
+                            ? `✓ ${slot.time} — Slobodno`
+                            : `✗ ${slot.time} — Zauzeto (${slot.occupiedBy || "Zauzeto"})`}
                         </SelectItem>
-                      );
-                    })}
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
             </div>
+
+            {/* Season working hours notice */}
+            {approveSeasonForSelectedDate && (
+              <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
+                🕒 Radno vrijeme sezone ({approveSeasonForSelectedDate.seasonName}): {approveSeasonForSelectedDate.from} — {approveSeasonForSelectedDate.to}h
+              </p>
+            )}
+
+            {/* Interactive quick pick free slot chips */}
+            {approveIsWorkingDay && approveFreeSlots.length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                  ⚡ Brzi odabir slobodnog termina:
+                </span>
+                <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/60 rounded-lg border border-emerald-100 max-h-24 overflow-y-auto">
+                  {approveFreeSlots.map((slot) => {
+                    const isSelected = approveTime === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setApproveTime(slot)}
+                        className={cn(
+                          "px-2 py-0.5 rounded text-xs font-mono font-medium transition-all shadow-sm",
+                          isSelected
+                            ? "bg-emerald-600 text-white font-bold ring-2 ring-emerald-400"
+                            : "bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                        )}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">

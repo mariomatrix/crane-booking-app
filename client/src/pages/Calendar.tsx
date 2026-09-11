@@ -69,18 +69,35 @@ export default function Calendar() {
     const activeSeason = (seasonsList as any[]).find((s: any) =>
       s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
     );
-    if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
-      const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-      const dayKey = dayKeys[today.getDay()];
-      const dayHours = (activeSeason.workingHours as any)[dayKey];
-      if (dayHours?.from && dayHours?.to) {
-        return { from: dayHours.from, to: dayHours.to };
+    if (!activeSeason?.workingHours || typeof activeSeason.workingHours !== "object") {
+      return null;
+    }
+
+    let minStart = 24 * 60;
+    let maxEnd = 0;
+    Object.values(activeSeason.workingHours as Record<string, { from?: string; to?: string }>).forEach(h => {
+      if (h.from && h.to && h.from.trim() && h.to.trim()) {
+        const [fh, fm] = h.from.split(":").map(Number);
+        const [th, tm] = h.to.split(":").map(Number);
+        minStart = Math.min(minStart, fh * 60 + fm);
+        maxEnd = Math.max(maxEnd, th * 60 + tm);
       }
+    });
+
+    if (minStart < maxEnd) {
+      const sH = Math.floor(minStart / 60);
+      const sM = minStart % 60;
+      const eH = Math.floor(maxEnd / 60);
+      const eM = maxEnd % 60;
+      return {
+        from: `${String(sH).padStart(2, "0")}:${String(sM).padStart(2, "0")}`,
+        to: `${String(eH).padStart(2, "0")}:${String(eM).padStart(2, "0")}`,
+      };
     }
     return null;
   }, [seasonsList]);
 
-  const workStart = currentSeasonWorkingHours?.from ?? sysSettings?.workdayStart ?? "08:00";
+  const workStart = currentSeasonWorkingHours?.from ?? sysSettings?.workdayStart ?? "07:00";
   const workEnd = currentSeasonWorkingHours?.to ?? sysSettings?.workdayEnd ?? "16:00";
 
   const craneColorMap = useMemo(() => {

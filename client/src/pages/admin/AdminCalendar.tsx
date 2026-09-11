@@ -163,25 +163,109 @@ export default function AdminCalendar() {
         };
     }, [utils]);
 
-    const currentSeasonWorkingHours = useMemo(() => {
-        if (!viewDate) return null;
+    const gridWorkingHours = useMemo(() => {
+        if (!viewDate) return { from: "07:00", to: "16:00" };
         const dateStr = formatToSqlDate(viewDate);
+        const activeSeason = (seasonsList as any[]).find((s: any) =>
+            s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
+        );
+        if (!activeSeason?.workingHours || typeof activeSeason.workingHours !== "object") {
+            return {
+                from: sysSettings?.workdayStart ?? "07:00",
+                to: sysSettings?.workdayEnd ?? "16:00",
+            };
+        }
+
+        if (viewMode === 'timeGridWeek') {
+            let minStart = 24 * 60;
+            let maxEnd = 0;
+            Object.values(activeSeason.workingHours as Record<string, { from?: string; to?: string }>).forEach(h => {
+                if (h.from && h.to && h.from.trim() && h.to.trim()) {
+                    const [fh, fm] = h.from.split(":").map(Number);
+                    const [th, tm] = h.to.split(":").map(Number);
+                    minStart = Math.min(minStart, fh * 60 + fm);
+                    maxEnd = Math.max(maxEnd, th * 60 + tm);
+                }
+            });
+            if (minStart < maxEnd) {
+                const sH = Math.floor(minStart / 60);
+                const sM = minStart % 60;
+                const eH = Math.floor(maxEnd / 60);
+                const eM = maxEnd % 60;
+                return {
+                    from: `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`,
+                    to: `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`,
+                };
+            }
+        }
+
+        const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+        const dayKey = dayKeys[viewDate.getDay()];
+        const dayHours = (activeSeason.workingHours as any)[dayKey];
+        if (dayHours?.from && dayHours?.to) {
+            return { from: dayHours.from, to: dayHours.to, seasonName: activeSeason.name };
+        }
+        return {
+            from: sysSettings?.workdayStart ?? "07:00",
+            to: sysSettings?.workdayEnd ?? "16:00",
+        };
+    }, [seasonsList, viewDate, viewMode, sysSettings]);
+
+    const workStart = gridWorkingHours.from;
+    const workEnd = gridWorkingHours.to;
+
+    // Edit Reservation Form State
+    const [isEditOpen, setIsEditOpen] = useState(false);
+    const [editingRes, setEditingRes] = useState<any>(null);
+    const [editDate, setEditDate] = useState<Date | undefined>(undefined);
+    const [editStart, setEditStart] = useState("");
+    const [editEnd, setEditEnd] = useState("");
+    const [editCraneId, setEditCraneId] = useState("");
+    const [editLandZoneId, setEditLandZoneId] = useState("none");
+    const [workOrderRes, setWorkOrderRes] = useState<any>(null);
+
+    // Edit Reservation Season Working Hours
+    const editSeasonWorkingHours = useMemo(() => {
+        if (!editDate) return null;
+        const dateStr = formatToSqlDate(editDate);
         const activeSeason = (seasonsList as any[]).find((s: any) =>
             s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
         );
         if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
             const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-            const dayKey = dayKeys[viewDate.getDay()];
+            const dayKey = dayKeys[editDate.getDay()];
             const dayHours = (activeSeason.workingHours as any)[dayKey];
             if (dayHours?.from && dayHours?.to) {
                 return { from: dayHours.from, to: dayHours.to, seasonName: activeSeason.name };
             }
         }
         return null;
-    }, [seasonsList, viewDate]);
+    }, [seasonsList, editDate]);
 
-    const workStart = currentSeasonWorkingHours?.from ?? sysSettings?.workdayStart ?? "07:00";
-    const workEnd = currentSeasonWorkingHours?.to ?? sysSettings?.workdayEnd ?? "15:00";
+    const editAvailableSlots = useMemo(() => {
+        const fromStr = editSeasonWorkingHours?.from || "07:00";
+        const toStr = editSeasonWorkingHours?.to || "16:00";
+        const [fH, fM] = fromStr.split(":").map(Number);
+        const [tH, tM] = toStr.split(":").map(Number);
+        const fromM = fH * 60 + fM;
+        const toM = tH * 60 + tM;
+
+        const startSlots: string[] = [];
+        const endSlots: string[] = [];
+
+        for (let m = fromM; m < toM; m += 30) {
+            const h = Math.floor(m / 60);
+            const min = m % 60;
+            startSlots.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+        }
+        for (let m = fromM + 30; m <= toM; m += 30) {
+            const h = Math.floor(m / 60);
+            const min = m % 60;
+            endSlots.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+        }
+
+        return { startSlots, endSlots };
+    }, [editSeasonWorkingHours]);
 
     // Create Reservation Dialog State
     const [isCreateResOpen, setIsCreateResOpen] = useState(false);
@@ -193,16 +277,6 @@ export default function AdminCalendar() {
     const [maintStart, setMaintStart] = useState("08:00");
     const [maintEnd, setMaintEnd] = useState("09:00");
     const [maintDesc, setMaintDesc] = useState("");
-
-    // Edit Reservation Form State
-    const [isEditOpen, setIsEditOpen] = useState(false);
-    const [editingRes, setEditingRes] = useState<any>(null);
-    const [editDate, setEditDate] = useState<Date | undefined>(undefined);
-    const [editStart, setEditStart] = useState("");
-    const [editEnd, setEditEnd] = useState("");
-    const [editCraneId, setEditCraneId] = useState("");
-    const [editLandZoneId, setEditLandZoneId] = useState("none");
-    const [workOrderRes, setWorkOrderRes] = useState<any>(null);
 
     const updateLandZoneMutation = trpc.reservation.updateLandZone.useMutation();
 
@@ -362,8 +436,10 @@ export default function AdminCalendar() {
         const [hS, mS] = editStart.split(":").map(Number);
         const [hE, mE] = editEnd.split(":").map(Number);
 
-        const startDate = setMinutes(setHours(startOfDay(editDate), hS), mS);
-        const endDate = setMinutes(setHours(startOfDay(editDate), hE), mE);
+        const dateStr = formatToSqlDate(editDate);
+        const [y, m, d] = dateStr.split("-").map(Number);
+        const startDate = new Date(y, m - 1, d, hS, mS, 0, 0);
+        const endDate = new Date(y, m - 1, d, hE, mE, 0, 0);
 
         rescheduleMutation.mutate({
             id: editingRes.id,
@@ -877,13 +953,10 @@ export default function AdminCalendar() {
                                                 <Label>Vrijeme početka</Label>
                                                 <Select value={editStart} onValueChange={setEditStart}>
                                                     <SelectTrigger><SelectValue placeholder="Odaberi" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {Array.from({ length: 33 }, (_, i) => {
-                                                            const h = Math.floor((i + 12) / 2);
-                                                            const m = (i % 2) * 30;
-                                                            const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-                                                            return <SelectItem key={val} value={val}>{val}</SelectItem>;
-                                                        })}
+                                                    <SelectContent className="max-h-52">
+                                                        {editAvailableSlots.startSlots.map((val) => (
+                                                            <SelectItem key={val} value={val}>{val}</SelectItem>
+                                                        ))}
                                                     </SelectContent>
                                                 </Select>
                                             </div>
@@ -891,17 +964,19 @@ export default function AdminCalendar() {
                                                 <Label>Vrijeme završetka</Label>
                                                 <Select value={editEnd} onValueChange={setEditEnd}>
                                                     <SelectTrigger><SelectValue placeholder="Odaberi" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {Array.from({ length: 33 }, (_, i) => {
-                                                            const h = Math.floor((i + 12) / 2);
-                                                            const m = (i % 2) * 30;
-                                                            const val = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-                                                            return <SelectItem key={val} value={val}>{val}</SelectItem>;
-                                                        })}
+                                                    <SelectContent className="max-h-52">
+                                                        {editAvailableSlots.endSlots.map((val) => (
+                                                            <SelectItem key={val} value={val}>{val}</SelectItem>
+                                                        ))}
                                                     </SelectContent>
                                                 </Select>
                                             </div>
                                         </div>
+                                        {editSeasonWorkingHours && (
+                                            <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
+                                                🕒 Radno vrijeme sezone ({editSeasonWorkingHours.seasonName}): {editSeasonWorkingHours.from} — {editSeasonWorkingHours.to}h
+                                            </p>
+                                        )}
                                         <div className="grid gap-2">
                                             <Label>Dizalica</Label>
                                             <Select value={editCraneId} onValueChange={setEditCraneId} required>

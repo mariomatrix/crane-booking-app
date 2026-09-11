@@ -148,9 +148,11 @@ import {
   and,
   eq,
   gte,
+  gt,
   isNull,
   or,
   lte,
+  lt,
   desc,
   asc,
   sql,
@@ -229,7 +231,21 @@ async function validateSlotAgainstSettings(
   const day = String(startDate.getDate()).padStart(2, "0");
   const dateStr = `${year}-${month}-${day}`;
 
+  const dateIsHoliday = await isHoliday(dateStr);
+  if (dateIsHoliday) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Odabrani datum je praznik ili neradni dan.",
+    });
+  }
+
   const activeSeason = await getActiveSeason(dateStr);
+  if (!activeSeason) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Odabrani datum je izvan sezone rada.",
+    });
+  }
 
   let workStartStr = sysSettings.workdayStart ?? "08:00";
   let workEndStr = sysSettings.workdayEnd ?? "18:00";
@@ -240,9 +256,15 @@ async function validateSlotAgainstSettings(
   ) {
     const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
     const dayKey = dayKeys[startDate.getDay()];
-    const dayHours = (activeSeason.workingHours as any)[dayKey];
-    if (dayHours?.from) workStartStr = dayHours.from;
-    if (dayHours?.to) workEndStr = dayHours.to;
+    const dayHours = (activeSeason.workingHours as any)?.[dayKey];
+    if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Odabrani dan nije radni dan prema rasporedu radnog vremena sezone.",
+      });
+    }
+    workStartStr = dayHours.from;
+    workEndStr = dayHours.to;
   }
 
   const { h: wsH, m: wsM } = parseHHMM(workStartStr);
@@ -1925,6 +1947,32 @@ export const appRouter = router({
           });
         }
 
+        if (
+          activeSeason?.workingHours &&
+          typeof activeSeason.workingHours === "object"
+        ) {
+          const [y, m, d] = input.requestedDate.split("-").map(Number);
+          const reqDate = new Date(y, m - 1, d);
+          const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+          const dayKey = dayKeys[reqDate.getDay()];
+          const dayHours = (activeSeason.workingHours as any)?.[dayKey];
+          if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Odabrani datum je neradni dan prema rasporedu radnog vremena sezone.",
+            });
+          }
+          if (input.requestedTimeSlot === "poslijepodne") {
+            const { h: weH } = parseHHMM(dayHours.to);
+            if (weH <= 12) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Za odabrani dan radno vrijeme je samo prijepodne (do ${dayHours.to}h). Molimo odaberite jutarnji termin.`,
+              });
+            }
+          }
+        }
+
         // 3. Validate service type exists
         const serviceType = await getServiceTypeById(input.serviceTypeId);
         if (!serviceType || !serviceType.isActive) {
@@ -3587,53 +3635,219 @@ export const appRouter = router({
         });
       }),
 
-    availableSlots: operatorProcedure
+    availableSlots: publicProcedure
       .input(
         z.object({
-          craneId: z.string().uuid(),
+          craneId: z.string().uuid().optional(),
           date: z.string(), // YYYY-MM-DD
-          durationMin: z.number().min(30).max(480).default(60),
+          durationMin: z.number().min(30).max(480).default(30),
+          excludeReservationId: z.string().uuid().optional(),
         })
       )
       .query(async ({ input }) => {
-        const sysSettings = await getAllSettings();
-        const slotMin = input.durationMin;
-        const bufferMin = 0;
+        const [yStr, mStr, dStr] = input.date.split("-");
+        const year = Number(yStr);
+        const month = Number(mStr);
+        const day = Number(dStr);
+        const dateObj = new Date(year, month - 1, day);
 
-        const dateObj = new Date(input.date);
-        const { h: wsH, m: wsM } = parseHHMM(
-          sysSettings.workdayStart ?? "08:00"
-        );
-        const { h: weH, m: weM } = parseHHMM(sysSettings.workdayEnd ?? "16:00");
-
-        const dayStartUTC = new Date(dateObj.getTime());
-        dayStartUTC.setUTCHours(wsH, wsM, 0, 0);
-
-        const dayEndUTC = new Date(dateObj.getTime());
-        dayEndUTC.setUTCHours(weH, weM, 0, 0);
-
-        const totalMinutes =
-          (dayEndUTC.getTime() - dayStartUTC.getTime()) / 60000;
-        const totalSlots = Math.floor(totalMinutes / slotMin);
-
-        const availableStarts: Date[] = [];
-
-        for (let i = 0; i < totalSlots; i++) {
-          const slotStart = new Date(
-            dayStartUTC.getTime() + i * slotMin * 60000
-          );
-          const slotEnd = new Date(slotStart.getTime() + slotMin * 60000);
-          const effectiveEnd = new Date(slotEnd.getTime() + bufferMin * 60000);
-
-          const overlap = await checkOverlap(
-            input.craneId,
-            slotStart,
-            effectiveEnd
-          );
-          if (!overlap) availableStarts.push(slotStart);
+        const holiday = await isHoliday(input.date);
+        if (holiday) {
+          return {
+            isWorkingDay: false,
+            reason: "Odabrani datum je praznik ili neradni dan.",
+            workingHours: null,
+            seasonName: null,
+            slots: [],
+            availableSlots: [],
+            otherCranesSummary: [],
+          };
         }
 
-        return { availableStarts, slotDurationMinutes: slotMin };
+        const activeSeason = await getActiveSeason(input.date);
+        if (!activeSeason) {
+          return {
+            isWorkingDay: false,
+            reason: "Odabrani datum je izvan aktivne sezone rada.",
+            workingHours: null,
+            seasonName: null,
+            slots: [],
+            availableSlots: [],
+            otherCranesSummary: [],
+          };
+        }
+
+        const sysSettings = await getAllSettings();
+        let workStartStr = sysSettings.workdayStart ?? "08:00";
+        let workEndStr = sysSettings.workdayEnd ?? "16:00";
+
+        if (
+          activeSeason.workingHours &&
+          typeof activeSeason.workingHours === "object"
+        ) {
+          const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+          const dayKey = dayKeys[dateObj.getDay()];
+          const dayHours = (activeSeason.workingHours as any)?.[dayKey];
+          if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
+            return {
+              isWorkingDay: false,
+              reason: "Neradni dan prema rasporedu sezone.",
+              workingHours: null,
+              seasonName: activeSeason.name,
+              slots: [],
+              availableSlots: [],
+              otherCranesSummary: [],
+            };
+          }
+          workStartStr = dayHours.from;
+          workEndStr = dayHours.to;
+        }
+
+        const { h: wsH, m: wsM } = parseHHMM(workStartStr);
+        const { h: weH, m: weM } = parseHHMM(workEndStr);
+        const fromMinutes = wsH * 60 + wsM;
+        const toMinutes = weH * 60 + weM;
+        const slotDuration = input.durationMin || 30;
+
+        // Fetch all active reservations for this date
+        const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0);
+        const dayEnd = new Date(year, month - 1, day, 23, 59, 59, 999);
+        const db = await getDb();
+        const existingRes = db
+          ? await db
+              .select({
+                id: reservations.id,
+                craneId: reservations.craneId,
+                scheduledStart: reservations.scheduledStart,
+                scheduledEnd: reservations.scheduledEnd,
+                status: reservations.status,
+                vesselRegistration: reservations.vesselRegistration,
+                vesselName: reservations.vesselName,
+                reservationNumber: reservations.reservationNumber,
+                isMaintenance: reservations.isMaintenance,
+                liftPurpose: reservations.liftPurpose,
+              })
+              .from(reservations)
+              .where(
+                and(
+                  or(
+                    eq(reservations.status, "pending"),
+                    eq(reservations.status, "approved"),
+                    eq(reservations.status, "completed")
+                  ),
+                  lt(reservations.scheduledStart, dayEnd),
+                  gt(reservations.scheduledEnd, dayStart)
+                )
+              )
+          : [];
+
+        const allActiveCranes = (await listCranes()).filter(
+          (c) => c.craneStatus === "active"
+        );
+
+        type SlotInfo = {
+          time: string;
+          available: boolean;
+          occupiedBy?: string;
+          reason?: string;
+        };
+        const slots: SlotInfo[] = [];
+        const availableSlots: string[] = [];
+
+        for (let m = fromMinutes; m + slotDuration <= toMinutes; m += 30) {
+          const hh = Math.floor(m / 60);
+          const mm = m % 60;
+          const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+          const slotStart = new Date(year, month - 1, day, hh, mm, 0, 0);
+          const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
+
+          if (!input.craneId) {
+            const freeCrane = allActiveCranes.find((crane) => {
+              const overlap = existingRes.some(
+                (r) =>
+                  r.craneId === crane.id &&
+                  r.scheduledStart &&
+                  r.scheduledEnd &&
+                  r.scheduledStart < slotEnd &&
+                  r.scheduledEnd > slotStart &&
+                  r.id !== input.excludeReservationId
+              );
+              return !overlap;
+            });
+            const isAvail = !!freeCrane;
+            slots.push({ time: timeStr, available: isAvail });
+            if (isAvail) availableSlots.push(timeStr);
+          } else {
+            const overlapping = existingRes.find(
+              (r) =>
+                r.craneId === input.craneId &&
+                r.scheduledStart &&
+                r.scheduledEnd &&
+                r.scheduledStart < slotEnd &&
+                r.scheduledEnd > slotStart &&
+                r.id !== input.excludeReservationId
+            );
+            if (overlapping) {
+              const occupiedDesc = overlapping.isMaintenance
+                ? "Održavanje dizalice"
+                : (overlapping.vesselRegistration ||
+                  overlapping.vesselName ||
+                  overlapping.reservationNumber ||
+                  "Zauzeto");
+              slots.push({
+                time: timeStr,
+                available: false,
+                occupiedBy: occupiedDesc,
+                reason: overlapping.liftPurpose ?? undefined,
+              });
+            } else {
+              slots.push({ time: timeStr, available: true });
+              availableSlots.push(timeStr);
+            }
+          }
+        }
+
+        // Other cranes summary
+        const otherCranesSummary: {
+          craneId: string;
+          craneName: string;
+          availableSlotsCount: number;
+        }[] = [];
+
+        for (const c of allActiveCranes) {
+          if (c.id === input.craneId) continue;
+          let count = 0;
+          for (let m = fromMinutes; m + slotDuration <= toMinutes; m += 30) {
+            const hh = Math.floor(m / 60);
+            const mm = m % 60;
+            const slotStart = new Date(year, month - 1, day, hh, mm, 0, 0);
+            const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
+            const hasOverlap = existingRes.some(
+              (r) =>
+                r.craneId === c.id &&
+                r.scheduledStart &&
+                r.scheduledEnd &&
+                r.scheduledStart < slotEnd &&
+                r.scheduledEnd > slotStart &&
+                r.id !== input.excludeReservationId
+            );
+            if (!hasOverlap) count++;
+          }
+          otherCranesSummary.push({
+            craneId: c.id,
+            craneName: c.name,
+            availableSlotsCount: count,
+          });
+        }
+
+        return {
+          isWorkingDay: true,
+          seasonName: activeSeason.name,
+          workingHours: { from: workStartStr, to: workEndStr },
+          slots,
+          availableSlots,
+          otherCranesSummary,
+        };
       }),
   }),
 

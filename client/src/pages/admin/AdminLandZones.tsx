@@ -316,7 +316,7 @@ export default function AdminLandZones() {
                     {occupancies.map((occ) => {
                       const liftedDate = occ.liftedAt ? new Date(occ.liftedAt) : new Date();
                       const daysOnLand = Math.max(1, Math.ceil((Date.now() - liftedDate.getTime()) / (1000 * 60 * 60 * 24)));
-                      const isMember = (occ.user?.clientCategory || "member") === "member";
+                      const isMember = ((occ.user as any)?.clientCategory || "member") === "member";
                       const isOverLimit = isMember && daysOnLand > 30;
 
                       return (

@@ -433,7 +433,8 @@ export async function checkOverlap(
     eq(reservations.craneId, craneId),
     or(
       eq(reservations.status, "pending"),
-      eq(reservations.status, "approved")
+      eq(reservations.status, "approved"),
+      eq(reservations.status, "completed")
     ),
     lt(reservations.scheduledStart, effectiveEnd),
     gt(reservations.scheduledEnd, startDate),

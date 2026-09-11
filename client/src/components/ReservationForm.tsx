@@ -15,7 +15,8 @@ import { useLang } from "@/contexts/LangContext";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { parseISO } from "date-fns";
 import { toast } from "sonner";
 import { Loader2, Send } from "lucide-react";
 
@@ -36,7 +37,9 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
     // ── Form state ───────────────────────────────────────────────────────
     const [serviceTypeId, setServiceTypeId] = useState(initialData?.serviceTypeId || "");
     const [requestedDate, setRequestedDate] = useState<Date | undefined>(
-        initialData?.date ? new Date(initialData.date) : undefined
+        initialData?.date
+            ? (typeof initialData.date === "string" ? parseISO(initialData.date) : new Date(initialData.date))
+            : undefined
     );
     const [requestedTimeSlot, setRequestedTimeSlot] = useState(initialData?.requestedTimeSlot || "po_dogovoru");
     const [userNote, setUserNote] = useState("");
@@ -61,7 +64,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         trpc.vessel.listMine.useQuery(undefined, { enabled: !!user });
 
     const { data: availableResources = [] } =
-        trpc.resources.list.useQuery({ onlyActive: true });
+        trpc.resources.list.useQuery({ activeOnly: true });
     const [selectedResources, setSelectedResources] = useState<Record<string, number>>({});
 
     // ── Effects ──────────────────────────────────────────────────────────
@@ -127,10 +130,70 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         }
     };
 
+    const { data: seasonsList = [] } = trpc.season.list.useQuery();
+
+    const activeSeasonInfo = useMemo(() => {
+        if (!requestedDate) return null;
+        const dateStr = formatToSqlDate(requestedDate);
+        const season = (seasonsList as any[]).find((s: any) =>
+            s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
+        );
+        if (!season) return { isOutsideSeason: true };
+
+        if (season.workingHours && typeof season.workingHours === "object") {
+            const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+            const dayKey = dayKeys[requestedDate.getDay()];
+            const dayHours = (season.workingHours as any)[dayKey];
+            if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
+                return { isNonWorkingDay: true, seasonName: season.name };
+            }
+            const [tH, tM] = dayHours.to.split(":").map(Number);
+            return {
+                seasonName: season.name,
+                from: dayHours.from,
+                to: dayHours.to,
+                hasAfternoon: tH > 12 || (tH === 12 && tM > 0),
+            };
+        }
+        return { seasonName: season.name, from: "08:00", to: "16:00", hasAfternoon: true };
+    }, [seasonsList, requestedDate]);
+
+    // If day only has morning hours (e.g. Saturday 08:00-12:00), reset poslijepodne to jutro
+    useEffect(() => {
+        if (activeSeasonInfo?.hasAfternoon === false && requestedTimeSlot === "poslijepodne") {
+            setRequestedTimeSlot("jutro");
+        }
+    }, [activeSeasonInfo, requestedTimeSlot]);
+
+    const timeSlotOptions = useMemo(() => {
+        if (activeSeasonInfo?.hasAfternoon === false) {
+            return [
+                { value: "jutro", label: lang === "hr" ? `Jutro (${activeSeasonInfo.from || "08:00"}–${activeSeasonInfo.to || "12:00"})` : `Morning (${activeSeasonInfo.from || "08:00"}–${activeSeasonInfo.to || "12:00"})` },
+                { value: "po_dogovoru", label: lang === "hr" ? "Po dogovoru" : "By arrangement" },
+            ];
+        }
+        const morningEnd = "12:00";
+        const morningStart = activeSeasonInfo?.from || "08:00";
+        const afternoonEnd = activeSeasonInfo?.to || "16:00";
+        return [
+            { value: "jutro", label: lang === "hr" ? `Jutro (${morningStart}–${morningEnd})` : `Morning (${morningStart}–${morningEnd})` },
+            { value: "poslijepodne", label: lang === "hr" ? `Poslijepodne (${morningEnd}–${afternoonEnd})` : `Afternoon (${morningEnd}–${afternoonEnd})` },
+            { value: "po_dogovoru", label: lang === "hr" ? "Po dogovoru" : "By arrangement" },
+        ];
+    }, [activeSeasonInfo, lang]);
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!serviceTypeId || !requestedDate || !vesselType) {
             toast.error(t.form.errors.required);
+            return;
+        }
+        if (activeSeasonInfo?.isNonWorkingDay) {
+            toast.error(lang === "hr" ? "Odabrani datum je neradni dan prema rasporedu sezone." : "The selected date is a non-working day according to season schedule.");
+            return;
+        }
+        if (activeSeasonInfo?.isOutsideSeason) {
+            toast.error(lang === "hr" ? "Odabrani datum je izvan aktivne sezone rada." : "The selected date is outside of active season.");
             return;
         }
         createMutation.mutate({
@@ -150,12 +213,6 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                 .map(([resourceId, quantity]) => ({ resourceId, quantity })),
         });
     };
-
-    const timeSlotOptions = [
-        { value: "jutro", label: lang === "hr" ? "Jutro (08:00–12:00)" : "Morning (08:00–12:00)" },
-        { value: "poslijepodne", label: lang === "hr" ? "Poslijepodne (12:00–16:00)" : "Afternoon (12:00–16:00)" },
-        { value: "po_dogovoru", label: lang === "hr" ? "Po dogovoru" : "By arrangement" },
-    ];
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -200,6 +257,27 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 placeholder={lang === "hr" ? "Odaberite datum" : "Select date"}
                                 disablePastDates
                             />
+                            {activeSeasonInfo?.isNonWorkingDay && (
+                                <p className="text-xs text-destructive font-medium bg-red-50 p-2 rounded border border-red-200">
+                                    ⚠ {lang === "hr"
+                                        ? `Odabrani dan je neradni dan prema rasporedu radnog vremena sezone (${activeSeasonInfo.seasonName}).`
+                                        : `Selected day is a non-working day according to season schedule (${activeSeasonInfo.seasonName}).`}
+                                </p>
+                            )}
+                            {activeSeasonInfo?.isOutsideSeason && (
+                                <p className="text-xs text-amber-800 font-medium bg-amber-50 p-2 rounded border border-amber-200">
+                                    ⚠ {lang === "hr"
+                                        ? "Odabrani datum je izvan aktivne sezone rada."
+                                        : "Selected date is outside the active season."}
+                                </p>
+                            )}
+                            {activeSeasonInfo && !activeSeasonInfo.isNonWorkingDay && !activeSeasonInfo.isOutsideSeason && (
+                                <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
+                                    🕒 {lang === "hr"
+                                        ? `Radno vrijeme sezone (${activeSeasonInfo.seasonName}): ${activeSeasonInfo.from} — ${activeSeasonInfo.to}h`
+                                        : `Season working hours (${activeSeasonInfo.seasonName}): ${activeSeasonInfo.from} — ${activeSeasonInfo.to}`}
+                                </p>
+                            )}
                         </div>
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Dio dana" : "Time of day"}</Label>
@@ -380,7 +458,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType}
+                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType || !!activeSeasonInfo?.isNonWorkingDay || !!activeSeasonInfo?.isOutsideSeason}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (

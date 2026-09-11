@@ -111,7 +111,7 @@ export function AdminReservationForm({
     const isLowerToSea = selectedServiceType?.operationCategory === "lower_to_sea";
 
     const { data: landZones = [] } = trpc.landZone.list.useQuery();
-    const { data: availableResources = [] } = trpc.resources.list.useQuery({ onlyActive: true });
+    const { data: availableResources = [] } = trpc.resources.list.useQuery({ activeOnly: true });
     const [selectedResources, setSelectedResources] = useState<Record<string, number>>({});
 
     const { data: zoneCapacity } = trpc.landZone.checkCapacity.useQuery(
@@ -137,7 +137,40 @@ export function AdminReservationForm({
     const { data: cranes = [] } = trpc.crane.list.useQuery();
     const { data: seasonsList = [] } = trpc.season.list.useQuery();
 
+    // Auto-select first active crane if none selected
+    useEffect(() => {
+        if (!craneId && cranes && (cranes as any[]).length > 0) {
+            const firstActive = (cranes as any[]).find((c: any) => c.craneStatus === "active");
+            if (firstActive) {
+                setCraneId(firstActive.id);
+            }
+        }
+    }, [cranes, craneId]);
+
+    const availableSlotsQuery = trpc.calendar.availableSlots.useQuery(
+        {
+            craneId: craneId || undefined,
+            date: requestedDate ? formatToSqlDate(requestedDate) : "",
+            durationMin: Number(durationMin) || 30,
+        },
+        {
+            enabled: !!requestedDate,
+            refetchOnWindowFocus: false,
+        }
+    );
+
+    const slotData = availableSlotsQuery.data;
+    const allSlots = slotData?.slots || [];
+    const freeSlots = slotData?.availableSlots || [];
+    const isWorkingDay = slotData?.isWorkingDay ?? true;
+    const nonWorkingReason = slotData?.reason;
+    const workingHoursInfo = slotData?.workingHours;
+    const otherCranesSummary = slotData?.otherCranesSummary || [];
+
     const activeSeasonForSelectedDate = useMemo(() => {
+        if (workingHoursInfo && slotData?.seasonName) {
+            return { from: workingHoursInfo.from, to: workingHoursInfo.to, seasonName: slotData.seasonName };
+        }
         if (!requestedDate) return null;
         const dateStr = formatToSqlDate(requestedDate);
         const activeSeason = (seasonsList as any[]).find((s: any) =>
@@ -152,9 +185,12 @@ export function AdminReservationForm({
             }
         }
         return null;
-    }, [seasonsList, requestedDate]);
+    }, [workingHoursInfo, slotData, seasonsList, requestedDate]);
 
     const allowedTimeSlots = useMemo(() => {
+        if (allSlots.length > 0) {
+            return allSlots.map(s => s.time);
+        }
         const fromStr = activeSeasonForSelectedDate?.from || "08:00";
         const toStr = activeSeasonForSelectedDate?.to || "16:00";
         const [fH, fM] = fromStr.split(":").map(Number);
@@ -170,16 +206,18 @@ export function AdminReservationForm({
             slots.push(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`);
         }
         return slots;
-    }, [activeSeasonForSelectedDate, durationMin]);
+    }, [allSlots, activeSeasonForSelectedDate, durationMin]);
 
-    // Update default scheduled time to match active season start time
+    // Auto-select first available free slot when date/crane/duration changes
     useEffect(() => {
-        if (allowedTimeSlots.length > 0) {
-            if (!scheduledTime || !allowedTimeSlots.includes(scheduledTime)) {
-                setScheduledTime(allowedTimeSlots[0]);
+        if (freeSlots.length > 0) {
+            if (!scheduledTime || !freeSlots.includes(scheduledTime)) {
+                setScheduledTime(freeSlots[0]);
             }
+        } else if (allowedTimeSlots.length > 0 && (!scheduledTime || !allowedTimeSlots.includes(scheduledTime))) {
+            setScheduledTime(allowedTimeSlots[0]);
         }
-    }, [allowedTimeSlots, scheduledTime]);
+    }, [freeSlots, allowedTimeSlots, scheduledTime]);
 
     const { data: userVessels = [], isLoading: userVesselsLoading } =
         trpc.vessel.listByUser.useQuery({ userId }, { enabled: !!userId });
@@ -260,13 +298,18 @@ export function AdminReservationForm({
 
         let scheduledStartDate: Date | undefined = undefined;
         if (!isWaitlisted && requestedDate) {
+            if (freeSlots.length > 0 && !freeSlots.includes(scheduledTime)) {
+                toast.error(`Odabrani termin (${scheduledTime}) je već zauzet na ovoj dizalici. Molimo odaberite slobodan termin.`);
+                return;
+            }
             if (!allowedTimeSlots.includes(scheduledTime)) {
                 toast.error(`Odabrani termin (${scheduledTime}) mora biti unutar radnog vremena sezone (${activeSeasonForSelectedDate?.from || "08:00"} - ${activeSeasonForSelectedDate?.to || "16:00"}).`);
                 return;
             }
             const [hours, minutes] = scheduledTime.split(":").map(Number);
-            scheduledStartDate = new Date(requestedDate);
-            scheduledStartDate.setHours(hours, minutes, 0, 0);
+            const dateStr = formatToSqlDate(requestedDate);
+            const [y, m, d] = dateStr.split("-").map(Number);
+            scheduledStartDate = new Date(y, m - 1, d, hours, minutes, 0, 0);
         }
 
         const commonPayload = {
@@ -575,6 +618,7 @@ export function AdminReservationForm({
 
 
 
+                        {/* Datum i Dizalica */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1.5">
                                 <Label className="text-xs font-semibold">
@@ -592,37 +636,6 @@ export function AdminReservationForm({
                             </div>
                             {!isWaitlisted && (
                                 <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold">{lang === "hr" ? "Točno vrijeme *" : "Exact Time *"}</Label>
-                                    <Select value={scheduledTime} onValueChange={setScheduledTime}>
-                                        <SelectTrigger className="h-9 text-xs">
-                                            <SelectValue placeholder="Odaberi vrijeme" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {allowedTimeSlots.length === 0 ? (
-                                                <SelectItem value="none" disabled>Nema termina unutar radnog vremena</SelectItem>
-                                            ) : (
-                                                allowedTimeSlots.map((slot) => (
-                                                    <SelectItem key={slot} value={slot}>
-                                                        {slot}
-                                                    </SelectItem>
-                                                ))
-                                            )}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
-                        </div>
-                        {activeSeasonForSelectedDate && (
-                            <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
-                                🕒 {lang === "hr"
-                                    ? `Radno vrijeme sezone (${activeSeasonForSelectedDate.seasonName}): ${activeSeasonForSelectedDate.from} — ${activeSeasonForSelectedDate.to}h`
-                                    : `Season working hours (${activeSeasonForSelectedDate.seasonName}): ${activeSeasonForSelectedDate.from} — ${activeSeasonForSelectedDate.to}`}
-                            </p>
-                        )}
-
-                        {!isWaitlisted && (
-                            <div className="grid grid-cols-12 gap-3">
-                                <div className="col-span-12 sm:col-span-7 space-y-1.5">
                                     <Label className="text-xs font-semibold">{lang === "hr" ? "Dizalica *" : "Crane *"}</Label>
                                     <Select value={craneId} onValueChange={setCraneId}>
                                         <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
@@ -633,19 +646,137 @@ export function AdminReservationForm({
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="col-span-12 sm:col-span-5 space-y-1.5">
+                            )}
+                        </div>
+
+                        {!isWaitlisted && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1.5">
                                     <Label className="text-xs font-semibold">{lang === "hr" ? "Trajanje (min) *" : "Duration (min) *"}</Label>
                                     <Input
                                         type="number"
                                         min="30"
                                         step="30"
-                                        placeholder="60"
+                                        placeholder="30"
                                         value={durationMin}
                                         onChange={(e) => setDurationMin(e.target.value)}
                                         className="h-9 text-xs"
                                         required
                                     />
                                 </div>
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-xs font-semibold">{lang === "hr" ? "Točno vrijeme *" : "Exact Time *"}</Label>
+                                        {availableSlotsQuery.isFetching && (
+                                            <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                                <Loader2 className="h-3 w-3 animate-spin" /> {lang === "hr" ? "Provjera termina..." : "Checking slots..."}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <Select value={scheduledTime} onValueChange={setScheduledTime}>
+                                        <SelectTrigger className="h-9 text-xs">
+                                            <SelectValue placeholder="Odaberi vrijeme" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-56">
+                                            {!isWorkingDay ? (
+                                                <SelectItem value="none" disabled>{nonWorkingReason || "Neradni dan"}</SelectItem>
+                                            ) : allSlots.length === 0 ? (
+                                                <SelectItem value="none" disabled>Nema termina unutar radnog vremena</SelectItem>
+                                            ) : (
+                                                allSlots.map((slot) => (
+                                                    <SelectItem
+                                                        key={slot.time}
+                                                        value={slot.time}
+                                                        disabled={!slot.available}
+                                                        className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
+                                                    >
+                                                        {slot.available
+                                                            ? `✓ ${slot.time} — Slobodno`
+                                                            : `✗ ${slot.time} — Zauzeto (${slot.occupiedBy || "Zauzeto"})`}
+                                                    </SelectItem>
+                                                ))
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Season working hours notice */}
+                        {activeSeasonForSelectedDate && (
+                            <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
+                                🕒 {lang === "hr"
+                                    ? `Radno vrijeme sezone (${activeSeasonForSelectedDate.seasonName}): ${activeSeasonForSelectedDate.from} — ${activeSeasonForSelectedDate.to}h`
+                                    : `Season working hours (${activeSeasonForSelectedDate.seasonName}): ${activeSeasonForSelectedDate.from} — ${activeSeasonForSelectedDate.to}`}
+                            </p>
+                        )}
+
+                        {/* Interactive Free Slots Chips */}
+                        {!isWaitlisted && isWorkingDay && (
+                            <div className="space-y-1.5 pt-1">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                                        ⚡ {lang === "hr" ? "Brzi odabir slobodnog termina:" : "Quick pick available slot:"}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground font-mono">
+                                        {freeSlots.length} {lang === "hr" ? "slobodnih termina" : "available"}
+                                    </span>
+                                </div>
+
+                                {freeSlots.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/60 rounded-lg border border-emerald-100">
+                                        {freeSlots.map((slot) => {
+                                            const isSelected = scheduledTime === slot;
+                                            return (
+                                                <button
+                                                    key={slot}
+                                                    type="button"
+                                                    onClick={() => setScheduledTime(slot)}
+                                                    className={cn(
+                                                        "px-2.5 py-1 rounded-md text-xs font-mono font-medium transition-all shadow-sm",
+                                                        isSelected
+                                                            ? "bg-emerald-600 text-white shadow-emerald-200 ring-2 ring-emerald-400 font-bold"
+                                                            : "bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
+                                                    )}
+                                                >
+                                                    {slot}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs space-y-2">
+                                        <p className="font-semibold text-amber-800 flex items-center gap-1.5">
+                                            ⚠ {lang === "hr"
+                                                ? "Svi termini za ovu dizalicu su zauzeti na odabrani datum."
+                                                : "All slots for this crane are occupied on the selected date."}
+                                        </p>
+                                        {otherCranesSummary.filter(o => o.availableSlotsCount > 0).length > 0 && (
+                                            <div className="space-y-1.5">
+                                                <p className="text-amber-700 text-[11px]">
+                                                    {lang === "hr" ? "Dostupne alternative na isti datum:" : "Available alternatives on the same date:"}
+                                                </p>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {otherCranesSummary
+                                                        .filter(o => o.availableSlotsCount > 0)
+                                                        .map(alt => (
+                                                            <Button
+                                                                key={alt.craneId}
+                                                                type="button"
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="h-7 text-xs border-amber-300 text-amber-900 bg-white hover:bg-amber-100"
+                                                                onClick={() => setCraneId(alt.craneId)}
+                                                            >
+                                                                {alt.craneName} ({alt.availableSlotsCount} slobodno)
+                                                            </Button>
+                                                        ))
+                                                    }
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
 
