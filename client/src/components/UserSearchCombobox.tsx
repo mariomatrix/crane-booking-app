@@ -290,6 +290,7 @@ export function UserSearchCombobox({
             {value !== "all" && value !== "" && !disabled && (
                 <Button
                     type="button"
+                    tabIndex={-1}
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 shrink-0"

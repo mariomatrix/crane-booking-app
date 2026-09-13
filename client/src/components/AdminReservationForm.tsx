@@ -367,8 +367,54 @@ export function AdminReservationForm({
         }
     };
 
+    // Keyboard navigation: Enter confirms current field and advances to the next focusable field
+    const handleFormKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+        if (e.key !== "Enter") return;
+
+        const target = e.target as HTMLElement;
+        if (!target) return;
+
+        // Allow regular Enter inside multiline textareas (notes)
+        if (target.tagName.toLowerCase() === "textarea") return;
+
+        // Do not interfere if user is inside a popup / modal (e.g. Radix dialog, DatePicker calendar, combobox search list)
+        if (
+            target.closest('[role="dialog"]') ||
+            target.closest('[data-radix-popper-content-wrapper]')
+        ) {
+            return;
+        }
+
+        // If target is the submit button, allow normal submission
+        if (target.getAttribute("type") === "submit") return;
+
+        // Prevent premature form submit on Enter
+        e.preventDefault();
+
+        // Find all interactive form control elements in DOM order
+        const form = e.currentTarget;
+        const focusableSelectors = [
+            'input:not([disabled]):not([type="hidden"]):not([tabindex="-1"])',
+            'select:not([disabled]):not([tabindex="-1"])',
+            'textarea:not([disabled]):not([tabindex="-1"])',
+            'button:not([disabled]):not([tabindex="-1"])',
+        ].join(', ');
+
+        const focusable = Array.from(form.querySelectorAll<HTMLElement>(focusableSelectors))
+            .filter(el => el.offsetParent !== null && !el.hasAttribute('disabled'));
+
+        const currentIndex = focusable.indexOf(target);
+        if (currentIndex !== -1 && currentIndex < focusable.length - 1) {
+            const next = focusable[currentIndex + 1];
+            next.focus();
+            if (next instanceof HTMLInputElement && (next.type === "text" || next.type === "number")) {
+                next.select();
+            }
+        }
+    };
+
     return (
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} className="space-y-6">
             <div className="space-y-4">
                 <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -402,6 +448,7 @@ export function AdminReservationForm({
                         {!isUserLocked && (
                             <Button
                                 type="button"
+                                tabIndex={-1}
                                 variant="outline"
                                 size="icon"
                                 onClick={() => setIsCreateUserOpen(true)}
@@ -420,7 +467,6 @@ export function AdminReservationForm({
                         <Input
                             value={contactPhone}
                             onChange={(e) => setContactPhone(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                             placeholder="npr. 0912345678"
                         />
                     </div>
@@ -581,6 +627,7 @@ export function AdminReservationForm({
                                             <div className="border-t border-amber-200/60 my-0.5" />
                                             <button
                                                 type="button"
+                                                tabIndex={-1}
                                                 onClick={() => {
                                                     setIsWaitlisted(true);
                                                     setOverrideCapacityCheck(false);
@@ -666,7 +713,6 @@ export function AdminReservationForm({
                                         placeholder="30"
                                         value={durationMin}
                                         onChange={(e) => setDurationMin(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                                         className="h-9 text-xs"
                                         required
                                     />
@@ -738,6 +784,7 @@ export function AdminReservationForm({
                                                 <button
                                                     key={slot}
                                                     type="button"
+                                                    tabIndex={-1}
                                                     onClick={() => setScheduledTime(slot)}
                                                     className={cn(
                                                         "px-2.5 py-1 rounded-md text-xs font-mono font-medium transition-all shadow-sm",
@@ -770,6 +817,7 @@ export function AdminReservationForm({
                                                             <Button
                                                                 key={alt.craneId}
                                                                 type="button"
+                                                                tabIndex={-1}
                                                                 size="sm"
                                                                 variant="outline"
                                                                 className="h-7 text-xs border-amber-300 text-amber-900 bg-white hover:bg-amber-100"
