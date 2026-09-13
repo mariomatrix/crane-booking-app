@@ -790,6 +790,12 @@ export const appRouter = router({
         );
       }),
 
+    getById: operatorProcedure
+      .input(z.object({ id: z.string() }))
+      .query(async ({ input }) => {
+        return getUserById(input.id);
+      }),
+
     create: adminProcedure
       .input(
         z.object({

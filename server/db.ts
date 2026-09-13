@@ -147,11 +147,13 @@ export async function listAllUsers(
     const tokenConditions = tokens.map(token => {
       const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return sql`(
-        concat_ws(' ', ${users.firstName}, ${users.lastName}, ${users.name}, ${users.companyName}, ${users.contactPerson}, ${users.oib}, ${users.email}) ~* ${`\\m${escaped}`}
+        concat_ws(' ', ${users.firstName}, ${users.lastName}, ${users.name}, ${users.companyName}, ${users.contactPerson}, ${users.oib}, ${users.email}, ${users.phone}) ~* ${`\\m${escaped}`}
+        OR ${users.oib} ILIKE ${`%${token}%`}
+        OR ${users.phone} ILIKE ${`%${token}%`}
         OR exists (
           select 1 from vessels 
           where vessels.owner_id = ${users.id} 
-            and (vessels.registration ~* ${`\\m${escaped}`} or vessels.name ~* ${`\\m${escaped}`})
+            and (vessels.registration ~* ${`\\m${escaped}`} or vessels.name ~* ${`\\m${escaped}`} or vessels.registration ILIKE ${`%${token}%`})
         )
       )`;
     });

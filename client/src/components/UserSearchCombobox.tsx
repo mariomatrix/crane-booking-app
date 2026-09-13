@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Check, ChevronsUpDown, X, Users } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { Check, ChevronsUpDown, X, Users, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +15,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover";
+import { trpc } from "@/lib/trpc";
 
 export interface UserOption {
     id: string;
@@ -29,9 +30,9 @@ export interface UserOption {
 }
 
 interface UserSearchComboboxProps {
-    users: UserOption[];
+    users?: UserOption[];
     value: string;          // "all" or a user ID
-    onChange: (id: string) => void;
+    onChange: (id: string, user?: UserOption) => void;
     initialUser?: UserOption | null;
     placeholder?: string;
     emptyLabel?: string;
@@ -42,7 +43,7 @@ interface UserSearchComboboxProps {
 }
 
 export function UserSearchCombobox({
-    users,
+    users = [],
     value,
     onChange,
     initialUser,
@@ -55,33 +56,121 @@ export function UserSearchCombobox({
 }: UserSearchComboboxProps) {
     const [open, setOpen] = useState(false);
     const [searchValue, setSearchValue] = useState("");
+    const [debouncedSearch, setDebouncedSearch] = useState("");
+    const [cachedUsers, setCachedUsers] = useState<Record<string, UserOption>>({});
 
-    // Find selected user from users array or fallback to initialUser
+    // Debounce search query to reduce server load
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearch(searchValue.trim());
+        }, 250);
+        return () => clearTimeout(timer);
+    }, [searchValue]);
+
+    // Cache initialUser if provided
+    useEffect(() => {
+        if (initialUser?.id) {
+            setCachedUsers((prev) => ({ ...prev, [initialUser.id]: initialUser }));
+        }
+    }, [initialUser]);
+
+    // Live search query when user types in search input
+    const isSearching = debouncedSearch.length > 0;
+    const searchQuery = trpc.user.list.useQuery(
+        { search: debouncedSearch, pageSize: 50 },
+        { enabled: open && isSearching }
+    );
+
+    // Fallback default query if users prop is empty
+    const shouldFetchDefault = open && !isSearching && users.length === 0;
+    const defaultUsersQuery = trpc.user.list.useQuery(
+        { pageSize: 50 },
+        { enabled: shouldFetchDefault }
+    );
+
+    // Resolve user by ID if value is set but user object is not yet loaded
+    const isValueInProvidedUsers = users.some((u) => u.id === value);
+    const shouldFetchById =
+        !!value &&
+        value !== "all" &&
+        !cachedUsers[value] &&
+        !isValueInProvidedUsers;
+
+    const userByIdQuery = trpc.user.getById.useQuery(
+        { id: value },
+        { enabled: shouldFetchById }
+    );
+
+    useEffect(() => {
+        if (userByIdQuery.data) {
+            const fetched = userByIdQuery.data as any;
+            if (fetched?.id) {
+                setCachedUsers((prev) => ({ ...prev, [fetched.id]: fetched }));
+            }
+        }
+    }, [userByIdQuery.data]);
+
+    // Determine current active list of candidate users
+    const candidateUsers = useMemo(() => {
+        if (isSearching) {
+            return (searchQuery.data?.data as UserOption[] | undefined) || [];
+        }
+        if (users.length > 0) {
+            return users;
+        }
+        return (defaultUsersQuery.data?.data as UserOption[] | undefined) || [];
+    }, [isSearching, searchQuery.data?.data, users, defaultUsersQuery.data?.data]);
+
+    // Cache any newly seen candidates
+    useEffect(() => {
+        if (candidateUsers.length > 0) {
+            setCachedUsers((prev) => {
+                let updated = false;
+                const next = { ...prev };
+                for (const u of candidateUsers) {
+                    if (!next[u.id]) {
+                        next[u.id] = u;
+                        updated = true;
+                    }
+                }
+                return updated ? next : prev;
+            });
+        }
+    }, [candidateUsers]);
+
+    // Find selected user
     const selectedUser = useMemo(() => {
         if (!value || value === "all") return null;
-        return users.find((u) => u.id === value) || (initialUser?.id === value ? initialUser : null);
-    }, [users, value, initialUser]);
+        return (
+            candidateUsers.find((u) => u.id === value) ||
+            cachedUsers[value] ||
+            users.find((u) => u.id === value) ||
+            (initialUser?.id === value ? initialUser : null)
+        );
+    }, [candidateUsers, cachedUsers, users, initialUser, value]);
+
+    // Ensure selectedUser is always visible in the list even if not in current search results
+    const displayedUsers = useMemo(() => {
+        let list = [...candidateUsers];
+        if (selectedUser && !list.some((u) => u.id === selectedUser.id)) {
+            list = [selectedUser, ...list];
+        }
+        return list;
+    }, [candidateUsers, selectedUser]);
 
     const displayLabel = selectedUser
         ? (selectedUser.name || `${selectedUser.firstName || ""} ${selectedUser.lastName || ""}`.trim() || "Korisnik") +
           (selectedUser.oib ? ` (${selectedUser.oib})` : "")
         : (showAllOption ? allLabel : "Odaberite korisnika...");
 
-    // Filter users using word-boundary prefix match for all typed tokens
-    const filteredUsers = useMemo(() => {
-        const query = searchValue.trim().toLowerCase();
-        if (!query) return users;
+    const handleSelect = (user: UserOption) => {
+        setCachedUsers((prev) => ({ ...prev, [user.id]: user }));
+        onChange(user.id, user);
+        setOpen(false);
+        setSearchValue("");
+    };
 
-        const tokens = query.split(/\s+/).filter(Boolean);
-
-        return users.filter((user) => {
-            const combined = `${user.name || ""} ${user.firstName || ""} ${user.lastName || ""} ${user.oib || ""} ${user.email || ""} ${user.phone || ""}`.toLowerCase();
-            const words = combined.split(/[\s,.-]+/).filter(Boolean);
-
-            // Every token must match the beginning of at least one word
-            return tokens.every(token => words.some(word => word.startsWith(token)));
-        });
-    }, [users, searchValue]);
+    const isFetchingUsers = isSearching && (searchQuery.isFetching || searchQuery.isLoading);
 
     return (
         <div className={cn("flex items-center gap-1.5", className)}>
@@ -108,15 +197,32 @@ export function UserSearchCombobox({
                         )}
                     </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[340px] p-0" align="start">
+                <PopoverContent className="w-[360px] p-0" align="start">
                     <Command shouldFilter={false}>
-                        <CommandInput
-                            value={searchValue}
-                            onValueChange={setSearchValue}
-                            placeholder={placeholder}
-                        />
+                        <div className="relative flex items-center">
+                            <CommandInput
+                                value={searchValue}
+                                onValueChange={setSearchValue}
+                                placeholder={placeholder}
+                                className="pr-8"
+                            />
+                            {isFetchingUsers && (
+                                <Loader2 className="absolute right-3 h-4 w-4 animate-spin text-muted-foreground pointer-events-none" />
+                            )}
+                        </div>
                         <CommandList>
-                            {filteredUsers.length === 0 && <CommandEmpty>{emptyLabel}</CommandEmpty>}
+                            {displayedUsers.length === 0 && (
+                                <CommandEmpty className="py-6 text-center text-sm text-muted-foreground">
+                                    {isFetchingUsers ? (
+                                        <div className="flex items-center justify-center gap-2">
+                                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                            <span>Pretraživanje baze...</span>
+                                        </div>
+                                    ) : (
+                                        emptyLabel
+                                    )}
+                                </CommandEmpty>
+                            )}
                             <CommandGroup>
                                 {showAllOption && (
                                     <CommandItem
@@ -136,24 +242,30 @@ export function UserSearchCombobox({
                                         {allLabel}
                                     </CommandItem>
                                 )}
-                                {filteredUsers.map((user) => {
-                                    const userName = user.name || `${user.firstName || ""} ${user.lastName || ""}`.trim() || "—";
-                                    const subInfo = [user.oib ? `OIB: ${user.oib}` : null, user.phone || user.email || null].filter(Boolean).join(" · ");
+                                {displayedUsers.map((user) => {
+                                    const userName =
+                                        user.name ||
+                                        `${user.firstName || ""} ${user.lastName || ""}`.trim() ||
+                                        "—";
+                                    const subInfo = [
+                                        user.oib ? `OIB: ${user.oib}` : null,
+                                        user.phone || user.email || null,
+                                    ]
+                                        .filter(Boolean)
+                                        .join(" · ");
+
+                                    const isSelected = value === user.id;
 
                                     return (
                                         <CommandItem
                                             key={user.id}
                                             value={user.id}
-                                            onSelect={() => {
-                                                onChange(user.id);
-                                                setOpen(false);
-                                                setSearchValue("");
-                                            }}
+                                            onSelect={() => handleSelect(user)}
                                         >
                                             <Check
                                                 className={cn(
                                                     "mr-2 h-4 w-4 shrink-0",
-                                                    value === user.id ? "opacity-100" : "opacity-0"
+                                                    isSelected ? "opacity-100" : "opacity-0"
                                                 )}
                                             />
                                             <div className="flex flex-col min-w-0">
@@ -174,7 +286,7 @@ export function UserSearchCombobox({
                     </Command>
                 </PopoverContent>
             </Popover>
-            {value !== "all" && value !== "" && (
+            {value !== "all" && value !== "" && !disabled && (
                 <Button
                     variant="ghost"
                     size="icon"

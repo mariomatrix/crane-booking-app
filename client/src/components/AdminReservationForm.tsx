@@ -387,10 +387,15 @@ export function AdminReservationForm({
                         <UserSearchCombobox
                             users={usersList as any}
                             value={userId}
-                            onChange={setUserId}
+                            onChange={(selectedId, selectedUserObj) => {
+                                setUserId(selectedId);
+                                if (selectedUserObj?.phone && !contactPhone) {
+                                    setContactPhone(selectedUserObj.phone);
+                                }
+                            }}
                             initialUser={initialData?.userObj}
                             showAllOption={false}
-                            placeholder="Odaberite korisnika..."
+                            placeholder="Pretraži po imenu, prezimenu, OIB-u ili plovilu..."
                             className="flex-1"
                             disabled={isUserLocked}
                         />
