@@ -420,6 +420,7 @@ export function AdminReservationForm({
                         <Input
                             value={contactPhone}
                             onChange={(e) => setContactPhone(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                             placeholder="npr. 0912345678"
                         />
                     </div>
@@ -665,6 +666,7 @@ export function AdminReservationForm({
                                         placeholder="30"
                                         value={durationMin}
                                         onChange={(e) => setDurationMin(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
                                         className="h-9 text-xs"
                                         required
                                     />

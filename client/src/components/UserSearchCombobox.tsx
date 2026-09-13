@@ -177,6 +177,7 @@ export function UserSearchCombobox({
             <Popover open={disabled ? false : open} onOpenChange={(val) => !disabled && setOpen(val)}>
                 <PopoverTrigger asChild>
                     <Button
+                        type="button"
                         variant="outline"
                         role="combobox"
                         aria-expanded={open}
@@ -288,6 +289,7 @@ export function UserSearchCombobox({
             </Popover>
             {value !== "all" && value !== "" && !disabled && (
                 <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 shrink-0"
