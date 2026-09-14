@@ -25,7 +25,7 @@ const statusConfig: Record<Status, { label: string; className: string }> = {
   },
   completed: {
     label: "Završeno",
-    className: "bg-green-600 text-white dark:bg-green-600 dark:text-white border-0 font-medium",
+    className: "bg-blue-600 text-white dark:bg-blue-600 dark:text-white border-0 font-medium",
   },
 };
 

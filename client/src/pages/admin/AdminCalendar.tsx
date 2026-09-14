@@ -1124,7 +1124,7 @@ export default function AdminCalendar() {
                                         className="h-2 w-2 rounded-full mr-1.5"
                                         style={{ backgroundColor: STATUS_COLORS[s] }}
                                     />
-                                    {s === "pending" ? "Na čekanju" : s === "approved" ? "Odobreno" : s === "in_progress" ? "U tijeku" : s === "completed" ? "Izvršeno" : s === "rejected" ? "Odbijeno" : "Otkazano"}
+                                    {STATUS_LABELS[s] || s}
                                 </Button>
                             ))}
                         </div>
@@ -1446,7 +1446,7 @@ export default function AdminCalendar() {
                             {Object.entries(STATUS_COLORS).map(([s, color]) => (
                                 <div key={s} className="flex items-center gap-2 text-xs">
                                     <div className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
-                                    <span className="capitalize">{s === 'pending' ? 'Na čekanju' : s === 'approved' ? 'Odobreno' : s === 'rejected' ? 'Odbijeno' : 'Otkazano'}</span>
+                                    <span>{STATUS_LABELS[s] || s}</span>
                                 </div>
                             ))}
                             <div className="flex items-center gap-2 text-xs mt-2 border-t pt-2">
