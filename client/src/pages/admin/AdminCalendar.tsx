@@ -521,6 +521,7 @@ export default function AdminCalendar() {
                         cancelReason: r.cancelReason,
                         vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
                         landZoneCode: r.landZone?.code || r.landZone?.name || "",
+                        durationMin: r.durationMin || 30,
                         operationCategory: r.serviceType?.operationCategory || "",
                         serviceTypeName: r.serviceType?.name || "",
                         adminNote: r.adminNote || "",
@@ -558,6 +559,7 @@ export default function AdminCalendar() {
                         cancelReason: r.cancelReason,
                         vesselRegistration: r.vesselRegistration || r.vessel?.registration || "",
                         landZoneCode: r.landZone?.code || r.landZone?.name || "",
+                        durationMin: r.durationMin || 30,
                         operationCategory: r.serviceType?.operationCategory || "",
                         serviceTypeName: r.serviceType?.name || "",
                         adminNote: r.adminNote || "",
@@ -632,7 +634,7 @@ export default function AdminCalendar() {
 
         if (viewMode !== 'master') {
             const origStart = info.oldEvent.start!;
-            const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
+            const origEnd = info.oldEvent.end || new Date(origStart.getTime() + (info.event.extendedProps?.durationMin || 30) * 60000);
             const durationMs = origEnd.getTime() - origStart.getTime();
 
             let newStart = info.event.start!;
@@ -671,7 +673,7 @@ export default function AdminCalendar() {
         const newStart = fromZagreb(dateStr, timeStr);
 
         const origStart = info.oldEvent.start!;
-        const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
+        const origEnd = info.oldEvent.end || new Date(origStart.getTime() + (info.event.extendedProps?.durationMin || 30) * 60000);
         const durationMs = origEnd.getTime() - origStart.getTime();
         const newEnd = new Date(newStart.getTime() + durationMs);
 
@@ -1218,6 +1220,14 @@ export default function AdminCalendar() {
                         allDaySlot={viewMode !== 'master'}
                         slotMinTime={workStart + ":00"}
                         slotMaxTime={workEnd + ":00"}
+                        slotDuration="00:30:00"
+                        slotLabelInterval="00:30:00"
+                        snapDuration="00:30:00"
+                        slotLabelFormat={{
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: false
+                        }}
                         scrollTime={workStart + ":00"}
                         height="100%"
                         editable={true}

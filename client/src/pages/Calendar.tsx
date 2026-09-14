@@ -324,6 +324,8 @@ export default function Calendar() {
                 events={calendarEvents}
                 height="auto"
                 slotDuration="00:30:00"
+                slotLabelInterval="00:30:00"
+                snapDuration="00:30:00"
                 selectAllow={(selectInfo: { start: Date }) => {
                   return selectInfo.start >= new Date();
                 }}

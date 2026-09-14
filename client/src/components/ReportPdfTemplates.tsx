@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Image, Font } from "@react-pdf/renderer";
 import { format, eachDayOfInterval } from "date-fns";
+import { toZagreb } from "@shared/timezone";
 
 // Register custom font to support Latin diacritics in PDF
 Font.register({
@@ -513,7 +514,9 @@ export function CalendarSchedulePdf({
     marinaName: string;
     marinaLogo?: string;
 }) {
-    const formattedDate = format(date, "yyyy-MM-dd");
+    const targetZg = toZagreb(date);
+    const formattedDate = targetZg.dateStr;
+    const displayDate = `${String(targetZg.day).padStart(2, "0")}.${String(targetZg.month).padStart(2, "0")}.${targetZg.year}.`;
     
     // Filter cranes
     const activeCranes = cranes && cranes.length > 0 ? cranes : [];
@@ -521,26 +524,49 @@ export function CalendarSchedulePdf({
     // Filter reservations for this day using local-date-safe comparison
     const dayReservations = reservations.filter((r: any) => {
         if (!r.scheduledStart) return false;
-        const rDate = safeParseDate(r.scheduledStart);
-        const dDate = safeParseDate(date);
-        return isSameDay(rDate, dDate);
+        try {
+            const rZg = toZagreb(r.scheduledStart);
+            return rZg.dateStr === targetZg.dateStr;
+        } catch {
+            return false;
+        }
     });
 
-    // Prepare hour slots
-    const startHour = parseInt(workStart.split(":")[0]) || 8;
-    const endHour = parseInt(workEnd.split(":")[0]) || 16;
-    const hours: number[] = [];
-    for (let h = startHour; h < endHour; h++) {
-        hours.push(h);
+    // Prepare 30-minute slots
+    const [wsH, wsM] = workStart.split(":").map(Number);
+    const [weH, weM] = workEnd.split(":").map(Number);
+    const fromMinutes = (isNaN(wsH) ? 8 : wsH) * 60 + (isNaN(wsM) ? 0 : wsM);
+    const toMinutes = (isNaN(weH) ? 16 : weH) * 60 + (isNaN(weM) ? 0 : weM);
+
+    interface SlotInfo {
+        startMin: number;
+        endMin: number;
+        label: string;
     }
 
-    // Width definitions: 16% for Time, remaining 84% divided equally among activeCranes
-    const timeColWidth = "16%";
-    const craneColWidth = activeCranes.length > 0 ? `${(84 / activeCranes.length).toFixed(1)}%` : "84%";
+    const timeSlots: SlotInfo[] = [];
+    for (let m = fromMinutes; m < toMinutes; m += 30) {
+        const nextM = m + 30;
+        const sH = Math.floor(m / 60);
+        const sM = m % 60;
+        const eH = Math.floor(nextM / 60);
+        const eM = nextM % 60;
+        const sStr = `${String(sH).padStart(2, "0")}:${String(sM).padStart(2, "0")}`;
+        const eStr = `${String(eH).padStart(2, "0")}:${String(eM).padStart(2, "0")}`;
+        timeSlots.push({
+            startMin: m,
+            endMin: nextM,
+            label: `${sStr} - ${eStr}`,
+        });
+    }
+
+    // Width definitions: 15% for Time, remaining 85% divided equally among activeCranes
+    const timeColWidth = "15%";
+    const craneColWidth = activeCranes.length > 0 ? `${(85 / activeCranes.length).toFixed(1)}%` : "85%";
 
     return (
         <PdfShell
-            title={`Plan rada dizalica na dan ${format(date, "dd.MM.yyyy.")}`}
+            title={`Plan rada dizalica na dan ${displayDate}`}
             dateFrom={formattedDate}
             dateTo={formattedDate}
             marinaName={marinaName}
@@ -559,37 +585,60 @@ export function CalendarSchedulePdf({
                     ))}
                 </View>
 
-                {/* Hour Slots */}
-                {hours.map((hour) => {
-                    const timeStr = `${String(hour).padStart(2, "0")}:00 - ${String(hour + 1).padStart(2, "0")}:00`;
-                    
+                {/* 30-minute Slots */}
+                {timeSlots.map((slot) => {
                     return (
-                        <View key={hour} style={[styles.tableRow, { minHeight: 48, alignItems: "flex-start", paddingTop: 4, paddingBottom: 4 }]}>
+                        <View key={slot.startMin} wrap={false} style={[styles.tableRow, { minHeight: 28, alignItems: "flex-start", paddingTop: 3, paddingBottom: 3 }]}>
                             {/* Time column */}
-                            <Text style={[styles.tableCell, { width: timeColWidth, fontFamily: "Roboto-Bold", fontSize: 8, paddingTop: 6 }]}>
-                                {timeStr}
+                            <Text style={[styles.tableCell, { width: timeColWidth, fontFamily: "Roboto-Bold", fontSize: 7.5, paddingTop: 4 }]}>
+                                {slot.label}
                             </Text>
 
                             {/* Crane columns */}
-                            {activeCranes.map((crane, colIdx) => {
-                                // Get reservations starting in this hour slot for this crane
-                                const slotRes = dayReservations.filter((r: any) => {
-                                    if (r.craneId !== crane.id) return false;
-                                    const startH = safeParseDate(r.scheduledStart).getHours();
-                                    return startH === hour;
+                            {activeCranes.map((crane) => {
+                                // Reservations that start within this 30-minute slot
+                                const startingRes = dayReservations.filter((r: any) => {
+                                    if (String(r.craneId) !== String(crane.id)) return false;
+                                    try {
+                                        const rZg = toZagreb(r.scheduledStart);
+                                        const rStartMin = rZg.hours * 60 + rZg.minutes;
+                                        return rStartMin >= slot.startMin && rStartMin < slot.endMin;
+                                    } catch {
+                                        return false;
+                                    }
+                                });
+
+                                // Ongoing reservations that started earlier and span across this slot
+                                const ongoingRes = dayReservations.filter((r: any) => {
+                                    if (String(r.craneId) !== String(crane.id)) return false;
+                                    try {
+                                        const rZg = toZagreb(r.scheduledStart);
+                                        const rStartMin = rZg.hours * 60 + rZg.minutes;
+                                        const duration = Number(r.durationMin) || 30;
+                                        const rEndMin = rStartMin + duration;
+                                        return rStartMin < slot.startMin && rEndMin > slot.startMin;
+                                    } catch {
+                                        return false;
+                                    }
                                 });
 
                                 return (
                                     <View key={crane.id} style={{ width: craneColWidth, paddingRight: 4 }}>
-                                        {slotRes.map((r: any, rIdx) => {
+                                        {startingRes.map((r: any, rIdx) => {
                                             const statusColor = r.isMaintenance 
                                                 ? "#f97316" 
-                                                : (r.status === "approved" ? "#059669" : r.status === "completed" ? "#16a34a" : r.status === "pending" ? "#f59e0b" : "#4b5563");
+                                                : (r.status === "approved" ? "#059669" : r.status === "completed" ? "#0284c7" : r.status === "pending" ? "#f59e0b" : "#4b5563");
                                             
                                             const clientName = r.user?.name || r.clientName || "Korisnik";
                                             const reg = r.vesselRegistration || "—";
                                             const action = r.isMaintenance ? "ODRŽAVANJE" : (r.serviceType?.name || r.serviceTypeName || "—");
                                             const landZoneLabel = r.landZone?.code ? (r.landZone.name ? `${r.landZone.name} (${r.landZone.code})` : r.landZone.code) : (r.landZone?.name || r.landZoneCode || r.landZoneName || null);
+                                            const duration = Number(r.durationMin) || 30;
+                                            const rZg = toZagreb(r.scheduledStart);
+                                            const endMin = rZg.hours * 60 + rZg.minutes + duration;
+                                            const endH = Math.floor(endMin / 60);
+                                            const endM = endMin % 60;
+                                            const endStr = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
 
                                             return (
                                                 <View 
@@ -597,31 +646,67 @@ export function CalendarSchedulePdf({
                                                     style={{ 
                                                         borderLeftWidth: 3, 
                                                         borderLeftColor: statusColor, 
-                                                        paddingLeft: 6, 
+                                                        paddingLeft: 5, 
                                                         paddingRight: 2,
-                                                        marginBottom: 4, 
-                                                        marginTop: rIdx > 0 ? 4 : 0 
+                                                        marginBottom: 2, 
+                                                        marginTop: rIdx > 0 ? 3 : 0 
                                                     }}
                                                 >
-                                                    <Text style={{ fontFamily: "Roboto-Bold", fontSize: 8, color: "#1e293b" }}>
+                                                    <Text style={{ fontFamily: "Roboto-Bold", fontSize: 7.5, color: "#1e293b" }}>
                                                         {clientName}
                                                     </Text>
-                                                    <Text style={{ fontSize: 7, color: "#64748b", marginTop: 1 }}>
+                                                    <Text style={{ fontSize: 6.5, color: "#64748b", marginTop: 0.5 }}>
                                                         Reg: {reg}{landZoneLabel ? ` • Suhi vez: ${landZoneLabel}` : ""}
                                                     </Text>
-                                                    <Text style={{ fontSize: 7, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 1, paddingLeft: 1 }}>
-                                                        {action}
+                                                    <Text style={{ fontSize: 6.5, fontFamily: "Roboto-Bold", color: statusColor, marginTop: 0.5 }}>
+                                                        {action}{duration > 30 ? ` (${duration} min, do ${endStr})` : ""}
                                                     </Text>
                                                     {r.adminNote && (
-                                                        <Text style={{ fontSize: 6.5, fontStyle: "italic", color: "#475569", marginTop: 1, paddingLeft: 1 }}>
+                                                        <Text style={{ fontSize: 6, fontStyle: "italic", color: "#475569", marginTop: 0.5 }}>
                                                             Napom: {r.adminNote}
                                                         </Text>
                                                     )}
                                                 </View>
                                             );
                                         })}
-                                        {slotRes.length === 0 && (
-                                            <Text style={{ fontSize: 7, color: "#cbd5e1", paddingTop: 6 }}>
+                                        {startingRes.length === 0 && ongoingRes.map((r: any, oIdx) => {
+                                            const statusColor = r.isMaintenance ? "#f97316" : (r.status === "approved" ? "#059669" : r.status === "completed" ? "#0284c7" : "#4b5563");
+                                            const clientName = r.user?.name || r.clientName || "Korisnik";
+                                            const reg = r.vesselRegistration || "—";
+                                            const duration = Number(r.durationMin) || 30;
+                                            const rZg = toZagreb(r.scheduledStart);
+                                            const endMin = rZg.hours * 60 + rZg.minutes + duration;
+                                            const endH = Math.floor(endMin / 60);
+                                            const endM = endMin % 60;
+                                            const endStr = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+
+                                            return (
+                                                <View 
+                                                    key={`ongoing-${r.id || oIdx}`}
+                                                    style={{ 
+                                                        borderLeftWidth: 2, 
+                                                        borderLeftColor: statusColor, 
+                                                        paddingLeft: 4, 
+                                                        paddingRight: 2,
+                                                        opacity: 0.85,
+                                                        backgroundColor: "#f8fafc",
+                                                        paddingTop: 1,
+                                                        paddingBottom: 1,
+                                                        borderRadius: 2,
+                                                        marginBottom: 2
+                                                    }}
+                                                >
+                                                    <Text style={{ fontSize: 6.5, fontFamily: "Roboto-Bold", color: "#475569" }}>
+                                                        ↳ U tijeku: {clientName} ({reg})
+                                                    </Text>
+                                                    <Text style={{ fontSize: 6, color: "#64748b" }}>
+                                                        (do {endStr})
+                                                    </Text>
+                                                </View>
+                                            );
+                                        })}
+                                        {startingRes.length === 0 && ongoingRes.length === 0 && (
+                                            <Text style={{ fontSize: 6.5, color: "#cbd5e1", paddingTop: 4 }}>
                                                 Slobodno
                                             </Text>
                                         )}

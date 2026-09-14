@@ -18,14 +18,14 @@ export default function AdminSettings() {
     const { data: settings, isLoading } = trpc.settings.get.useQuery();
     const utils = trpc.useUtils();
 
-    const [slotMin, setSlotMin] = useState("60");
+    const [slotMin, setSlotMin] = useState("30");
     const [bufferMin, setBufferMin] = useState("15");
     const [marinaName, setMarinaName] = useState("PŠD Špinut");
     const [marinaLogo, setMarinaLogo] = useState("");
 
     useEffect(() => {
         if (settings) {
-            setSlotMin(settings.slotDurationMinutes ?? "60");
+            setSlotMin(settings.slotDurationMinutes ?? "30");
             setBufferMin(settings.bufferMinutes ?? "15");
             setMarinaName(settings.marinaName ?? "PŠD Špinut");
             setMarinaLogo(settings.marinaLogo ?? "");
