@@ -55,7 +55,7 @@ import { ReservationChat } from "@/components/ReservationChat";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { useLang } from "@/contexts/LangContext";
-import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { formatAppDate, formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -308,10 +308,8 @@ export default function AdminReservations() {
       toast.error(`Odabrani termin (${approveTime}) je zauzet. Molimo odaberite slobodan termin.`);
       return;
     }
-    const [hours, minutes] = approveTime.split(":").map(Number);
     const dateStr = formatToSqlDate(approveDate);
-    const [y, m, d] = dateStr.split("-").map(Number);
-    const scheduledStart = new Date(y, m - 1, d, hours, minutes, 0, 0);
+    const scheduledStart = fromZagreb(dateStr, approveTime);
 
     approveMutation.mutate({
       id: selectedId,

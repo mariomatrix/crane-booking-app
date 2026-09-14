@@ -11,7 +11,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/lib/trpc";
 import { useLang } from "@/contexts/LangContext";
-import { formatToSqlDate } from "@/lib/date-utils";
+import { formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
@@ -306,10 +306,8 @@ export function AdminReservationForm({
                 toast.error(`Odabrani termin (${scheduledTime}) mora biti unutar radnog vremena sezone (${activeSeasonForSelectedDate?.from || "08:00"} - ${activeSeasonForSelectedDate?.to || "16:00"}).`);
                 return;
             }
-            const [hours, minutes] = scheduledTime.split(":").map(Number);
             const dateStr = formatToSqlDate(requestedDate);
-            const [y, m, d] = dateStr.split("-").map(Number);
-            scheduledStartDate = new Date(y, m - 1, d, hours, minutes, 0, 0);
+            scheduledStartDate = fromZagreb(dateStr, scheduledTime);
         }
 
         const commonPayload = {

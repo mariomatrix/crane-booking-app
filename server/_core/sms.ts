@@ -49,6 +49,7 @@ export async function sendReservationConfirmationSms(opts: {
 }) {
     const { lang = "hr" } = opts;
     const time = opts.startDate.toLocaleString(lang === "hr" ? "hr-HR" : "en-GB", {
+        timeZone: "Europe/Zagreb",
         day: "2-digit",
         month: "2-digit",
         hour: "2-digit",

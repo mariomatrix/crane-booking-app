@@ -4,6 +4,7 @@ import {
   ACCESS_TOKEN_EXPIRY_MS,
   REFRESH_TOKEN_EXPIRY_MS,
 } from "@shared/const";
+import { toZagreb, fromZagreb } from "@shared/timezone";
 import {
   getSessionCookieOptions,
   getRefreshCookieOptions,
@@ -206,17 +207,12 @@ async function validateSlotAgainstSettings(
   endDate: Date,
   sysSettings: Record<string, string>
 ) {
-  // 1. Past date check (No past dates allowed)
-  const now = new Date();
-  const startOfToday = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    0,
-    0,
-    0,
-    0
-  );
+  const zgStart = toZagreb(startDate);
+  const zgEnd = toZagreb(endDate);
+  const zgNow = toZagreb(new Date());
+
+  // 1. Past date check (No past dates allowed - compare against start of today in Zagreb)
+  const startOfToday = fromZagreb(zgNow.dateStr, "00:00");
   if (startDate < startOfToday) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -226,10 +222,7 @@ async function validateSlotAgainstSettings(
   }
 
   // 2. Active Season & Working Hours check
-  const year = startDate.getFullYear();
-  const month = String(startDate.getMonth() + 1).padStart(2, "0");
-  const day = String(startDate.getDate()).padStart(2, "0");
-  const dateStr = `${year}-${month}-${day}`;
+  const dateStr = zgStart.dateStr;
 
   const dateIsHoliday = await isHoliday(dateStr);
   if (dateIsHoliday) {
@@ -255,7 +248,7 @@ async function validateSlotAgainstSettings(
     typeof activeSeason.workingHours === "object"
   ) {
     const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-    const dayKey = dayKeys[startDate.getDay()];
+    const dayKey = dayKeys[zgStart.dayOfWeek];
     const dayHours = (activeSeason.workingHours as any)?.[dayKey];
     if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
       throw new TRPCError({
@@ -270,13 +263,13 @@ async function validateSlotAgainstSettings(
   const { h: wsH, m: wsM } = parseHHMM(workStartStr);
   const { h: weH, m: weM } = parseHHMM(workEndStr);
 
-  const startH = startDate.getHours() * 60 + startDate.getMinutes();
-  const endH = endDate.getHours() * 60 + endDate.getMinutes();
+  const startH = zgStart.hours * 60 + zgStart.minutes;
+  const endH = zgEnd.hours * 60 + zgEnd.minutes;
   const workStart = wsH * 60 + wsM;
   const workEnd = weH * 60 + weM;
 
   if (startH < workStart || endH > workEnd) {
-    const startFormatted = `${String(startDate.getHours()).padStart(2, "0")}:${String(startDate.getMinutes()).padStart(2, "0")}`;
+    const startFormatted = zgStart.timeStr;
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: `Odabrani termin (${startFormatted}) je izvan radnog vremena za taj dan (${workStartStr} - ${workEndStr}).`,
@@ -284,7 +277,7 @@ async function validateSlotAgainstSettings(
   }
 
   // Strictly 30-minute interval slots (XX:00 or XX:30)
-  if (startDate.getMinutes() % 30 !== 0 || startDate.getSeconds() !== 0) {
+  if (zgStart.minutes % 30 !== 0 || zgStart.seconds !== 0) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
@@ -2537,7 +2530,7 @@ export const appRouter = router({
 
         if (reservation.status === "approved" && reservation.craneId) {
           const dateStr = reservation.scheduledStart
-            ? new Date(reservation.scheduledStart).toISOString().split("T")[0]
+            ? toZagreb(reservation.scheduledStart).dateStr
             : "";
           notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
         }
@@ -2592,8 +2585,8 @@ export const appRouter = router({
 
         // Date range filtering - check both confirmed schedule and requested date (for pending)
         if (filters.scheduledStart && filters.scheduledEnd) {
-          const startStr = filters.scheduledStart.toISOString().split("T")[0];
-          const endStr = filters.scheduledEnd.toISOString().split("T")[0];
+          const startStr = toZagreb(filters.scheduledStart).dateStr;
+          const endStr = toZagreb(filters.scheduledEnd).dateStr;
           conditions.push(
             or(
               and(
@@ -2960,7 +2953,7 @@ export const appRouter = router({
 
         if (reservation.craneId) {
           const dateStr = reservation.scheduledStart
-            ? new Date(reservation.scheduledStart).toISOString().split("T")[0]
+            ? toZagreb(reservation.scheduledStart).dateStr
             : "";
           notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
         }
@@ -3577,8 +3570,8 @@ export const appRouter = router({
         );
 
         if (input?.scheduledStart && input?.scheduledEnd) {
-          const startStr = input.scheduledStart.toISOString().split("T")[0];
-          const endStr = input.scheduledEnd.toISOString().split("T")[0];
+          const startStr = toZagreb(input.scheduledStart).dateStr;
+          const endStr = toZagreb(input.scheduledEnd).dateStr;
           conditions.push(
             or(
               and(
@@ -3656,11 +3649,8 @@ export const appRouter = router({
         })
       )
       .query(async ({ input }) => {
-        const [yStr, mStr, dStr] = input.date.split("-");
-        const year = Number(yStr);
-        const month = Number(mStr);
-        const day = Number(dStr);
-        const dateObj = new Date(year, month - 1, day);
+        const dayStart = fromZagreb(input.date, "00:00");
+        const dayEnd = new Date(fromZagreb(input.date, "23:59").getTime() + 59999);
 
         const holiday = await isHoliday(input.date);
         if (holiday) {
@@ -3697,7 +3687,8 @@ export const appRouter = router({
           typeof activeSeason.workingHours === "object"
         ) {
           const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-          const dayKey = dayKeys[dateObj.getDay()];
+          const zgDay = toZagreb(dayStart).dayOfWeek;
+          const dayKey = dayKeys[zgDay];
           const dayHours = (activeSeason.workingHours as any)?.[dayKey];
           if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
             return {
@@ -3721,8 +3712,6 @@ export const appRouter = router({
         const slotDuration = input.durationMin || 30;
 
         // Fetch all active reservations for this date
-        const dayStart = new Date(year, month - 1, day, 0, 0, 0, 0);
-        const dayEnd = new Date(year, month - 1, day, 23, 59, 59, 999);
         const db = await getDb();
         const existingRes = db
           ? await db
@@ -3769,7 +3758,7 @@ export const appRouter = router({
           const hh = Math.floor(m / 60);
           const mm = m % 60;
           const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-          const slotStart = new Date(year, month - 1, day, hh, mm, 0, 0);
+          const slotStart = fromZagreb(input.date, timeStr);
           const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
 
           if (!input.craneId) {
@@ -3831,7 +3820,8 @@ export const appRouter = router({
           for (let m = fromMinutes; m + slotDuration <= toMinutes; m += 30) {
             const hh = Math.floor(m / 60);
             const mm = m % 60;
-            const slotStart = new Date(year, month - 1, day, hh, mm, 0, 0);
+            const timeStr = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+            const slotStart = fromZagreb(input.date, timeStr);
             const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
             const hasOverlap = existingRes.some(
               (r) =>
@@ -4419,7 +4409,7 @@ export const appRouter = router({
         allRes
           .filter(r => r.status === "approved" && r.scheduledStart)
           .forEach(r => {
-            const day = r.scheduledStart!.toISOString().split("T")[0];
+            const day = toZagreb(r.scheduledStart!).dateStr;
             trendMap[day] = (trendMap[day] || 0) + 1;
           });
         const trendStats = Object.entries(trendMap)

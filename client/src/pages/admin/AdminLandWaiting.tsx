@@ -23,7 +23,7 @@ import { ListOrdered, Loader2, ArrowUp, ArrowDown, UserPlus, CheckCircle, XCircl
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { formatAppDate } from "@/lib/date-utils";
+import { formatAppDate, formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 
 export default function AdminLandWaiting() {
@@ -187,9 +187,8 @@ export default function AdminLandWaiting() {
       toast.error(isHr ? "Molimo popunite sva polja." : "Please fill in all fields.");
       return;
     }
-    const [hours, minutes] = directTime.split(":").map(Number);
-    const scheduledStart = new Date(directDate);
-    scheduledStart.setHours(hours, minutes, 0, 0);
+    const dateStr = formatToSqlDate(directDate);
+    const scheduledStart = fromZagreb(dateStr, directTime);
 
     directAssignMutation.mutate({
       id: directAssignEntry.id,

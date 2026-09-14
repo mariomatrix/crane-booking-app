@@ -32,7 +32,7 @@ import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { addDays, addMonths, addWeeks, startOfDay, endOfDay, startOfWeek, endOfWeek, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
-import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
+import { formatAppDate, formatToSqlDate, toZagreb, fromZagreb } from "@/lib/date-utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -403,8 +403,8 @@ export default function AdminCalendar() {
 
     const handleCreateMaintenance = (e: React.FormEvent) => {
         e.preventDefault();
-        const start = new Date(`${maintDate}T${maintStart}:00`);
-        const end = new Date(`${maintDate}T${maintEnd}:00`);
+        const start = fromZagreb(maintDate, maintStart);
+        const end = fromZagreb(maintDate, maintEnd);
         maintenanceMutation.mutate({
             craneId: maintCraneId,
             scheduledStart: start,
@@ -420,9 +420,12 @@ export default function AdminCalendar() {
         const res = allReservations.find((r: any) => r.id === p.reservationId);
         if (res) {
             setEditingRes(res);
-            setEditDate(new Date(String(res.scheduledStart)));
-            setEditStart(format(new Date(String(res.scheduledStart)), "HH:mm"));
-            setEditEnd(format(new Date(String(res.scheduledEnd)), "HH:mm"));
+            const rawStartDate = res.scheduledStart ? new Date(res.scheduledStart) : (res.requestedDate ? fromZagreb(res.requestedDate, "08:00") : new Date());
+            const zgStart = toZagreb(rawStartDate);
+            const zgEnd = res.scheduledEnd ? toZagreb(res.scheduledEnd) : null;
+            setEditDate(rawStartDate);
+            setEditStart(zgStart.timeStr);
+            setEditEnd(zgEnd ? zgEnd.timeStr : toZagreb(new Date(rawStartDate.getTime() + (res.durationMin || 30) * 60000)).timeStr);
             setEditCraneId(String(res.craneId));
             setEditLandZoneId(res.landZoneId || "none");
             setIsEditOpen(true);
@@ -433,13 +436,9 @@ export default function AdminCalendar() {
         e.preventDefault();
         if (!editingRes || !editDate) return;
 
-        const [hS, mS] = editStart.split(":").map(Number);
-        const [hE, mE] = editEnd.split(":").map(Number);
-
         const dateStr = formatToSqlDate(editDate);
-        const [y, m, d] = dateStr.split("-").map(Number);
-        const startDate = new Date(y, m - 1, d, hS, mS, 0, 0);
-        const endDate = new Date(y, m - 1, d, hE, mE, 0, 0);
+        const startDate = fromZagreb(dateStr, editStart);
+        const endDate = fromZagreb(dateStr, editEnd);
 
         rescheduleMutation.mutate({
             id: editingRes.id,
@@ -475,26 +474,28 @@ export default function AdminCalendar() {
 
     const calendarEvents = useMemo(() => {
         const resEvents = allReservations.map((r: any) => {
-            const rawDate = r.scheduledStart ? new Date(r.scheduledStart) : (r.requestedDate ? new Date(`${r.requestedDate}T08:00:00`) : null);
+            const rawDate = r.scheduledStart ? new Date(r.scheduledStart) : (r.requestedDate ? fromZagreb(r.requestedDate, "08:00") : null);
             if (!rawDate || isNaN(rawDate.getTime())) return null;
 
             const craneIdx = activeCranes.findIndex(c => String(c.id).toLowerCase() === String(r.craneId || "").toLowerCase());
+            const zgStart = toZagreb(rawDate);
 
             if (viewMode === 'master') {
-                const eventDateStr = format(rawDate, "yyyy-MM-dd");
-                const viewDateStr = format(viewDate, "yyyy-MM-dd");
+                const eventDateStr = zgStart.dateStr;
+                const viewDateStr = formatToSqlDate(viewDate);
                 if (eventDateStr !== viewDateStr) {
                     return null;
                 }
 
                 const actualCraneIdx = craneIdx >= 0 ? craneIdx : 0;
                 const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
+                const zgEnd = toZagreb(rawEnd);
 
                 const start = addDays(viewDate, actualCraneIdx);
-                start.setHours(rawDate.getHours(), rawDate.getMinutes(), 0, 0);
+                start.setHours(zgStart.hours, zgStart.minutes, 0, 0);
 
                 const end = addDays(viewDate, actualCraneIdx);
-                end.setHours(rawEnd.getHours(), rawEnd.getMinutes(), 0, 0);
+                end.setHours(zgEnd.hours, zgEnd.minutes, 0, 0);
 
                 const isLocked = r.isMaintenance || r.status === 'completed' || r.status === 'cancelled' || r.status === 'rejected';
 
@@ -636,8 +637,9 @@ export default function AdminCalendar() {
 
             let newStart = info.event.start!;
             if (viewMode === 'dayGridMonth') {
-                newStart = new Date(info.event.start!);
-                newStart.setHours(origStart.getHours(), origStart.getMinutes(), 0, 0);
+                const dateStr = formatToSqlDate(info.event.start!);
+                const zgOrig = toZagreb(origStart);
+                newStart = fromZagreb(dateStr, zgOrig.timeStr);
             }
             const newEnd = new Date(newStart.getTime() + durationMs);
 
@@ -664,8 +666,9 @@ export default function AdminCalendar() {
         }
 
         const newTargetCrane = activeCranes[diffDays];
-        const newStart = new Date(viewDate);
-        newStart.setHours(newOffsetDate.getHours(), newOffsetDate.getMinutes(), 0, 0);
+        const dateStr = formatToSqlDate(viewDate);
+        const timeStr = `${String(newOffsetDate.getHours()).padStart(2, "0")}:${String(newOffsetDate.getMinutes()).padStart(2, "0")}`;
+        const newStart = fromZagreb(dateStr, timeStr);
 
         const origStart = info.oldEvent.start!;
         const origEnd = info.oldEvent.end || new Date(origStart.getTime() + 60 * 60000);
@@ -714,8 +717,9 @@ export default function AdminCalendar() {
                 return;
             }
             craneId = activeCranes[diffDays].id;
-            const realStart = new Date(viewDate);
-            realStart.setHours(newStart.getHours(), newStart.getMinutes(), 0, 0);
+            const dateStr = formatToSqlDate(viewDate);
+            const timeStr = `${String(newStart.getHours()).padStart(2, "0")}:${String(newStart.getMinutes()).padStart(2, "0")}`;
+            const realStart = fromZagreb(dateStr, timeStr);
 
             const durationMs = newEnd.getTime() - newStart.getTime();
             newStart = realStart;
@@ -1234,8 +1238,9 @@ export default function AdminCalendar() {
                                         return;
                                     }
                                     targetCrane = activeCranes[diffDays];
-                                    startDate = new Date(viewDate);
-                                    startDate.setHours(dropDate.getHours(), dropDate.getMinutes(), 0, 0);
+                                    const dateStr = formatToSqlDate(viewDate);
+                                    const timeStr = `${String(dropDate.getHours()).padStart(2, "0")}:${String(dropDate.getMinutes()).padStart(2, "0")}`;
+                                    startDate = fromZagreb(dateStr, timeStr);
                                 } else if (selectedCrane !== "all") {
                                     const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
                                     if (found) targetCrane = found;

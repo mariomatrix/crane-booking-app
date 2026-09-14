@@ -105,8 +105,8 @@ export async function sendReservationConfirmation(opts: {
     const subject = isHr
         ? `Rezervacija potvrđena — ${opts.craneName}`
         : `Reservation Confirmed — ${opts.craneName}`;
-    const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
-    const endStr = opts.endDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
+    const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB", { timeZone: "Europe/Zagreb" });
+    const endStr = opts.endDate.toLocaleString(isHr ? "hr-HR" : "en-GB", { timeZone: "Europe/Zagreb" });
 
     const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
@@ -147,7 +147,7 @@ export async function sendReservationRejection(opts: {
     const subject = isHr
         ? `Rezervacija odbijena — ${opts.craneName}`
         : `Reservation Rejected — ${opts.craneName}`;
-    const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB");
+    const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB", { timeZone: "Europe/Zagreb" });
 
     const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
