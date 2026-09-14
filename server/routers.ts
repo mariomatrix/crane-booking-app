@@ -5036,7 +5036,9 @@ export const appRouter = router({
     directAssign: operatorProcedure
       .input(
         z.object({
-          id: z.string().uuid(),
+          id: z.string().uuid().optional(),
+          userId: z.string().uuid().optional(),
+          vesselId: z.string().uuid().optional(),
           craneId: z.string().uuid(),
           scheduledStart: z.date(),
           durationMin: z.number().int().positive().default(30),
@@ -5049,14 +5051,38 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        const waitlistEntry = await db
-          .select()
-          .from(landWaitingList)
-          .where(eq(landWaitingList.id, input.id))
-          .limit(1);
-        if (waitlistEntry.length === 0)
-          throw new TRPCError({ code: "NOT_FOUND" });
-        const entry = waitlistEntry[0];
+        let entry: any;
+        let entryId = input.id;
+
+        if (entryId) {
+          const waitlistEntry = await db
+            .select()
+            .from(landWaitingList)
+            .where(eq(landWaitingList.id, entryId))
+            .limit(1);
+          if (waitlistEntry.length === 0)
+            throw new TRPCError({ code: "NOT_FOUND" });
+          entry = waitlistEntry[0];
+        } else {
+          if (!input.userId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Korisnik je obavezan.",
+            });
+          }
+          entryId = await addLandWaitingListEntry({
+            userId: input.userId,
+            vesselId: input.vesselId,
+            preferredZoneId: input.zoneId,
+            note: input.adminNote,
+          });
+          const createdList = await db
+            .select()
+            .from(landWaitingList)
+            .where(eq(landWaitingList.id, entryId))
+            .limit(1);
+          entry = createdList[0];
+        }
 
         // Validate crane
         const crane = await getCraneById(input.craneId);
@@ -5167,17 +5193,34 @@ export const appRouter = router({
           await db
             .update(landWaitingList)
             .set({ reservationId: newRes.id, updatedAt: new Date() })
-            .where(eq(landWaitingList.id, input.id));
+            .where(eq(landWaitingList.id, entryId));
+        }
+
+        // Record land occupancy if a dry berth zone is selected
+        let occupancyId: string | undefined = undefined;
+        if (input.zoneId && entry.vesselId) {
+          occupancyId = await createLandOccupancy({
+            vesselId: entry.vesselId,
+            userId: entry.userId,
+            zoneId: input.zoneId,
+            spotNumber: input.spotNumber,
+            createdBy: ctx.user.id,
+            liftedAt: input.scheduledStart,
+          });
         }
 
         // Update waitlist entry to assigned
-        await updateLandWaitingListStatus(input.id, "assigned");
+        await updateLandWaitingListStatus(
+          entryId,
+          "assigned",
+          occupancyId ? { assignedOccupancyId: occupancyId } : undefined
+        );
 
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "land_waiting_assigned_direct",
           entityType: "land_waiting_list",
-          entityId: input.id,
+          entityId: entryId,
         });
 
         // Send confirmation email if available

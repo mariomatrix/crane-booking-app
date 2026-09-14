@@ -24,7 +24,6 @@ import {
   Loader2,
   ArrowUp,
   ArrowDown,
-  UserPlus,
   CheckCircle,
   XCircle,
   Send,
@@ -41,29 +40,24 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { formatAppDate, formatToSqlDate, fromZagreb, toZagreb } from "@/lib/date-utils";
+import { formatAppDate, formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 
 export default function AdminLandWaiting() {
   const { lang } = useLang();
   const isHr = lang === "hr";
 
-  // Waitlist add dialog states
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [userId, setUserId] = useState("");
-  const [vesselId, setVesselId] = useState("");
-  const [preferredZoneId, setPreferredZoneId] = useState("");
-  const [note, setNote] = useState("");
-
-  // Assign berth only dialog states
+  // Assign berth only dialog states (when offer accepted)
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assignEntryId, setAssignEntryId] = useState<string | null>(null);
   const [assignZoneId, setAssignZoneId] = useState("");
   const [assignSpotNumber, setAssignSpotNumber] = useState("");
 
-  // Unified Direct assign dialog states (Crane + Dry berth)
+  // Unified Scheduling dialog states (Crane + Dry berth)
   const [directAssignDialogOpen, setDirectAssignDialogOpen] = useState(false);
   const [directAssignEntry, setDirectAssignEntry] = useState<any | null>(null);
+  const [userId, setUserId] = useState("");
+  const [vesselId, setVesselId] = useState("");
   const [directZoneId, setDirectZoneId] = useState("");
   const [directSpotNumber, setDirectSpotNumber] = useState("");
   const [directCraneId, setDirectCraneId] = useState("");
@@ -85,19 +79,6 @@ export default function AdminLandWaiting() {
     { userId },
     { enabled: !!userId }
   );
-
-  const addMutation = trpc.landWaiting.add.useMutation({
-    onSuccess: () => {
-      toast.success(isHr ? "Korisnik je dodan na listu čekanja." : "User successfully added to waitlist.");
-      utils.landWaiting.listAll.invalidate();
-      utils.landWaiting.getOverview.invalidate();
-      utils.reservation.listAll.invalidate();
-      utils.calendar.events.invalidate();
-      setAddDialogOpen(false);
-      resetAddForm();
-    },
-    onError: (error) => toast.error(error.message),
-  });
 
   const offerMutation = trpc.landWaiting.offer.useMutation({
     onSuccess: () => {
@@ -151,6 +132,9 @@ export default function AdminLandWaiting() {
       utils.landZone.list.invalidate();
       utils.calendar.events.invalidate();
       setDirectAssignDialogOpen(false);
+      setDirectAssignEntry(null);
+      setUserId("");
+      setVesselId("");
       setDirectCraneId("");
       setDirectZoneId("");
       setDirectSpotNumber("");
@@ -169,13 +153,6 @@ export default function AdminLandWaiting() {
     },
     onError: (error) => toast.error(error.message),
   });
-
-  const resetAddForm = () => {
-    setUserId("");
-    setVesselId("");
-    setPreferredZoneId("");
-    setNote("");
-  };
 
   const handleMove = (index: number, direction: "up" | "down") => {
     const nextList = [...waiting];
@@ -196,8 +173,26 @@ export default function AdminLandWaiting() {
     setAssignDialogOpen(true);
   };
 
+  // Open modal from top button for a new assignment
+  const openNewSchedule = () => {
+    setDirectAssignEntry(null);
+    setUserId("");
+    setVesselId("");
+    setDirectZoneId(overview?.zones?.[0]?.id || "");
+    setDirectSpotNumber("");
+    setDirectCraneId(cranes.find(c => c.craneStatus === "active")?.id || "");
+    setDirectDate(new Date());
+    setDirectTime("08:00");
+    setDirectDuration("30");
+    setDirectAdminNote("");
+    setDirectAssignDialogOpen(true);
+  };
+
+  // Open modal for an existing waitlist candidate
   const openDirectAssign = (entry: any) => {
     setDirectAssignEntry(entry);
+    setUserId(entry.userId);
+    setVesselId(entry.vesselId || "");
     setDirectZoneId(entry.preferredZoneId || (overview?.zones?.[0]?.id || ""));
     setDirectSpotNumber("");
     setDirectCraneId(cranes.find(c => c.craneStatus === "active")?.id || "");
@@ -223,7 +218,11 @@ export default function AdminLandWaiting() {
 
   const handleDirectAssignSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!directAssignEntry || !directCraneId || !directDate || !directTime) {
+    if (!directAssignEntry && !userId) {
+      toast.error(isHr ? "Molimo odaberite korisnika." : "Please select a user.");
+      return;
+    }
+    if (!directCraneId || !directDate || !directTime) {
       toast.error(isHr ? "Molimo popunite sva obavezna polja." : "Please fill in all required fields.");
       return;
     }
@@ -231,27 +230,15 @@ export default function AdminLandWaiting() {
     const scheduledStart = fromZagreb(dateStr, directTime);
 
     directAssignMutation.mutate({
-      id: directAssignEntry.id,
+      id: directAssignEntry ? directAssignEntry.id : undefined,
+      userId: directAssignEntry ? undefined : userId,
+      vesselId: directAssignEntry ? undefined : (vesselId || undefined),
       craneId: directCraneId,
       zoneId: directZoneId || undefined,
       spotNumber: directSpotNumber ? Number(directSpotNumber) : undefined,
       scheduledStart,
       durationMin: Number(directDuration),
       adminNote: directAdminNote || undefined,
-    });
-  };
-
-  const handleAddSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userId) {
-      toast.error(isHr ? "Korisnik je obavezan." : "User is required.");
-      return;
-    }
-    addMutation.mutate({
-      userId,
-      vesselId: vesselId || undefined,
-      preferredZoneId: preferredZoneId || undefined,
-      note: note || undefined,
     });
   };
 
@@ -302,12 +289,13 @@ export default function AdminLandWaiting() {
           </p>
         </div>
 
+        {/* Top button directly opens the unified scheduling form */}
         <Button
-          onClick={() => setAddDialogOpen(true)}
-          className="bg-primary hover:bg-primary/90 text-white rounded-xl shadow-sm gap-2"
+          onClick={openNewSchedule}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm gap-2 font-semibold"
         >
-          <UserPlus className="h-4 w-4" />
-          {isHr ? "Dodaj na listu" : "Add to Waitlist"}
+          <CalendarClock className="h-4 w-4" />
+          {isHr ? "Rasporedi (Dizalica + Vez)" : "Schedule (Crane + Berth)"}
         </Button>
       </div>
 
@@ -715,17 +703,20 @@ export default function AdminLandWaiting() {
         </CardContent>
       </Card>
 
-      {/* Unified Direct Assign Dialog: Crane + Dry Berth */}
+      {/* Unified Scheduling Dialog: Crane + Dry Berth (used for both "+ Rasporedi" and row actions) */}
       <Dialog open={directAssignDialogOpen} onOpenChange={setDirectAssignDialogOpen}>
         <DialogContent className="rounded-2xl max-w-lg">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <CalendarClock className="h-5 w-5 text-indigo-600" />
-              {isHr ? "Ugovori termin dizalice i dodijeli suhi vez" : "Schedule Crane & Assign Dry Berth"}
+              {directAssignEntry
+                ? (isHr ? "Rasporedi termin dizalice i suhog veza" : "Schedule Crane & Dry Berth Spot")
+                : (isHr ? "Nova dodjela: Dizalica i suhi vez" : "New Assignment: Crane & Dry Berth")}
             </DialogTitle>
           </DialogHeader>
 
-          {directAssignEntry && (
+          {/* 1. Candidate Info OR User & Vessel Selection */}
+          {directAssignEntry ? (
             <div className="bg-slate-50 dark:bg-slate-900/60 p-3.5 rounded-xl border text-xs space-y-1 my-1">
               <div className="flex justify-between items-center">
                 <span className="font-semibold text-sm text-foreground">
@@ -749,10 +740,41 @@ export default function AdminLandWaiting() {
                 )}
               </div>
             </div>
+          ) : (
+            <div className="space-y-3 pb-1 border-b">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">{isHr ? "Korisnik (Vlasnik)" : "Owner"} *</Label>
+                <UserSearchCombobox
+                  users={usersList as any}
+                  value={userId}
+                  onChange={setUserId}
+                  placeholder={isHr ? "Pretraži i odaberi korisnika..." : "Search and select user..."}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">{isHr ? "Plovilo" : "Vessel"}</Label>
+                <Select value={vesselId} onValueChange={setVesselId} disabled={!userId || vesselsLoading}>
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder={
+                      vesselsLoading ? "..." : (isHr ? "Odaberite plovilo" : "Select vessel")
+                    } />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {userVessels.map(v => (
+                      <SelectItem key={v.id} value={v.id}>
+                        ⛵ {v.registration ? `[${v.registration}] ` : ""}{v.name}
+                        {(v.lengthM || v.beamM) ? ` (${v.lengthM ? `L:${v.lengthM}m` : ""} ${v.beamM ? `B:${v.beamM}m` : ""})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           )}
 
           <form onSubmit={handleDirectAssignSubmit} className="space-y-4 pt-1">
-            {/* 1. Dry Berth Spot Selection */}
+            {/* 2. Dry Berth Spot Selection */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs font-semibold">{isHr ? "Zona na kopnu" : "Dry Berth Zone"}</Label>
@@ -785,7 +807,7 @@ export default function AdminLandWaiting() {
               </div>
             </div>
 
-            {/* 2. Crane Selection */}
+            {/* 3. Crane Selection */}
             <div className="space-y-1">
               <Label className="text-xs font-semibold">{isHr ? "Dizalica" : "Crane"} *</Label>
               <Select value={directCraneId} onValueChange={setDirectCraneId}>
@@ -802,7 +824,7 @@ export default function AdminLandWaiting() {
               </Select>
             </div>
 
-            {/* 3. Date and 30-min Slot */}
+            {/* 4. Date and 30-min Slot */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs font-semibold">{isHr ? "Datum dizanja" : "Date"} *</Label>
@@ -845,7 +867,7 @@ export default function AdminLandWaiting() {
               </div>
             </div>
 
-            {/* 4. Operator note */}
+            {/* 5. Operator note */}
             <div className="space-y-1">
               <Label className="text-xs font-semibold">{isHr ? "Napomena operatera" : "Operator Note"}</Label>
               <Input
@@ -868,7 +890,7 @@ export default function AdminLandWaiting() {
               <Button
                 type="submit"
                 className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
-                disabled={directAssignMutation.isPending || !directCraneId || !directDate}
+                disabled={directAssignMutation.isPending || (!directAssignEntry && !userId) || !directCraneId || !directDate}
               >
                 {directAssignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {isHr ? "Potvrdi i dodijeli termin" : "Confirm & Schedule"}
@@ -917,77 +939,6 @@ export default function AdminLandWaiting() {
               <Button type="submit" className="rounded-xl" disabled={assignMutation.isPending || !assignZoneId}>
                 {assignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {isHr ? "Potvrdi i dodijeli" : "Confirm & Assign"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add candidate to waitlist dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="rounded-2xl max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold">
-              {isHr ? "Dodaj na listu čekanja za suhi vez" : "Add to Dry Berth Waitlist"}
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleAddSubmit} className="space-y-4 pt-2">
-            <div className="space-y-1">
-              <Label>{isHr ? "Korisnik (Vlasnik)" : "Owner"} *</Label>
-              <UserSearchCombobox
-                users={usersList as any}
-                value={userId}
-                onChange={setUserId}
-                placeholder={isHr ? "Odaberite korisnika..." : "Select user..."}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <Label>{isHr ? "Plovilo" : "Vessel"}</Label>
-              <Select value={vesselId} onValueChange={setVesselId} disabled={!userId || vesselsLoading}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder={
-                    vesselsLoading ? "..." : (isHr ? "Odaberite plovilo" : "Select vessel")
-                  } />
-                </SelectTrigger>
-                <SelectContent>
-                  {userVessels.map(v => (
-                    <SelectItem key={v.id} value={v.id}>
-                      ⛵ {v.registration ? `[${v.registration}] ` : ""}{v.name}
-                      {(v.lengthM || v.beamM) ? ` (${v.lengthM ? `L:${v.lengthM}m` : ""} ${v.beamM ? `B:${v.beamM}m` : ""})` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label>{isHr ? "Preferirana zona" : "Preferred Zone"}</Label>
-              <Select value={preferredZoneId} onValueChange={setPreferredZoneId}>
-                <SelectTrigger className="rounded-xl"><SelectValue placeholder={isHr ? "Bilo koja" : "Any zone"} /></SelectTrigger>
-                <SelectContent>
-                  {zones.map(z => (
-                    <SelectItem key={z.id} value={z.id}>{z.name} ({z.code})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label>{isHr ? "Napomena" : "Note"}</Label>
-              <Input
-                className="rounded-xl"
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                placeholder={isHr ? "Napomena uz zahtjev..." : "Note..."}
-              />
-            </div>
-
-            <DialogFooter className="pt-2">
-              <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setAddDialogOpen(false)}>{isHr ? "Odustani" : "Cancel"}</Button>
-              <Button type="submit" className="rounded-xl" disabled={addMutation.isPending || !userId}>
-                {addMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {isHr ? "Dodaj" : "Add"}
               </Button>
             </DialogFooter>
           </form>
