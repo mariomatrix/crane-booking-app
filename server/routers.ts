@@ -3128,10 +3128,11 @@ export const appRouter = router({
           });
         }
 
-        // 3. Clean up related records
+        // 3. Clean up related records (freeing dry berth and queue completely)
         await db.delete(messages).where(eq(messages.reservationId, input.id));
-        await db.update(landWaitingList).set({ reservationId: null }).where(eq(landWaitingList.reservationId, input.id));
-        await db.update(landOccupancies).set({ reservationId: null }).where(eq(landOccupancies.reservationId, input.id));
+        await db.delete(landWaitingList).where(eq(landWaitingList.reservationId, input.id));
+        await db.delete(landOccupancies).where(eq(landOccupancies.reservationId, input.id));
+        await db.update(landOccupancies).set({ returnReservationId: null }).where(eq(landOccupancies.returnReservationId, input.id));
         await db.delete(workOrders).where(eq(workOrders.reservationId, input.id));
 
         // 4. Delete the reservation
