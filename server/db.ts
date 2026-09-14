@@ -1367,12 +1367,31 @@ export async function listLandWaitingList() {
         id: landZones.id,
         name: landZones.name,
         code: landZones.code,
+      },
+      reservation: {
+        id: reservations.id,
+        reservationNumber: reservations.reservationNumber,
+        scheduledStart: reservations.scheduledStart,
+        scheduledEnd: reservations.scheduledEnd,
+        requestedDate: reservations.requestedDate,
+        requestedTimeSlot: reservations.requestedTimeSlot,
+        durationMin: reservations.durationMin,
+        status: reservations.status,
+        craneId: reservations.craneId,
+      },
+      crane: {
+        id: cranes.id,
+        name: cranes.name,
+        location: cranes.location,
+        maxCapacityKN: cranes.maxCapacityKN,
       }
     })
     .from(landWaitingList)
     .innerJoin(users, eq(landWaitingList.userId, users.id))
     .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
     .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
+    .leftJoin(reservations, eq(landWaitingList.reservationId, reservations.id))
+    .leftJoin(cranes, eq(reservations.craneId, cranes.id))
     .where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined")))
     .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
 }

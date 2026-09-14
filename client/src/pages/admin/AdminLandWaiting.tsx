@@ -36,11 +36,13 @@ import {
   Mail,
   ArrowDownCircle,
   SlidersHorizontal,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
-import { formatAppDate, formatToSqlDate, fromZagreb } from "@/lib/date-utils";
+import { formatAppDate, formatToSqlDate, fromZagreb, toZagreb } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 
 export default function AdminLandWaiting() {
@@ -79,6 +81,13 @@ export default function AdminLandWaiting() {
     { userId },
     { enabled: !!userId }
   );
+
+  // Identify the largest crane (highest capacity in kN) for PŠD Špinut 9-15m rule
+  const largestCrane = [...cranes]
+    .filter(c => c.craneStatus === "active")
+    .sort((a, b) => (Number(b.maxCapacityKN) || 0) - (Number(a.maxCapacityKN) || 0))[0];
+
+  const defaultCrane = cranes.find(c => c.craneStatus === "active");
 
   const offerMutation = trpc.landWaiting.offer.useMutation({
     onSuccess: () => {
@@ -180,7 +189,7 @@ export default function AdminLandWaiting() {
     setVesselId("");
     setDirectZoneId(overview?.zones?.[0]?.id || "");
     setDirectSpotNumber("");
-    setDirectCraneId(cranes.find(c => c.craneStatus === "active")?.id || "");
+    setDirectCraneId(defaultCrane?.id || "");
     setDirectDate(new Date());
     setDirectTime("08:00");
     setDirectDuration("30");
@@ -195,11 +204,32 @@ export default function AdminLandWaiting() {
     setVesselId(entry.vesselId || "");
     setDirectZoneId(entry.preferredZoneId || (overview?.zones?.[0]?.id || ""));
     setDirectSpotNumber("");
-    setDirectCraneId(cranes.find(c => c.craneStatus === "active")?.id || "");
-    setDirectDate(new Date());
-    setDirectTime("08:00");
-    setDirectDuration("30");
-    setDirectAdminNote(entry.note || "");
+
+    const vesselLength = Number(entry.vessel?.lengthM) || 0;
+    const isLargeVessel = vesselLength >= 9 && vesselLength <= 15;
+
+    // Feedback coupling: preselect crane from linked reservation or pick largest for 9-15m
+    const preselectedCraneId =
+      entry.crane?.id ||
+      entry.reservation?.craneId ||
+      (isLargeVessel && largestCrane ? largestCrane.id : (defaultCrane?.id || ""));
+
+    setDirectCraneId(preselectedCraneId);
+
+    if (entry.reservation?.scheduledStart) {
+      const zDate = toZagreb(entry.reservation.scheduledStart);
+      setDirectDate(new Date(entry.reservation.scheduledStart));
+      setDirectTime(zDate.timeStr || "08:00");
+    } else if (entry.reservation?.requestedDate) {
+      setDirectDate(new Date(entry.reservation.requestedDate));
+      setDirectTime("08:00");
+    } else {
+      setDirectDate(new Date());
+      setDirectTime("08:00");
+    }
+
+    setDirectDuration(entry.reservation?.durationMin ? String(entry.reservation.durationMin) : "30");
+    setDirectAdminNote(entry.note || entry.adminNote || "");
     setDirectAssignDialogOpen(true);
   };
 
@@ -223,7 +253,7 @@ export default function AdminLandWaiting() {
       return;
     }
     if (!directCraneId || !directDate || !directTime) {
-      toast.error(isHr ? "Molimo popunite sva obavezna polja." : "Please fill in all required fields.");
+      toast.error(isHr ? "Molimo popunite sva obavezna polja (dizalica, datum, vrijeme)." : "Please fill in all required fields.");
       return;
     }
     const dateStr = formatToSqlDate(directDate);
@@ -261,6 +291,12 @@ export default function AdminLandWaiting() {
   const totalDryOccupied = overview?.zones?.reduce((acc, z) => acc + (z.totalOccupied || 0), 0) || 0;
   const totalLaunches = overview?.zones?.reduce((acc, z) => acc + (z.upcomingLaunchesCount || 0), 0) || 0;
 
+  // Active vessel in dialog (for length rules & guidance)
+  const currentModalVessel = directAssignEntry
+    ? directAssignEntry.vessel
+    : userVessels.find(v => v.id === vesselId);
+  const currentVesselLength = Number(currentModalVessel?.lengthM) || 0;
+
   // Time slot options in 30-min intervals (from 06:00 to 20:00)
   const timeSlotOptions: string[] = [];
   for (let h = 6; h <= 20; h++) {
@@ -284,8 +320,8 @@ export default function AdminLandWaiting() {
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isHr
-              ? "Integrirani nadzor raspoloživosti kopna i dizalica s fleksibilnim dodjeljivanjem termina."
-              : "Integrated monitoring of dry berth zones and crane loads with unified slot scheduling."}
+              ? "Integrirani nadzor raspoloživosti kopna i dizalica (maks. dužina 15m • plovila 9-15m na najveću dizalicu)."
+              : "Integrated monitoring of dry berth zones and crane loads (max vessel length 15m • 9-15m on largest crane)."}
           </p>
         </div>
 
@@ -418,7 +454,7 @@ export default function AdminLandWaiting() {
                   {isHr ? "Dizalice — Zauzetost danas" : "Cranes — Today's Load"}
                 </CardTitle>
                 <CardDescription className="text-xs">
-                  {isHr ? "Trenutno opterećenje po dizalicama" : "Scheduled operations for today"}
+                  {isHr ? "Dizalice lučice i zakazane operacije" : "Scheduled operations for today"}
                 </CardDescription>
               </div>
             </div>
@@ -435,29 +471,39 @@ export default function AdminLandWaiting() {
               </p>
             ) : (
               <div className="space-y-3">
-                {overview.cranes.map((crane) => (
-                  <div
-                    key={crane.id}
-                    className="p-3 rounded-xl border border-muted bg-card flex items-center justify-between gap-3"
-                  >
-                    <div>
-                      <div className="font-semibold text-sm">{crane.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {crane.location || (isHr ? "Glavni dok" : "Main dock")} • {crane.maxCapacityKN} kN
+                {overview.cranes.map((crane) => {
+                  const isTopCrane = largestCrane && crane.id === largestCrane.id;
+                  return (
+                    <div
+                      key={crane.id}
+                      className="p-3 rounded-xl border border-muted bg-card flex items-center justify-between gap-3"
+                    >
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-sm">{crane.name}</span>
+                          {isTopCrane && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/50 dark:text-amber-300">
+                              {isHr ? "Najveća (9-15m)" : "Largest (9-15m)"}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {crane.location || (isHr ? "Glavni dok" : "Main dock")} • {crane.maxCapacityKN} kN
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <Badge
+                          variant="secondary"
+                          className="bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 font-semibold text-xs"
+                        >
+                          {crane.bookingsCountForDate}{" "}
+                          {isHr ? "operacija danas" : "operations today"}
+                        </Badge>
                       </div>
                     </div>
-
-                    <div className="text-right">
-                      <Badge
-                        variant="secondary"
-                        className="bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 font-semibold text-xs"
-                      >
-                        {crane.bookingsCountForDate}{" "}
-                        {isHr ? "operacija danas" : "operations today"}
-                      </Badge>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
@@ -470,12 +516,12 @@ export default function AdminLandWaiting() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div>
               <CardTitle className="text-base font-bold">
-                {isHr ? "Kandidati na listi čekanja" : "Waitlist Candidates"}
+                {isHr ? "Kandidati na listi čekanja za suhi vez" : "Dry Berth Waitlist Candidates"}
               </CardTitle>
               <CardDescription className="text-xs">
                 {isHr
-                  ? "Poredani po FIFO redoslijedu. Operater ima slobodu odabira dizalice i zone suhog veza."
-                  : "Sorted by FIFO. The operator has full flexibility to combine crane and dry berth zones."}
+                  ? "Povezani status dizalice i mjesta na kopnu. Plovila od 9-15 m se u pravilu podižu najvećom dizalicom (maks. 15 m)."
+                  : "Coupled crane & dry berth status. Vessels 9-15m are assigned to largest crane (max 15m)."}
               </CardDescription>
             </div>
           </div>
@@ -499,7 +545,8 @@ export default function AdminLandWaiting() {
                     <TableHead className="w-12 text-center">#</TableHead>
                     <TableHead>{isHr ? "Korisnik" : "User"}</TableHead>
                     <TableHead>{isHr ? "Plovilo & Dimenzije" : "Vessel & Dimensions"}</TableHead>
-                    <TableHead>{isHr ? "Preferirana zona" : "Preferred Zone"}</TableHead>
+                    <TableHead>{isHr ? "Dizalica i Termin" : "Crane & Slot"}</TableHead>
+                    <TableHead>{isHr ? "Zona kopna" : "Dry Berth Zone"}</TableHead>
                     <TableHead>{isHr ? "Status" : "Status"}</TableHead>
                     <TableHead className="text-center">{isHr ? "Odbijanja" : "Declines"}</TableHead>
                     <TableHead>{isHr ? "Prijavljeno" : "Registered At"}</TableHead>
@@ -507,9 +554,13 @@ export default function AdminLandWaiting() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {waiting.map((entry, idx) => {
+                  {waiting.map((entry: any, idx: number) => {
                     const vessel = entry.vessel;
                     const hasDims = vessel?.lengthM || vessel?.beamM;
+                    const vesselLength = Number(vessel?.lengthM) || 0;
+                    const isOver15 = vesselLength > 15;
+                    const is9to15 = vesselLength >= 9 && vesselLength <= 15;
+
                     return (
                       <TableRow
                         key={entry.id}
@@ -536,7 +587,7 @@ export default function AdminLandWaiting() {
                           </div>
                         </TableCell>
 
-                        {/* Vessel info & dimensions (Length & Beam only, no tons) */}
+                        {/* Vessel info & dimensions */}
                         <TableCell>
                           {vessel ? (
                             <div>
@@ -560,9 +611,49 @@ export default function AdminLandWaiting() {
                                   {isHr ? "Dimenzije nisu unesene" : "No dimensions recorded"}
                                 </div>
                               )}
+                              {isOver15 && (
+                                <Badge variant="destructive" className="text-[10px] mt-1 py-0 px-1 font-semibold">
+                                  ⚠️ &gt;15m (Limit Špinut)
+                                </Badge>
+                              )}
                             </div>
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+
+                        {/* Coupled Crane & Scheduled Slot */}
+                        <TableCell>
+                          {entry.crane?.name ? (
+                            <div>
+                              <div className="flex items-center gap-1">
+                                <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 text-xs font-semibold">
+                                  🏗️ {entry.crane.name}
+                                </Badge>
+                              </div>
+                              {entry.reservation?.scheduledStart ? (
+                                <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1 font-mono">
+                                  <CalendarClock className="h-3 w-3 text-indigo-500" />
+                                  <span>{formatAppDate(entry.reservation.scheduledStart)} {toZagreb(entry.reservation.scheduledStart).timeStr}</span>
+                                </div>
+                              ) : entry.reservation?.requestedDate ? (
+                                <div className="text-[11px] text-muted-foreground mt-1">
+                                  {isHr ? "Zatraženo:" : "Req:"} {formatAppDate(entry.reservation.requestedDate)} ({entry.reservation.requestedTimeSlot || "Jutro"})
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div>
+                              {is9to15 ? (
+                                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 text-[11px]">
+                                  📐 9–15m → Velika dizalica
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground italic">
+                                  {isHr ? "Čeka dodjelu dizalice" : "Crane pending"}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </TableCell>
 
@@ -773,6 +864,29 @@ export default function AdminLandWaiting() {
             </div>
           )}
 
+          {/* PŠD Špinut Guidelines & Rules Alert */}
+          {currentVesselLength > 15 ? (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800 dark:text-rose-300 text-xs flex items-start gap-2">
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>{isHr ? "Upozorenje na limit lučice:" : "Marina limit warning:"}</strong>{" "}
+                {isHr
+                  ? `Dužina plovila je ${currentVesselLength} m. Maksimalna dozvoljena dužina plovila za lučicu PŠD Špinut je 15 metara.`
+                  : `Vessel length is ${currentVesselLength}m. Maximum allowed length in PŠD Špinut marina is 15 meters.`}
+              </div>
+            </div>
+          ) : currentVesselLength >= 9 ? (
+            <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
+              <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>{isHr ? "Preporuka dizalice (PŠD Špinut):" : "Crane recommendation:"}</strong>{" "}
+                {isHr
+                  ? `Plovilo dužine ${currentVesselLength} m (kategorija 9–15 m) podiže se najvećom dizalicom.`
+                  : `Vessel length ${currentVesselLength}m (category 9-15m) is handled by the largest crane.`}
+              </div>
+            </div>
+          ) : null}
+
           <form onSubmit={handleDirectAssignSubmit} className="space-y-4 pt-1">
             {/* 2. Dry Berth Spot Selection */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -809,17 +923,27 @@ export default function AdminLandWaiting() {
 
             {/* 3. Crane Selection */}
             <div className="space-y-1">
-              <Label className="text-xs font-semibold">{isHr ? "Dizalica" : "Crane"} *</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold">{isHr ? "Dizalica" : "Crane"} *</Label>
+                {currentVesselLength >= 9 && currentVesselLength <= 15 && largestCrane && (
+                  <span className="text-[11px] text-amber-600 font-medium">
+                    {isHr ? `Preporučeno: ${largestCrane.name}` : `Recommended: ${largestCrane.name}`}
+                  </span>
+                )}
+              </div>
               <Select value={directCraneId} onValueChange={setDirectCraneId}>
                 <SelectTrigger className="rounded-xl">
                   <SelectValue placeholder={isHr ? "Odaberite dizalicu" : "Select crane"} />
                 </SelectTrigger>
                 <SelectContent>
-                  {cranes.filter(c => c.craneStatus === "active").map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name} {c.location ? `(${c.location})` : ""}
-                    </SelectItem>
-                  ))}
+                  {cranes.filter(c => c.craneStatus === "active").map(c => {
+                    const isTop = largestCrane && c.id === largestCrane.id;
+                    return (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} {isTop ? `⭐ (${isHr ? "Najveća - za 9-15m" : "Largest - 9-15m"})` : (c.location ? `(${c.location})` : "")}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
