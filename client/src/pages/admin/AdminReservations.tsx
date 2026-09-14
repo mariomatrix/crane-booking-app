@@ -1,7 +1,13 @@
+import { useState, useEffect, useMemo } from "react";
+import { Link } from "wouter";
+import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/StatusBadge";
-import { trpc } from "@/lib/trpc";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -10,16 +16,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Pagination,
   PaginationContent,
@@ -27,191 +38,107 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
-import { DatePicker } from "@/components/ui/date-picker";
 import {
-  CalendarDays,
-  Check,
-  CheckCircle2,
-  Loader2,
-  User,
-  X,
-  MessageSquare,
   Plus,
+  Search,
   LayoutGrid,
   List,
   Anchor,
   Clock,
-  Lock,
+  CalendarDays,
+  Check,
+  CheckCircle2,
   RotateCcw,
-  Construction,
+  MessageSquare,
+  Ship,
+  User as UserIcon,
   MapPin,
-  Pencil,
+  Construction,
+  X,
   FileText,
+  Pencil,
+  Loader2,
+  AlertTriangle,
+  Info,
+  CalendarClock,
+  Phone,
+  RefreshCw,
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
-import { parseISO } from "date-fns";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
-import { AdminReservationForm } from "@/components/AdminReservationForm";
+import { ReservationScheduleModal } from "@/components/ReservationScheduleModal";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
-import { useLang } from "@/contexts/LangContext";
-import { formatAppDate, formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useLang } from "@/contexts/LangContext";
+import { formatAppDate } from "@/lib/date-utils";
+import { toZagreb } from "@shared/timezone";
 import { cn } from "@/lib/utils";
 
 export default function AdminReservations() {
   const { lang } = useLang();
+  const utils = trpc.useUtils();
 
-  // View mode & filters
-  const [viewMode, setViewMode] = useState<"board" | "list">("board");
-  const [statusFilter, setStatusFilter] = useState("pending");
-  const [selectedUser, setSelectedUser] = useState("all");
+  // Filters and view modes
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [statusFilter, setStatusFilter] = useState<string>("pending");
+  const [selectedCrane, setSelectedCrane] = useState<string>("all");
+  const [selectedUser, setSelectedUser] = useState<string>("all");
+  const [search, setSearch] = useState<string>("");
   const [page, setPage] = useState(1);
   const pageSize = 50;
 
-  // Create dialog state
-  const [createOpen, setCreateOpen] = useState(false);
+  // Unified Schedule Modal state (for create, approve, edit)
+  const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
+  const [scheduleModalMode, setScheduleModalMode] = useState<"approve" | "edit" | "create">("create");
+  const [selectedRes, setSelectedRes] = useState<any | null>(null);
 
-  // Approve dialog state
-  const [approveOpen, setApproveOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [approveCraneId, setApproveCraneId] = useState("");
-  const [approveDate, setApproveDate] = useState<Date | undefined>(undefined);
-  const [approveTime, setApproveTime] = useState("");
-  const [approveDuration, setApproveDuration] = useState("60");
-  const [adminNote, setAdminNote] = useState("");
-  const [approveVesselRegistration, setApproveVesselRegistration] = useState("");
-  const [approveContactPhone, setApproveContactPhone] = useState("");
-
-  // Edit details dialog state
-  const [editDetailsOpen, setEditDetailsOpen] = useState(false);
-  const [editDetailsId, setEditDetailsId] = useState<string | null>(null);
-  const [editVesselRegistration, setEditVesselRegistration] = useState("");
-  const [editContactPhone, setEditContactPhone] = useState("");
-  const [editAdminNote, setEditAdminNote] = useState("");
+  // Work order dialog state
+  const [selectedWorkOrderRes, setSelectedWorkOrderRes] = useState<any | null>(null);
 
   // Reject dialog state
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState("");
 
-  // Chat dialog state
+  // Chat modal state
   const [chatReservationId, setChatReservationId] = useState<string | null>(null);
 
-  // Work order execution dialog state
-  const [selectedWorkOrderRes, setSelectedWorkOrderRes] = useState<any | null>(null);
-
-  const utils = trpc.useUtils();
-
+  // Read status filter from URL on mount if available
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("status");
-    if (status && ["pending", "approved", "waitlisted", "rejected", "cancelled", "completed", "all"].includes(status)) {
+    if (
+      status &&
+      ["pending", "approved", "waitlisted", "rejected", "cancelled", "completed", "all"].includes(status)
+    ) {
       setStatusFilter(status);
-      // If URL specifically specifies a status other than board defaults, open list view
-      if (["rejected", "cancelled", "completed", "all"].includes(status)) {
-        setViewMode("list");
-      }
     }
   }, []);
 
-  // Board query fetches all active statuses (pending, waitlisted, approved)
-  const boardStatusFilter = ["pending", "waitlisted", "approved"];
-
-  const reservationsQuery = trpc.reservation.listAll.useQuery(
-    {
-      status: viewMode === "board" ? boardStatusFilter : (statusFilter !== "all" ? [statusFilter] : undefined),
-      userId: selectedUser !== "all" ? selectedUser : undefined,
-      page: viewMode === "board" ? 1 : page,
-      pageSize: viewMode === "board" ? 200 : pageSize,
-    }
-  );
+  // Main reservations query
+  const reservationsQuery = trpc.reservation.listAll.useQuery({
+    status: statusFilter !== "all" ? [statusFilter] : undefined,
+    userId: selectedUser !== "all" ? selectedUser : undefined,
+    page,
+    pageSize,
+  });
 
   const reservationsList = reservationsQuery.data?.data || [];
   const totalReservations = reservationsQuery.data?.total || 0;
   const totalPages = Math.ceil(totalReservations / pageSize);
 
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
-  const { data: seasonsList = [] } = trpc.season.list.useQuery();
-  const usersQuery = trpc.user.list.useQuery();
+  const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
   const usersList = usersQuery.data?.data || [];
 
-  const approveSlotsQuery = trpc.calendar.availableSlots.useQuery(
-    {
-      craneId: approveCraneId || undefined,
-      date: approveDate ? formatToSqlDate(approveDate) : "",
-      durationMin: Number(approveDuration) || 30,
-      excludeReservationId: selectedId || undefined,
-    },
-    {
-      enabled: !!approveDate && approveOpen,
-      refetchOnWindowFocus: false,
-    }
-  );
-  const approveSlotData = approveSlotsQuery.data;
-  const approveAllSlots = approveSlotData?.slots || [];
-  const approveFreeSlots = approveSlotData?.availableSlots || [];
-  const approveIsWorkingDay = approveSlotData?.isWorkingDay ?? true;
-  const approveWorkingHours = approveSlotData?.workingHours;
-
-  const approveSeasonForSelectedDate = useMemo(() => {
-    if (approveWorkingHours && approveSlotData?.seasonName) {
-      return { from: approveWorkingHours.from, to: approveWorkingHours.to, seasonName: approveSlotData.seasonName };
-    }
-    if (!approveDate) return null;
-    const dateStr = formatToSqlDate(approveDate);
-    const activeSeason = (seasonsList as any[]).find((s: any) =>
-      s.isActive && s.startDate <= dateStr && s.endDate >= dateStr
-    );
-    if (activeSeason?.workingHours && typeof activeSeason.workingHours === "object") {
-      const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-      const dayKey = dayKeys[approveDate.getDay()];
-      const dayHours = (activeSeason.workingHours as any)[dayKey];
-      if (dayHours?.from && dayHours?.to) {
-        return { from: dayHours.from, to: dayHours.to, seasonName: activeSeason.name };
-      }
-    }
-    return null;
-  }, [approveWorkingHours, approveSlotData, seasonsList, approveDate]);
-
-  useEffect(() => {
-    if (approveOpen && approveFreeSlots.length > 0) {
-      if (!approveTime || !approveFreeSlots.includes(approveTime)) {
-        setApproveTime(approveFreeSlots[0]);
-      }
-    }
-  }, [approveOpen, approveFreeSlots, approveTime]);
-
-  // Group reservations for Kanban board
-  const pendingReservations = reservationsList.filter((r: any) => r.status === "pending");
-  const waitlistedReservations = reservationsList.filter((r: any) => r.status === "waitlisted");
-  const approvedReservations = reservationsList.filter((r: any) => r.status === "approved");
-
-  const approveMutation = trpc.reservation.approve.useMutation({
-    onSuccess: () => {
-      toast.success("Rezervacija odobrena.");
-      utils.reservation.listAll.invalidate();
-      setApproveOpen(false);
-      resetApproveState();
-    },
-    onError: (error) => toast.error(error.message),
-  });
-
-  const updateDetailsMutation = trpc.reservation.updateDetails.useMutation({
-    onSuccess: () => {
-      toast.success("Podaci rezervacije su ažurirani.");
-      utils.reservation.listAll.invalidate();
-      setEditDetailsOpen(false);
-    },
-    onError: (error) => toast.error(error.message),
-  });
-
+  // Mutations
   const rejectMutation = trpc.reservation.reject.useMutation({
     onSuccess: () => {
-      toast.success("Rezervacija odbijena.");
+      toast.success("Rezervacija je odbijena.");
       utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
       setRejectOpen(false);
+      setRejectId(null);
       setRejectNote("");
     },
     onError: (error) => toast.error(error.message),
@@ -219,8 +146,9 @@ export default function AdminReservations() {
 
   const completeMutation = trpc.reservation.complete.useMutation({
     onSuccess: () => {
-      toast.success("Rezervacija označena kao završena.");
+      toast.success("Rezervacija je označena kao završena.");
       utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
     },
     onError: (error) => toast.error(error.message),
   });
@@ -229,1010 +157,721 @@ export default function AdminReservations() {
     onSuccess: () => {
       toast.success("Rezervacija je vraćena u obradu.");
       utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
     },
     onError: (error) => toast.error(error.message),
   });
 
-  const resetApproveState = () => {
-    setSelectedId(null);
-    setApproveCraneId("");
-    setApproveDate(new Date());
-    setApproveTime("08:00");
-    setApproveDuration("60");
-    setAdminNote("");
-    setApproveVesselRegistration("");
-    setApproveContactPhone("");
+  // Action handlers
+  const handleOpenCreate = () => {
+    setSelectedRes(null);
+    setScheduleModalMode("create");
+    setScheduleModalOpen(true);
   };
 
-  const openApprove = (id: string) => {
-    setSelectedId(id);
-    const reservation = (reservationsList as any[]).find((r: any) => r.id === id);
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    if (reservation) {
-      setApproveVesselRegistration(reservation.vesselRegistration || "");
-      setApproveContactPhone(reservation.contactPhone || reservation.user?.phone || "");
-      if (reservation.craneId) {
-        setApproveCraneId(reservation.craneId);
-      }
-      if (reservation.durationMin) {
-        setApproveDuration(String(reservation.durationMin));
-      }
-      if (reservation.requestedDate) {
-        const rDate = typeof reservation.requestedDate === "string" ? parseISO(reservation.requestedDate) : new Date(reservation.requestedDate);
-        setApproveDate(rDate < startOfToday ? new Date() : rDate);
-      } else {
-        setApproveDate(new Date());
-      }
-      setApproveTime("08:00");
-    } else {
-      setApproveDate(new Date());
-      setApproveTime("08:00");
-      setApproveVesselRegistration("");
-      setApproveContactPhone("");
-    }
-    setApproveOpen(true);
+  const handleOpenApprove = (res: any) => {
+    setSelectedRes(res);
+    setScheduleModalMode("approve");
+    setScheduleModalOpen(true);
   };
 
-  const openEditDetails = (reservation: any) => {
-    setEditDetailsId(reservation.id);
-    setEditVesselRegistration(reservation.vesselRegistration || "");
-    setEditContactPhone(reservation.contactPhone || reservation.user?.phone || "");
-    setEditAdminNote(reservation.adminNote || "");
-    setEditDetailsOpen(true);
+  const handleOpenEdit = (res: any) => {
+    setSelectedRes(res);
+    setScheduleModalMode("edit");
+    setScheduleModalOpen(true);
   };
 
-  const handleEditDetailsSave = () => {
-    if (!editDetailsId) return;
-    updateDetailsMutation.mutate({
-      id: editDetailsId,
-      vesselRegistration: editVesselRegistration || undefined,
-      contactPhone: editContactPhone || undefined,
-      adminNote: editAdminNote || undefined,
-    });
-  };
-
-  const openReject = (id: string) => {
-    setSelectedId(id);
+  const handleOpenReject = (id: string) => {
+    setRejectId(id);
     setRejectNote("");
     setRejectOpen(true);
   };
 
-  const handleApproveConfirm = () => {
-    if (!selectedId || !approveCraneId || !approveDate || !approveTime) {
-      toast.error("Molimo popunite sve obavezne podatke (dizalicu, datum i sat).");
-      return;
-    }
-    if (approveFreeSlots.length > 0 && !approveFreeSlots.includes(approveTime)) {
-      toast.error(`Odabrani termin (${approveTime}) je zauzet. Molimo odaberite slobodan termin.`);
-      return;
-    }
-    const dateStr = formatToSqlDate(approveDate);
-    const scheduledStart = fromZagreb(dateStr, approveTime);
-
-    approveMutation.mutate({
-      id: selectedId,
-      craneId: approveCraneId,
-      scheduledStart,
-      durationMin: Number(approveDuration),
-      adminNote: adminNote || undefined,
-      vesselRegistration: approveVesselRegistration || undefined,
-      contactPhone: approveContactPhone || undefined,
-    });
-  };
-
   const handleRejectConfirm = () => {
-    if (!selectedId) return;
-    rejectMutation.mutate({ id: selectedId, adminNote: rejectNote || undefined });
+    if (!rejectId) return;
+    rejectMutation.mutate({ id: rejectId, adminNote: rejectNote || undefined });
   };
 
-  const selectedReservation = (reservationsList as any[]).find((r: any) => r.id === selectedId);
-
-  const durationOptions = [
-    { value: "30", label: "30 min" },
-    { value: "60", label: "1 sat (60 min)" },
-    { value: "90", label: "1,5 sat (90 min)" },
-    { value: "120", label: "2 sata (120 min)" },
-    { value: "180", label: "3 sata (180 min)" },
-    { value: "240", label: "4 sata (240 min)" },
-  ];
-
-  // Helper renderer for compact card in board view
-  const renderCompactCard = (reservation: any) => {
-    const isWaitlisted = reservation.status === "waitlisted";
-    const isPending = reservation.status === "pending";
-    const isApproved = reservation.status === "approved";
-
-    return (
-      <Card
-        key={reservation.id}
-        className={cn(
-          "relative overflow-hidden transition-all duration-200 hover:shadow-md border",
-          isPending && "border-amber-200 bg-amber-50/10 dark:bg-amber-950/10",
-          isWaitlisted && "border-blue-200 bg-blue-50/10 dark:bg-blue-950/10",
-          isApproved && "border-emerald-200 bg-emerald-50/10 dark:bg-emerald-950/10"
-        )}
-      >
-        <div className="p-3 sm:p-4 space-y-3">
-          {/* Header row: Reservation ID + Operation Title + Chat button */}
-          <div className="flex items-start justify-between gap-2">
-            <div className="space-y-0.5 min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[11px] font-mono font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                  {reservation.reservationNumber || "REZ"}
-                </span>
-                <StatusBadge status={reservation.status} />
-              </div>
-              <h4 className="font-semibold text-sm truncate text-foreground pt-1">
-                {reservation.serviceType?.name ?? reservation.vesselRegistration ?? "Rezervacija"}
-              </h4>
-            </div>
-
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8 relative shrink-0 text-muted-foreground hover:text-foreground"
-              onClick={() => setChatReservationId(reservation.id)}
-              title="Poruke"
-            >
-              <MessageSquare className="h-4 w-4" />
-              {reservation.unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white ring-2 ring-background">
-                  {reservation.unreadCount}
-                </span>
-              )}
-            </Button>
-          </div>
-
-          {/* User & Vessel details */}
-          <div className="space-y-1.5 text-xs text-muted-foreground border-t pt-2.5">
-            <div className="flex items-center gap-1.5 truncate">
-              <User className="h-3.5 w-3.5 shrink-0 text-gray-500" />
-              <span className="font-medium text-foreground truncate">
-                {reservation.user?.name ?? "Nepoznat korisnik"}
-              </span>
-              {reservation.user?.phone && (
-                <span className="text-gray-400 text-[11px]">({reservation.user.phone})</span>
-              )}
-            </div>
-
-            {reservation.vesselRegistration && (
-              <div className="flex items-center gap-1.5 truncate">
-                <Anchor className="h-3.5 w-3.5 shrink-0 text-gray-500" />
-                <span className="font-medium text-foreground truncate">
-                  {reservation.vesselRegistration}
-                </span>
-                <span className="text-gray-500 truncate">
-                  ({reservation.vesselType}
-                  {reservation.vesselLengthM ? ` • ${reservation.vesselLengthM}m` : ""}
-                  {reservation.vesselWeightTons ? ` • ${Number(reservation.vesselWeightTons)}t` : ""})
-                </span>
-              </div>
-            )}
-
-            {/* Crane & Land Zone */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[11px]">
-              {reservation.crane ? (
-                <span className="flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
-                  <Construction className="h-3 w-3 text-blue-600" />
-                  {reservation.crane.name}
-                </span>
-              ) : (
-                <span className="text-amber-700 italic text-[10px]">Dizalica nije odabrana</span>
-              )}
-
-              {reservation.landZone && (
-                <span className="flex items-center gap-1 font-semibold text-blue-800 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300">
-                  <MapPin className="h-3 w-3 text-blue-600" />
-                  {reservation.landZone.code || reservation.landZone.name}
-                </span>
-              )}
-            </div>
-
-            {/* Date / Schedule Info */}
-            <div className="pt-1.5">
-              {reservation.scheduledStart ? (
-                <div className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 p-1.5 rounded border border-emerald-200 dark:border-emerald-800/50 text-xs font-semibold">
-                  <Clock className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                  <span>{formatAppDate(reservation.scheduledStart, lang as any, true)}</span>
-                  {reservation.durationMin && (
-                    <span className="text-[10px] opacity-75 font-normal">({reservation.durationMin} min)</span>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-1.5 rounded border border-amber-200 dark:border-amber-800/50 text-xs">
-                  <CalendarDays className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                  <span>
-                    {reservation.requestedDate
-                      ? `Okvirno: ${formatAppDate(reservation.requestedDate, lang as any)} (${reservation.requestedTimeSlot ?? "po dogovoru"})`
-                      : "Termin nije zakazan"}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* User Note */}
-            {reservation.userNote && (
-              <p className="text-[11px] text-muted-foreground line-clamp-2 pt-1 italic bg-muted/30 p-1.5 rounded">
-                "{reservation.userNote}"
-              </p>
-            )}
-
-            {/* Admin Note */}
-            {reservation.adminNote && (
-              <div className="flex items-start gap-1.5 text-[11px] text-amber-900 dark:text-amber-200 bg-amber-50/80 dark:bg-amber-900/20 border border-amber-200/80 rounded p-1.5">
-                <Lock className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
-                <span className="line-clamp-2">{reservation.adminNote}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Card Footer Actions */}
-          <div className="flex items-center justify-end gap-1.5 pt-2 border-t">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => openEditDetails(reservation)}
-              className="h-7 text-xs px-2"
-              title="Uredi registraciju, kontakt i bilješke"
-            >
-              <Pencil className="h-3.5 w-3.5 mr-1" />
-              Uredi
-            </Button>
-            {(isPending || isWaitlisted) && (
-              <>
-                <Button
-                  size="sm"
-                  onClick={() => openApprove(reservation.id)}
-                  className="h-7 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-2.5"
-                >
-                  <Check className="h-3.5 w-3.5 mr-1" />
-                  {isWaitlisted ? "Zakaži termin" : "Odobri"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => openReject(reservation.id)}
-                  className="h-7 text-xs text-destructive border-destructive/30 hover:bg-destructive/10 px-2"
-                >
-                  <X className="h-3.5 w-3.5 mr-1" />
-                  Odbij
-                </Button>
-              </>
-            )}
-
-            {isApproved && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedWorkOrderRes(reservation)}
-                  className="h-7 text-xs text-primary border-primary/40 hover:bg-primary/5 font-semibold px-2"
-                >
-                  <FileText className="h-3.5 w-3.5 mr-1" />
-                  Radni nalog
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => completeMutation.mutate({ id: reservation.id })}
-                  disabled={completeMutation.isPending}
-                  className="h-7 text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 dark:hover:bg-emerald-950/50 px-2"
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" />
-                  Završi
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => revertMutation.mutate({ id: reservation.id })}
-                  disabled={revertMutation.isPending}
-                  className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-800 dark:hover:bg-amber-950/50 px-2"
-                  title="Vrati u obradu"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                </Button>
-              </>
-            )}
-          </div>
-        </div>
-      </Card>
-    );
-  };
+  // Filtered reservations by crane and search term
+  const filteredReservations = useMemo(() => {
+    return (reservationsList as any[]).filter((res: any) => {
+      if (selectedCrane !== "all") {
+        const resCraneId = res.craneId || res.crane?.id;
+        if (resCraneId !== selectedCrane) return false;
+      }
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const userName = (res.user?.name || "").toLowerCase();
+        const userEmail = (res.user?.email || "").toLowerCase();
+        const userPhone = (res.user?.phone || res.contactPhone || "").toLowerCase();
+        const vesselReg = (res.vesselRegistration || "").toLowerCase();
+        const vesselName = (res.vesselName || "").toLowerCase();
+        const resNumber = (res.reservationNumber || "").toLowerCase();
+        const matches =
+          userName.includes(q) ||
+          userEmail.includes(q) ||
+          userPhone.includes(q) ||
+          vesselReg.includes(q) ||
+          vesselName.includes(q) ||
+          resNumber.includes(q);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [reservationsList, selectedCrane, search]);
 
   return (
     <div className="space-y-6">
-      {/* Top Bar Header */}
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b pb-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Rezervacije</h2>
           <p className="text-sm text-muted-foreground">
-            Upravljanje operacijama i rasporedom dizalica
+            Pregled, odobravanje i raspoređivanje termina dizalica i suhog veza
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {/* View Mode Switcher */}
-          <div className="flex items-center bg-muted p-1 rounded-lg border">
-            <button
-              type="button"
-              onClick={() => setViewMode("board")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors",
-                viewMode === "board"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <LayoutGrid className="h-3.5 w-3.5 text-primary" />
-              <span>Board (3 Kolone)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("list")}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-colors",
-                viewMode === "list"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <List className="h-3.5 w-3.5" />
-              <span>Lista / Arhiva</span>
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Quick link to dry berth waiting list screen */}
+          <Link href="/admin/land-waiting">
+            <Button variant="outline" className="h-9 rounded-xl text-xs font-semibold gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:text-indigo-300">
+              <Anchor className="h-3.5 w-3.5" />
+              Nadzor suhog veza & čekanje
+            </Button>
+          </Link>
 
-          {/* List mode status filter dropdown */}
-          {viewMode === "list" && (
-            <Select value={statusFilter} onValueChange={(val) => { setStatusFilter(val); setPage(1); }}>
-              <SelectTrigger className="w-[160px] h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pending">Na čekanju</SelectItem>
-                <SelectItem value="waitlisted">Čeka suhi vez</SelectItem>
-                <SelectItem value="approved">Odobreni</SelectItem>
-                <SelectItem value="completed">Završeni</SelectItem>
-                <SelectItem value="rejected">Odbijeni</SelectItem>
-                <SelectItem value="cancelled">Otkazani</SelectItem>
-                <SelectItem value="all">Svi statusi</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-
-          {/* User search filter */}
-          <UserSearchCombobox
-            users={usersList as any}
-            value={selectedUser}
-            onChange={(val) => { setSelectedUser(val); setPage(1); }}
-          />
-
-          {/* New reservation button */}
-          <Button onClick={() => setCreateOpen(true)} className="h-9 px-3 text-xs font-semibold">
-            <Plus className="h-4 w-4 mr-1" />
+          {/* New reservation trigger */}
+          <Button
+            onClick={handleOpenCreate}
+            className="h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-3.5 gap-1.5"
+          >
+            <Plus className="h-4 w-4" />
             Nova rezervacija
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => reservationsQuery.refetch()}
+            disabled={reservationsQuery.isFetching}
+            className="h-9 w-9 rounded-xl"
+            title="Osvježi listu"
+          >
+            <RefreshCw className={cn("h-4 w-4", reservationsQuery.isFetching && "animate-spin")} />
           </Button>
         </div>
       </div>
 
-      {/* Main Content Area */}
+      {/* ── Toolbar & Filters ────────────────────────────────────────────────── */}
+      <Card className="rounded-2xl shadow-xs border">
+        <CardContent className="p-3.5 sm:p-4 space-y-3">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+            {/* Status tabs filter */}
+            <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl">
+              {[
+                { id: "pending", label: "Na čekanju" },
+                { id: "approved", label: "Odobrene" },
+                { id: "waitlisted", label: "Čeka suhi vez" },
+                { id: "completed", label: "Završene" },
+                { id: "rejected", label: "Odbijene" },
+                { id: "cancelled", label: "Otkazane" },
+                { id: "all", label: "Sve" },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter(tab.id);
+                    setPage(1);
+                  }}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                    statusFilter === tab.id
+                      ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* View mode toggle (Cards vs Table) */}
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl shrink-0 self-start lg:self-auto">
+              <button
+                type="button"
+                onClick={() => setViewMode("cards")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  viewMode === "cards"
+                    ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                <span>Kartice</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all",
+                  viewMode === "table"
+                    ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <List className="h-3.5 w-3.5" />
+                <span>Tablica</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Secondary filter row (Search, Crane, User) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Pretraži plovilo, registraciju, korisnika..."
+                className="pl-9 h-9 rounded-xl text-xs"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <Select value={selectedCrane} onValueChange={setSelectedCrane}>
+              <SelectTrigger className="h-9 rounded-xl text-xs">
+                <SelectValue placeholder="Sve dizalice" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Sve dizalice</SelectItem>
+                {(cranesList as any[]).map((c: any) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    🏗️ {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <UserSearchCombobox
+              users={usersList as any}
+              value={selectedUser}
+              onChange={(val) => {
+                setSelectedUser(val);
+                setPage(1);
+              }}
+              placeholder="Filtriraj po korisniku..."
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Content View ─────────────────────────────────────────────────────── */}
       {reservationsQuery.isLoading ? (
         <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
           <p className="text-sm text-muted-foreground">Učitavanje rezervacija...</p>
         </div>
-      ) : viewMode === "board" ? (
-        /* ─── 3-COLUMN KANBAN BOARD VIEW ─────────────────────────────────────── */
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
-          {/* COLUMN 1: Na čekanju (Pending) */}
-          <div className="flex flex-col rounded-xl border bg-slate-50/50 dark:bg-slate-900/20 overflow-hidden">
-            <div className="p-3.5 border-b bg-amber-500/10 border-amber-200 dark:border-amber-900/50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                <h3 className="font-bold text-sm text-amber-900 dark:text-amber-300">Na čekanju</h3>
-              </div>
-              <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 font-bold text-xs">
-                {pendingReservations.length}
-              </Badge>
-            </div>
+      ) : filteredReservations.length === 0 ? (
+        <Card className="rounded-2xl border">
+          <CardContent className="py-16 text-center">
+            <CalendarDays className="h-10 w-10 mx-auto text-muted-foreground/40 mb-3" />
+            <h3 className="text-base font-semibold">Nema pronađenih rezervacija</h3>
+            <p className="text-muted-foreground text-xs mt-1">
+              Za odabrane kriterije i status nema evidentiranih zahtjeva.
+            </p>
+          </CardContent>
+        </Card>
+      ) : viewMode === "cards" ? (
+        /* ── Modern Cards Grid ─────────────────────────────────────────────── */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredReservations.map((reservation: any) => {
+            const isPending = reservation.status === "pending";
+            const isWaitlisted = reservation.status === "waitlisted";
+            const isApproved = reservation.status === "approved";
+            const isCompleted = reservation.status === "completed";
 
-            <ScrollArea className="h-[calc(100vh-250px)] min-h-[500px]">
-              <div className="p-3 space-y-3">
-                {pendingReservations.length === 0 ? (
-                  <div className="text-center py-12 px-4 border border-dashed rounded-lg bg-background/50 text-xs text-muted-foreground space-y-1">
-                    <CheckCircle2 className="h-8 w-8 mx-auto text-emerald-500/60 mb-2" />
-                    <p className="font-semibold text-foreground">Nema novih zahtjeva</p>
-                    <p>Svi zahtjevi na čekanju su obrađeni.</p>
-                  </div>
-                ) : (
-                  pendingReservations.map(renderCompactCard)
+            const vLength = Number(reservation.vesselLengthM) || 0;
+            const isOver15 = vLength > 15;
+            const is9to15 = vLength >= 9 && vLength <= 15;
+
+            return (
+              <Card
+                key={reservation.id}
+                className={cn(
+                  "rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between overflow-hidden",
+                  isPending && "border-amber-200/80 bg-amber-50/20 dark:bg-amber-950/10",
+                  isWaitlisted && "border-blue-200/80 bg-blue-50/20 dark:bg-blue-950/10",
+                  isApproved && "border-emerald-200/80 bg-emerald-50/20 dark:bg-emerald-950/10",
+                  isCompleted && "border-slate-200 bg-slate-50/30 dark:bg-slate-900/20"
                 )}
-              </div>
-            </ScrollArea>
-          </div>
+              >
+                <div className="p-4 space-y-3">
+                  {/* Card Header: Res Number + Status + Chat */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[11px] font-mono font-bold text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md">
+                          {reservation.reservationNumber || "REZ"}
+                        </span>
+                        <StatusBadge status={reservation.status} />
+                      </div>
+                      <h4 className="font-bold text-sm text-foreground pt-1 line-clamp-1">
+                        {reservation.serviceType?.name || reservation.vesselRegistration || "Rezervacija"}
+                      </h4>
+                    </div>
 
-          {/* COLUMN 2: Čeka suhi vez (Waitlisted) */}
-          <div className="flex flex-col rounded-xl border bg-slate-50/50 dark:bg-slate-900/20 overflow-hidden">
-            <div className="p-3.5 border-b bg-blue-500/10 border-blue-200 dark:border-blue-900/50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                <h3 className="font-bold text-sm text-blue-900 dark:text-blue-300">Čeka suhi vez</h3>
-              </div>
-              <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/40 dark:text-blue-300 font-bold text-xs">
-                {waitlistedReservations.length}
-              </Badge>
-            </div>
-
-            <ScrollArea className="h-[calc(100vh-250px)] min-h-[500px]">
-              <div className="p-3 space-y-3">
-                {waitlistedReservations.length === 0 ? (
-                  <div className="text-center py-12 px-4 border border-dashed rounded-lg bg-background/50 text-xs text-muted-foreground space-y-1">
-                    <Anchor className="h-8 w-8 mx-auto text-blue-400/60 mb-2" />
-                    <p className="font-semibold text-foreground">Lista čekanja je prazna</p>
-                    <p>Nema rezervacija koje čekaju na slobodan suhi vez.</p>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 relative shrink-0 rounded-xl hover:bg-accent text-muted-foreground"
+                      onClick={() => setChatReservationId(reservation.id)}
+                      title="Poruke"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      {reservation.unreadCount > 0 && (
+                        <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white ring-2 ring-background">
+                          {reservation.unreadCount}
+                        </span>
+                      )}
+                    </Button>
                   </div>
-                ) : (
-                  waitlistedReservations.map(renderCompactCard)
-                )}
-              </div>
-            </ScrollArea>
-          </div>
 
-          {/* COLUMN 3: Odobreni (Approved) */}
-          <div className="flex flex-col rounded-xl border bg-slate-50/50 dark:bg-slate-900/20 overflow-hidden">
-            <div className="p-3.5 border-b bg-emerald-500/10 border-emerald-200 dark:border-emerald-900/50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                <h3 className="font-bold text-sm text-emerald-900 dark:text-emerald-300">Odobreni</h3>
-              </div>
-              <Badge variant="outline" className="bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-900/40 dark:text-emerald-300 font-bold text-xs">
-                {approvedReservations.length}
-              </Badge>
-            </div>
+                  {/* Client Info */}
+                  <div className="space-y-1 text-xs text-muted-foreground border-t pt-2.5">
+                    <div className="flex items-center gap-1.5 text-foreground font-medium truncate">
+                      <UserIcon className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                      <span className="truncate">{reservation.user?.name || "Korisnik"}</span>
+                      {(reservation.contactPhone || reservation.user?.phone) && (
+                        <span className="text-muted-foreground font-normal text-[11px] truncate">
+                          ({reservation.contactPhone || reservation.user?.phone})
+                        </span>
+                      )}
+                    </div>
 
-            <ScrollArea className="h-[calc(100vh-250px)] min-h-[500px]">
-              <div className="p-3 space-y-3">
-                {approvedReservations.length === 0 ? (
-                  <div className="text-center py-12 px-4 border border-dashed rounded-lg bg-background/50 text-xs text-muted-foreground space-y-1">
-                    <CalendarDays className="h-8 w-8 mx-auto text-emerald-400/60 mb-2" />
-                    <p className="font-semibold text-foreground">Nema odobrenih rezervacija</p>
-                    <p>Trenutno nema rezervacija s fiksno zakazanim terminom.</p>
+                    {/* Vessel Info & Dimensions (L x B) */}
+                    <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                      <Ship className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                      <span className="font-semibold text-foreground text-xs">
+                        {reservation.vesselName || reservation.vesselRegistration || "Plovilo"}
+                      </span>
+                      {reservation.vesselRegistration && (
+                        <Badge variant="secondary" className="font-mono text-[10px] py-0 px-1">
+                          {reservation.vesselRegistration}
+                        </Badge>
+                      )}
+                      {(reservation.vesselLengthM || reservation.vesselBeamM) && (
+                        <span className="font-mono text-[11px] text-muted-foreground">
+                          ({reservation.vesselLengthM ? `L: ${reservation.vesselLengthM}m` : ""}
+                          {reservation.vesselLengthM && reservation.vesselBeamM ? " × " : ""}
+                          {reservation.vesselBeamM ? `B: ${reservation.vesselBeamM}m` : ""})
+                        </span>
+                      )}
+                    </div>
+
+                    {/* PŠD Špinut Guidelines badges */}
+                    {isOver15 && (
+                      <Badge variant="destructive" className="text-[10px] mt-1 py-0 px-1 font-semibold">
+                        ⚠️ &gt;15m (Limit Špinut)
+                      </Badge>
+                    )}
+                    {is9to15 && (
+                      <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 text-[10px] mt-1 py-0 px-1 font-semibold">
+                        📐 9–15m (Velika dizalica)
+                      </Badge>
+                    )}
                   </div>
-                ) : (
-                  approvedReservations.map(renderCompactCard)
-                )}
-              </div>
-            </ScrollArea>
-          </div>
+
+                  {/* Crane & Dry Berth Zone Badges */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                    {reservation.crane ? (
+                      <Badge variant="outline" className="bg-indigo-50/70 text-indigo-800 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 text-[11px] font-semibold gap-1 py-0.5">
+                        <Construction className="h-3 w-3 text-indigo-600" />
+                        {reservation.crane.name}
+                      </Badge>
+                    ) : (
+                      <span className="text-amber-700 italic text-[11px]">Čeka dodjelu dizalice</span>
+                    )}
+
+                    {reservation.landZone && (
+                      <Badge variant="outline" className="bg-blue-50 text-blue-800 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 text-[11px] font-semibold gap-1 py-0.5">
+                        <MapPin className="h-3 w-3 text-blue-600" />
+                        {reservation.landZone.name} ({reservation.landZone.code})
+                      </Badge>
+                    )}
+                  </div>
+
+                  {/* Date and Time Slot */}
+                  <div className="pt-1">
+                    {reservation.scheduledStart ? (
+                      <div className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 p-2 rounded-xl border border-emerald-200 dark:border-emerald-800/50 text-xs font-semibold font-mono">
+                        <Clock className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        <span>
+                          {formatAppDate(reservation.scheduledStart)} {toZagreb(reservation.scheduledStart).timeStr}
+                        </span>
+                        {reservation.durationMin && (
+                          <span className="text-[10px] font-normal opacity-80">({reservation.durationMin} min)</span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-xl border border-amber-200 dark:border-amber-800/50 text-xs">
+                        <CalendarDays className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                        <span className="line-clamp-1">
+                          {reservation.requestedDate
+                            ? `Željeno: ${formatAppDate(reservation.requestedDate)} (${reservation.requestedTimeSlot || "po dogovoru"})`
+                            : "Termin nije zakazan"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Admin note */}
+                  {reservation.adminNote && (
+                    <p className="text-[11px] text-amber-900 dark:text-amber-200 bg-amber-50/60 dark:bg-amber-950/30 p-1.5 rounded-lg border border-amber-200/60 line-clamp-2 italic">
+                      Napomena: {reservation.adminNote}
+                    </p>
+                  )}
+                </div>
+
+                {/* Card Actions Footer */}
+                <div className="p-3 bg-slate-50/60 dark:bg-slate-900/40 border-t flex flex-wrap items-center justify-end gap-1.5">
+                  {(isPending || isWaitlisted) && (
+                    <>
+                      <Button
+                        size="sm"
+                        onClick={() => handleOpenApprove(reservation)}
+                        className="h-7 rounded-lg text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-2.5"
+                      >
+                        <CalendarClock className="h-3.5 w-3.5 mr-1" />
+                        Odobri i zakaži
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenReject(reservation.id)}
+                        className="h-7 rounded-lg text-xs text-destructive border-destructive/30 hover:bg-destructive/10 px-2"
+                      >
+                        <X className="h-3.5 w-3.5 mr-1" />
+                        Odbij
+                      </Button>
+                    </>
+                  )}
+
+                  {isApproved && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenEdit(reservation)}
+                        className="h-7 rounded-lg text-xs px-2"
+                        title="Prerasporedi termin ili izmijeni podatke"
+                      >
+                        <Pencil className="h-3.5 w-3.5 mr-1" />
+                        Uredi termin
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setSelectedWorkOrderRes(reservation)}
+                        className="h-7 rounded-lg text-xs text-primary border-primary/40 hover:bg-primary/5 font-semibold px-2"
+                      >
+                        <FileText className="h-3.5 w-3.5 mr-1" />
+                        Radni nalog
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => completeMutation.mutate({ id: reservation.id })}
+                        disabled={completeMutation.isPending}
+                        className="h-7 rounded-lg text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 dark:text-emerald-400 dark:border-emerald-800 px-2"
+                        title="Završi rezervaciju"
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1 text-emerald-600" />
+                        Završi
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => revertMutation.mutate({ id: reservation.id })}
+                        disabled={revertMutation.isPending}
+                        className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 px-2"
+                        title="Vrati u obradu"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                      </Button>
+                    </>
+                  )}
+
+                  {(reservation.status === "rejected" || reservation.status === "cancelled") && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => revertMutation.mutate({ id: reservation.id })}
+                      disabled={revertMutation.isPending}
+                      className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                      Vrati u obradu
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
       ) : (
-        /* ─── CLASSIC LIST VIEW ─────────────────────────────────────────────────── */
-        <div>
-          {reservationsList.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <CalendarDays className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                <h3 className="text-lg font-medium mb-2">Nema rezultata</h3>
-                <p className="text-muted-foreground text-sm">
-                  {statusFilter === "pending"
-                    ? "Nema zahtjeva koji čekaju odobrenje."
-                    : `Nema rezervacija za odabrane filtre.`}
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {(reservationsList as any[]).map((reservation: any) => (
-                <Card key={reservation.id}>
-                  <CardContent className="p-4 sm:p-6">
-                    <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                      <div className="space-y-2 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-medium text-base">
-                            {reservation.serviceType?.name ?? reservation.vesselRegistration ?? `Rezervacija #${reservation.reservationNumber}`}
-                          </span>
-                          <StatusBadge status={reservation.status} />
-                          {reservation.reservationNumber && (
-                            <span className="text-xs font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded">
-                              {reservation.reservationNumber}
-                            </span>
-                          )}
-                        </div>
+        /* ── Modern Table View ─────────────────────────────────────────────── */
+        <Card className="rounded-2xl border overflow-hidden">
+          <Table>
+            <TableHeader className="bg-slate-50 dark:bg-slate-900/60">
+              <TableRow>
+                <TableHead className="w-12 text-center">#</TableHead>
+                <TableHead>Rezervacija / Usluga</TableHead>
+                <TableHead>Korisnik</TableHead>
+                <TableHead>Plovilo (Dimenzije)</TableHead>
+                <TableHead>Dizalica & Suhi vez</TableHead>
+                <TableHead>Termin</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Akcije</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredReservations.map((reservation: any, idx: number) => {
+                const isPending = reservation.status === "pending";
+                const isWaitlisted = reservation.status === "waitlisted";
+                const isApproved = reservation.status === "approved";
+                const vLength = Number(reservation.vesselLengthM) || 0;
+                const isOver15 = vLength > 15;
+                const is9to15 = vLength >= 9 && vLength <= 15;
 
-                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                          <User className="h-3.5 w-3.5" />
-                          {reservation.user?.name ?? "Nepoznat"}{" "}
-                          {reservation.user?.phone ? `(${reservation.user.phone})` : ""}
-                          {reservation.user?.email && (
-                            <span className="text-xs">— {reservation.user.email}</span>
-                          )}
-                        </div>
+                return (
+                  <TableRow key={reservation.id}>
+                    <TableCell className="text-center font-mono text-xs text-muted-foreground">
+                      {(page - 1) * pageSize + idx + 1}
+                    </TableCell>
 
-                        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                          <CalendarDays className="h-3.5 w-3.5" />
-                          {reservation.scheduledStart
-                            ? formatAppDate(reservation.scheduledStart, lang as any, true)
-                            : reservation.requestedDate
-                              ? `Okvirno: ${formatAppDate(reservation.requestedDate, lang as any)} (${reservation.requestedTimeSlot ?? "po dogovoru"})`
-                              : "Termin nije dodijeljen"}
-                        </div>
+                    <TableCell>
+                      <div className="font-semibold text-sm">
+                        {reservation.serviceType?.name || "Rezervacija"}
+                      </div>
+                      <div className="font-mono text-xs text-muted-foreground mt-0.5">
+                        {reservation.reservationNumber || "REZ"}
+                      </div>
+                    </TableCell>
 
+                    <TableCell>
+                      <div className="font-semibold text-xs text-foreground">
+                        {reservation.user?.name || "Korisnik"}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {reservation.contactPhone || reservation.user?.phone || reservation.user?.email || "—"}
+                      </div>
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex items-center gap-1.5 text-xs font-semibold">
+                        <Ship className="h-3.5 w-3.5 text-blue-600" />
+                        <span>{reservation.vesselName || reservation.vesselRegistration || "Plovilo"}</span>
                         {reservation.vesselRegistration && (
-                          <div className="text-sm text-muted-foreground">
-                            <span className="font-medium text-foreground">Plovilo:</span>{" "}
-                            {reservation.vesselRegistration} ({reservation.vesselType})
-                            {reservation.vesselLengthM ? ` — D: ${reservation.vesselLengthM} m` : ""}
-                            {reservation.vesselBeamM ? ` — Š: ${reservation.vesselBeamM} m` : ""}
-                            {reservation.vesselWeightTons ? ` — ${Number(reservation.vesselWeightTons).toLocaleString(lang === 'hr' ? 'hr-HR' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} t` : ""}
-                          </div>
+                          <Badge variant="secondary" className="font-mono text-[10px] py-0 px-1">
+                            {reservation.vesselRegistration}
+                          </Badge>
                         )}
+                      </div>
+                      {(reservation.vesselLengthM || reservation.vesselBeamM) && (
+                        <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                          {reservation.vesselLengthM ? `L: ${reservation.vesselLengthM}m` : ""}
+                          {reservation.vesselLengthM && reservation.vesselBeamM ? " × " : ""}
+                          {reservation.vesselBeamM ? `B: ${reservation.vesselBeamM}m` : ""}
+                        </div>
+                      )}
+                      {isOver15 && (
+                        <Badge variant="destructive" className="text-[9px] mt-0.5 py-0 px-1 font-semibold">
+                          ⚠️ &gt;15m (Špinut)
+                        </Badge>
+                      )}
+                      {is9to15 && (
+                        <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-300 text-[9px] mt-0.5 py-0 px-1">
+                          📐 9–15m
+                        </Badge>
+                      )}
+                    </TableCell>
 
-                        {reservation.crane && (
-                          <div className="text-sm text-muted-foreground">
-                            <span className="font-medium text-foreground">Dizalica:</span> {reservation.crane.name}
-                            {reservation.crane.location ? ` — ${reservation.crane.location}` : ""}
-                          </div>
+                    <TableCell>
+                      <div className="space-y-1">
+                        {reservation.crane ? (
+                          <Badge variant="outline" className="bg-indigo-50/70 text-indigo-800 border-indigo-200 text-[11px] font-semibold">
+                            🏗️ {reservation.crane.name}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-amber-700 italic">Nije odabrana</span>
                         )}
-
                         {reservation.landZone && (
-                          <div className="text-sm text-muted-foreground flex items-center gap-1.5">
-                            <span className="font-medium text-foreground">Kopnena zona:</span>{" "}
-                            <span className="font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-xs">
-                              {reservation.landZone.name} ({reservation.landZone.code})
-                            </span>
-                          </div>
-                        )}
-
-                        {reservation.userNote && (
-                          <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                            <span className="font-medium text-foreground">Napomena korisnika:</span> {reservation.userNote}
-                          </p>
-                        )}
-
-                        {reservation.adminNote && (
-                          <div className="mt-2 p-3 bg-muted rounded-md text-sm">
-                            <span className="font-medium text-foreground">Admin bilješka: </span>
-                            {reservation.adminNote}
-                          </div>
-                        )}
-
-                        {reservation.approver && (
-                          <div className="text-xs text-muted-foreground mt-2 bg-slate-50 border rounded py-1.5 px-2 inline-block shadow-sm">
-                            <span className="font-medium text-foreground">Obradio:</span> {reservation.approver.name}
+                          <div>
+                            <Badge variant="outline" className="bg-blue-50 text-blue-800 border-blue-200 text-[10px]">
+                              📍 {reservation.landZone.name} ({reservation.landZone.code})
+                            </Badge>
                           </div>
                         )}
                       </div>
+                    </TableCell>
 
-                      <div className="flex gap-2 shrink-0">
-                        {(reservation.status === "pending" || reservation.status === "waitlisted") && (
+                    <TableCell>
+                      {reservation.scheduledStart ? (
+                        <div className="font-mono text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                          {formatAppDate(reservation.scheduledStart)} {toZagreb(reservation.scheduledStart).timeStr}
+                          {reservation.durationMin && (
+                            <span className="text-[10px] font-normal opacity-80 block">
+                              ({reservation.durationMin} min)
+                            </span>
+                          )}
+                        </div>
+                      ) : reservation.requestedDate ? (
+                        <div className="text-xs text-amber-700 dark:text-amber-400">
+                          {formatAppDate(reservation.requestedDate)} ({reservation.requestedTimeSlot || "po dogovoru"})
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+
+                    <TableCell>
+                      <StatusBadge status={reservation.status} />
+                    </TableCell>
+
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 rounded-lg relative"
+                          onClick={() => setChatReservationId(reservation.id)}
+                          title="Poruke"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          {reservation.unreadCount > 0 && (
+                            <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white">
+                              {reservation.unreadCount}
+                            </span>
+                          )}
+                        </Button>
+
+                        {(isPending || isWaitlisted) && (
                           <>
                             <Button
                               size="sm"
-                              onClick={() => openApprove(reservation.id)}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={() => handleOpenApprove(reservation)}
+                              className="h-7 rounded-lg text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-2.5"
                             >
-                              <Check className="h-3.5 w-3.5 mr-1" /> Odobri
+                              <CalendarClock className="h-3.5 w-3.5 mr-1" />
+                              Odobri
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => openReject(reservation.id)}
-                              className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                              onClick={() => handleOpenReject(reservation.id)}
+                              className="h-7 rounded-lg text-xs text-destructive border-destructive/30 hover:bg-destructive/10 px-2"
                             >
-                              <X className="h-3.5 w-3.5 mr-1" /> Odbij
+                              <X className="h-3.5 w-3.5" />
                             </Button>
                           </>
                         )}
-                        {reservation.status === "approved" && (
-                          <>
-                            {(() => {
-                              const dt = reservation.scheduledStart || reservation.scheduledDate || reservation.requestedDate;
-                              const target = dt ? new Date(dt) : null;
-                              const now = new Date();
-                              const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-                              const isFuture = target ? target.getTime() > endOfToday.getTime() : false;
 
-                              return (
-                                <>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => setSelectedWorkOrderRes(reservation)}
-                                    disabled={isFuture}
-                                    title={isFuture ? "Radni nalog se može pokrenuti tek na dan termina ili nakon njega." : "Pokreni radni nalog"}
-                                    className="text-primary border-primary/40 hover:bg-primary/5 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
-                                  >
-                                    <FileText className="h-3.5 w-3.5 mr-1" />
-                                    Radni nalog
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => completeMutation.mutate({ id: reservation.id })}
-                                    disabled={completeMutation.isPending || isFuture}
-                                    title={isFuture ? "Završavanje je moguće tek na dan termina ili nakon njega." : "Označi rezervaciju kao izvršenu."}
-                                    className="text-emerald-700 border-emerald-300 hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                                  >
-                                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                                    Završeno
-                                  </Button>
-                                </>
-                              );
-                            })()}
+                        {isApproved && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleOpenEdit(reservation)}
+                              className="h-7 rounded-lg text-xs px-2"
+                              title="Uredi termin"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setSelectedWorkOrderRes(reservation)}
+                              className="h-7 rounded-lg text-xs text-primary border-primary/40 hover:bg-primary/5 font-semibold px-2"
+                            >
+                              <FileText className="h-3.5 w-3.5 mr-1" />
+                              Nalog
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => completeMutation.mutate({ id: reservation.id })}
+                              disabled={completeMutation.isPending}
+                              className="h-7 rounded-lg text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 px-2"
+                              title="Završi"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                            </Button>
+
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => revertMutation.mutate({ id: reservation.id })}
                               disabled={revertMutation.isPending}
-                              className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                              className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
+                              title="Vrati u obradu"
                             >
-                              Vrati u obradu
+                              <RotateCcw className="h-3.5 w-3.5" />
                             </Button>
                           </>
                         )}
-                        {(reservation.status === "cancelled" || reservation.status === "rejected") && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => revertMutation.mutate({ id: reservation.id })}
-                            disabled={revertMutation.isPending}
-                            className="text-amber-700 border-amber-300 hover:bg-amber-50"
-                          >
-                            Vrati u obradu
-                          </Button>
-                        )}
-                        <div className="relative">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setChatReservationId(reservation.id)}
-                          >
-                            <MessageSquare className="h-3.5 w-3.5 mr-1" />
-                            Poruke
-                          </Button>
-                          {reservation.unreadCount > 0 && (
-                            <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-background">
-                              {reservation.unreadCount}
-                            </span>
-                          )}
-                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
 
-              {totalPages > 1 && (
-                <div className="flex justify-center py-6 border-t mt-6">
-                  <Pagination>
-                    <PaginationContent>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          onClick={() => setPage(p => Math.max(1, p - 1))}
-                          className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                        />
-                      </PaginationItem>
-                      <div className="flex items-center px-4 text-sm font-medium">
-                        {page} / {totalPages} ({totalReservations} ukupno)
-                      </div>
-                      <PaginationItem>
-                        <PaginationNext
-                          onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                          className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
-                        />
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                </div>
-              )}
-            </div>
-          )}
+      {/* ── Pagination ──────────────────────────────────────────────────────── */}
+      {totalPages > 1 && (
+        <div className="flex justify-center py-4 border-t">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className={page === 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+              <div className="flex items-center px-4 text-xs font-medium">
+                Stranica {page} od {totalPages} ({totalReservations} ukupno)
+              </div>
+              <PaginationItem>
+                <PaginationNext
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className={page === totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
         </div>
       )}
 
-      {/* Create Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Nova rezervacija</DialogTitle>
-            <DialogDescription>
-              Kreirajte novu rezervaciju za postojećeg ili novog korisnika.
-            </DialogDescription>
-          </DialogHeader>
-          <AdminReservationForm
-            onSuccess={() => {
-              setCreateOpen(false);
-              utils.reservation.listAll.invalidate();
-            }}
-            onCancel={() => setCreateOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {/* ── Unified Reservation Scheduling Modal ────────────────────────────── */}
+      <ReservationScheduleModal
+        open={scheduleModalOpen}
+        onOpenChange={setScheduleModalOpen}
+        mode={scheduleModalMode}
+        reservation={selectedRes}
+        onSuccess={() => {
+          reservationsQuery.refetch();
+        }}
+      />
 
-      {/* Approve Dialog */}
-      <Dialog open={approveOpen} onOpenChange={(v) => { if (!v) resetApproveState(); setApproveOpen(v); }}>
-        <DialogContent className="sm:max-w-[520px]">
-          <DialogHeader>
-            <DialogTitle>Odobri / Zakaži rezervaciju</DialogTitle>
-            <DialogDescription>
-              Odaberite dizalicu i dodijelite termin. Korisnik će biti obaviješten e-mailom.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedReservation && (
-            <div className="rounded-md bg-muted p-3 text-xs sm:text-sm space-y-1 mb-2">
-              {selectedReservation.vesselRegistration && (
-                <div>
-                  <span className="font-medium">Plovilo:</span> {selectedReservation.vesselRegistration} ({selectedReservation.vesselType})
-                  {selectedReservation.vesselLengthM ? ` — D: ${selectedReservation.vesselLengthM} m` : ""}
-                  {selectedReservation.vesselBeamM ? ` — Š: ${selectedReservation.vesselBeamM} m` : ""}
-                  {selectedReservation.vesselWeightTons ? ` — ${Number(selectedReservation.vesselWeightTons)} t` : ""}
-                </div>
-              )}
-              {selectedReservation.requestedDate && (
-                <div>
-                  <span className="font-medium">Željeni termin:</span> {selectedReservation.requestedDate}
-                  <span className="ml-1 opacity-70">
-                    ({selectedReservation.requestedTimeSlot === "jutro" ? "08:00–12:00" :
-                      selectedReservation.requestedTimeSlot === "poslijepodne" ? "12:00–16:00" : "Po dogovoru"})
-                  </span>
-                </div>
-              )}
-              {selectedReservation.userNote && (
-                <div><span className="font-medium">Napomena:</span> {selectedReservation.userNote}</div>
-              )}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Dizalica *</Label>
-              <Select value={approveCraneId} onValueChange={setApproveCraneId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Odaberite dizalicu" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(cranesList as any[]).filter((c: any) => c.craneStatus === "active").map((crane: any) => (
-                    <SelectItem key={crane.id} value={String(crane.id)}>
-                      {crane.name} (max {crane.maxCapacityKN} kN)
-                      {crane.location ? ` — ${crane.location}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Datum *</Label>
-                <DatePicker
-                  date={approveDate}
-                  onChange={setApproveDate}
-                  placeholder="Odaberi datum"
-                  disablePastDates
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Sat *</Label>
-                  {approveSlotsQuery.isFetching && (
-                    <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                      <Loader2 className="h-3 w-3 animate-spin" /> Provjera...
-                    </span>
-                  )}
-                </div>
-                <Select value={approveTime} onValueChange={setApproveTime}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Odaberite sat" />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-[220px]">
-                    {!approveIsWorkingDay ? (
-                      <SelectItem value="none" disabled>Neradni dan</SelectItem>
-                    ) : approveAllSlots.length === 0 ? (
-                      <SelectItem value="none" disabled>Nema termina unutar radnog vremena</SelectItem>
-                    ) : (
-                      approveAllSlots.map((slot) => (
-                        <SelectItem
-                          key={slot.time}
-                          value={slot.time}
-                          disabled={!slot.available}
-                          className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
-                        >
-                          {slot.available
-                            ? `✓ ${slot.time} — Slobodno`
-                            : `✗ ${slot.time} — Zauzeto (${slot.occupiedBy || "Zauzeto"})`}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Season working hours notice */}
-            {approveSeasonForSelectedDate && (
-              <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
-                🕒 Radno vrijeme sezone ({approveSeasonForSelectedDate.seasonName}): {approveSeasonForSelectedDate.from} — {approveSeasonForSelectedDate.to}h
-              </p>
-            )}
-
-            {/* Interactive quick pick free slot chips */}
-            {approveIsWorkingDay && approveFreeSlots.length > 0 && (
-              <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  ⚡ Brzi odabir slobodnog termina:
-                </span>
-                <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/60 rounded-lg border border-emerald-100 max-h-24 overflow-y-auto">
-                  {approveFreeSlots.map((slot) => {
-                    const isSelected = approveTime === slot;
-                    return (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => setApproveTime(slot)}
-                        className={cn(
-                          "px-2 py-0.5 rounded text-xs font-mono font-medium transition-all shadow-sm",
-                          isSelected
-                            ? "bg-emerald-600 text-white font-bold ring-2 ring-emerald-400"
-                            : "bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100"
-                        )}
-                      >
-                        {slot}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Registracija plovila</Label>
-                <Input
-                  placeholder="npr. ST-1234"
-                  value={approveVesselRegistration}
-                  onChange={(e) => setApproveVesselRegistration(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Kontakt telefon / mobitel</Label>
-                <Input
-                  placeholder="npr. 0912345678"
-                  value={approveContactPhone}
-                  onChange={(e) => setApproveContactPhone(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Trajanje</Label>
-              <Select value={approveDuration} onValueChange={setApproveDuration}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {durationOptions.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Admin bilješka (opcionalno)</Label>
-              <Textarea
-                placeholder="Interna napomena..."
-                value={adminNote}
-                onChange={(e) => setAdminNote(e.target.value)}
-                rows={2}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setApproveOpen(false); resetApproveState(); }}>
-              Odustani
-            </Button>
-            <Button
-              onClick={handleApproveConfirm}
-              disabled={approveMutation.isPending || !approveCraneId || !approveDate || !approveTime}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              {approveMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Odobri rezervaciju
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Details Dialog */}
-      <Dialog open={editDetailsOpen} onOpenChange={setEditDetailsOpen}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>Uredi podatke rezervacije</DialogTitle>
-            <DialogDescription>
-              Izmijenite registraciju plovila, kontakt telefon i internu bilješku operatera.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>Registracija plovila</Label>
-              <Input
-                placeholder="npr. ST-1234"
-                value={editVesselRegistration}
-                onChange={(e) => setEditVesselRegistration(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Kontakt telefon / mobitel</Label>
-              <Input
-                placeholder="npr. 0912345678"
-                value={editContactPhone}
-                onChange={(e) => setEditContactPhone(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Interna bilješka operatera</Label>
-              <Textarea
-                placeholder="Interna napomena vidljiva samo osoblju..."
-                value={editAdminNote}
-                onChange={(e) => setEditAdminNote(e.target.value)}
-                rows={3}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditDetailsOpen(false)}>
-              Odustani
-            </Button>
-            <Button
-              onClick={handleEditDetailsSave}
-              disabled={updateDetailsMutation.isPending}
-              className="bg-primary text-white"
-            >
-              {updateDetailsMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Spremi promjene
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reject Dialog */}
-      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Odbij rezervaciju</DialogTitle>
-            <DialogDescription>
-              Rezervacija će biti odbijena i korisnik će biti obaviješten.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <Label>Razlog odbijanja (opcionalno)</Label>
-            <Textarea
-              placeholder="Razlog..."
-              value={rejectNote}
-              onChange={(e) => setRejectNote(e.target.value)}
-              rows={3}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRejectOpen(false)}>Odustani</Button>
-            <Button
-              onClick={handleRejectConfirm}
-              disabled={rejectMutation.isPending}
-              variant="destructive"
-            >
-              {rejectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Odbij
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Work Order Execution Dialog */}
+      {/* ── Work Order Execution Dialog ─────────────────────────────────────── */}
       {selectedWorkOrderRes && (
         <WorkOrderExecutionDialog
           open={!!selectedWorkOrderRes}
@@ -1240,15 +879,77 @@ export default function AdminReservations() {
           reservationId={selectedWorkOrderRes.id}
           craneId={selectedWorkOrderRes.craneId || selectedWorkOrderRes.crane?.id || ""}
           craneName={selectedWorkOrderRes.crane?.name || selectedWorkOrderRes.craneName}
-          userName={selectedWorkOrderRes.user?.name || (selectedWorkOrderRes.user?.firstName ? `${selectedWorkOrderRes.user.firstName} ${selectedWorkOrderRes.user.lastName || ''}`.trim() : null) || selectedWorkOrderRes.userName}
+          userName={
+            selectedWorkOrderRes.user?.name ||
+            (selectedWorkOrderRes.user?.firstName
+              ? `${selectedWorkOrderRes.user.firstName} ${selectedWorkOrderRes.user.lastName || ""}`.trim()
+              : null) ||
+            selectedWorkOrderRes.userName
+          }
           userOib={selectedWorkOrderRes.user?.oib || selectedWorkOrderRes.userOib}
-          isMember={selectedWorkOrderRes.user ? (!selectedWorkOrderRes.user.isLegalEntity && selectedWorkOrderRes.user.role === "user") : !selectedWorkOrderRes.isLegalEntity}
+          isMember={
+            selectedWorkOrderRes.user
+              ? !selectedWorkOrderRes.user.isLegalEntity && selectedWorkOrderRes.user.role === "user"
+              : !selectedWorkOrderRes.isLegalEntity
+          }
           vesselName={selectedWorkOrderRes.vesselName}
           vesselLengthM={selectedWorkOrderRes.vesselLengthM}
           onSuccess={() => {
             reservationsQuery.refetch();
           }}
         />
+      )}
+
+      {/* ── Reject Confirmation Dialog ──────────────────────────────────────── */}
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle>Odbij rezervaciju</DialogTitle>
+            <DialogDescription className="text-xs">
+              Rezervacija će biti označena kao odbijena, a korisnik će primiti obavijest.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label className="text-xs font-semibold">Razlog odbijanja (opcionalno)</Label>
+            <Textarea
+              className="rounded-xl text-xs"
+              placeholder="Unesite razlog za korisnika..."
+              value={rejectNote}
+              onChange={(e) => setRejectNote(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setRejectOpen(false)}
+              disabled={rejectMutation.isPending}
+            >
+              Odustani
+            </Button>
+            <Button
+              variant="destructive"
+              className="rounded-xl"
+              onClick={handleRejectConfirm}
+              disabled={rejectMutation.isPending}
+            >
+              {rejectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Odbij rezervaciju
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Reservation Chat Dialog ─────────────────────────────────────────── */}
+      {chatReservationId && (
+        <Dialog open={!!chatReservationId} onOpenChange={(open) => !open && setChatReservationId(null)}>
+          <DialogContent className="rounded-2xl sm:max-w-[600px] h-[650px] p-0 overflow-hidden flex flex-col">
+            <ReservationChat reservationId={chatReservationId} />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

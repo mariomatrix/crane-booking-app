@@ -2113,23 +2113,13 @@ export const appRouter = router({
         let finalApprovedAt = undefined;
         let autoApproveCrane = null;
 
-        // Validate crane capacity for waitlisted reservations (crane is known, schedule is not)
+        // Validate crane for waitlisted reservations (crane is known, schedule is not)
         if (finalStatus === "waitlisted" && input.craneId) {
           const waitlistedCrane = await getCraneById(input.craneId);
           if (!waitlistedCrane || waitlistedCrane.craneStatus !== "active") {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message: "Odabrana dizalica nije aktivna.",
-            });
-          }
-          if (
-            vesselSnapshot.vesselWeightTons &&
-            Number(vesselSnapshot.vesselWeightTons) * 10 >
-              Number(waitlistedCrane.maxCapacityKN)
-          ) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `Težina plovila (${vesselSnapshot.vesselWeightTons} t) prelazi kapacitet dizalice (${waitlistedCrane.maxCapacityKN} kN).`,
             });
           }
           finalCraneId = input.craneId;
@@ -2166,17 +2156,6 @@ export const appRouter = router({
             finalScheduledEnd,
             sysSettings
           );
-
-          if (
-            vesselSnapshot.vesselWeightTons &&
-            Number(vesselSnapshot.vesselWeightTons) * 10 >
-              Number(autoApproveCrane.maxCapacityKN)
-          ) {
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `Težina plovila (${vesselSnapshot.vesselWeightTons} t) prelazi kapacitet dizalice (${autoApproveCrane.maxCapacityKN} kN).`,
-            });
-          }
 
           const hasOverlap = await checkOverlap(
             input.craneId,
@@ -2807,6 +2786,7 @@ export const appRouter = router({
           craneId: z.string().uuid(),
           scheduledStart: z.date(),
           durationMin: z.number().int().positive().default(60),
+          landZoneId: z.string().uuid().nullable().optional(),
           adminNote: z.string().optional(),
           vesselRegistration: z.string().optional(),
           contactPhone: z.string().optional(),
@@ -2827,13 +2807,18 @@ export const appRouter = router({
           });
         }
 
+        const finalLandZoneId =
+          input.landZoneId !== undefined
+            ? input.landZoneId
+            : reservation.landZoneId;
+
         // Check dry berth capacity if it is a haul-out (Dizanje iz mora)
         const serviceType = reservation.serviceTypeId
           ? await getServiceTypeById(reservation.serviceTypeId)
           : null;
         const isLiftFromSea =
           serviceType?.operationCategory === "lift_from_sea";
-        if (isLiftFromSea && reservation.landZoneId) {
+        if (isLiftFromSea && finalLandZoneId) {
           const db = await getDb();
           if (db) {
             // Check if there is an active waiting list queue for this zone that contains other entries
@@ -2842,7 +2827,7 @@ export const appRouter = router({
               .from(landWaitingList)
               .where(
                 and(
-                  eq(landWaitingList.preferredZoneId, reservation.landZoneId),
+                  eq(landWaitingList.preferredZoneId, finalLandZoneId),
                   or(
                     eq(landWaitingList.status, "waiting"),
                     eq(landWaitingList.status, "offered")
@@ -2859,7 +2844,7 @@ export const appRouter = router({
               });
             }
 
-            const cap = await getLandZoneCapacity(reservation.landZoneId);
+            const cap = await getLandZoneCapacity(finalLandZoneId);
             if (cap.isOver80 && !input.ignoreNoSpace) {
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
@@ -2891,18 +2876,6 @@ export const appRouter = router({
           sysSettings
         );
 
-        // Validate weight vs crane capacity
-        if (
-          reservation.vesselWeightTons &&
-          Number(reservation.vesselWeightTons) * 10 >
-            Number(crane.maxCapacityKN)
-        ) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: `Težina plovila (${reservation.vesselWeightTons} t) prelazi kapacitet dizalice (${crane.maxCapacityKN} kN).`,
-          });
-        }
-
         // Overlap check
         const hasOverlap = await checkOverlap(
           input.craneId,
@@ -2926,6 +2899,7 @@ export const appRouter = router({
               scheduledStart: input.scheduledStart,
               scheduledEnd,
               durationMin: input.durationMin,
+              landZoneId: finalLandZoneId,
               status: "approved",
               adminNote:
                 input.adminNote !== undefined
@@ -3408,6 +3382,8 @@ export const appRouter = router({
       .input(
         z.object({
           id: z.string().uuid(),
+          craneId: z.string().uuid().optional(),
+          scheduledStart: z.date().optional(),
           vesselRegistration: z.string().optional(),
           contactPhone: z.string().optional(),
           userNote: z.string().optional(),
@@ -3447,7 +3423,44 @@ export const appRouter = router({
           updatedAt: new Date(),
         };
 
-        if (input.durationMin !== undefined && input.durationMin !== reservation.durationMin) {
+        const targetDuration = input.durationMin || reservation.durationMin || 30;
+
+        if (input.craneId || input.scheduledStart) {
+          const targetCraneId = input.craneId || reservation.craneId;
+          const targetStart = input.scheduledStart || (reservation.scheduledStart ? new Date(reservation.scheduledStart) : undefined);
+
+          if (targetCraneId && targetStart) {
+            const crane = await getCraneById(targetCraneId);
+            if (!crane || crane.craneStatus !== "active") {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Odabrana dizalica nije aktivna.",
+              });
+            }
+
+            const targetEnd = new Date(targetStart.getTime() + targetDuration * 60000);
+            const sysSettings = await getAllSettings();
+            await validateSlotAgainstSettings(targetStart, targetEnd, sysSettings);
+
+            const hasOverlap = await checkOverlap(
+              targetCraneId,
+              targetStart,
+              targetEnd,
+              input.id
+            );
+            if (hasOverlap) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: "Odabrani termin se preklapa s drugom rezervacijom na toj dizalici.",
+              });
+            }
+
+            updates.craneId = targetCraneId;
+            updates.scheduledStart = targetStart;
+            updates.scheduledEnd = targetEnd;
+            updates.durationMin = targetDuration;
+          }
+        } else if (input.durationMin !== undefined && input.durationMin !== reservation.durationMin) {
           updates.durationMin = input.durationMin;
           if (reservation.scheduledStart) {
             updates.scheduledEnd = new Date(
@@ -3470,6 +3483,20 @@ export const appRouter = router({
               updatedAt: new Date(),
             })
             .where(eq(vessels.id, reservation.vesselId));
+        }
+
+        try {
+          const { calendarSync } = await import("./services/calendarSync");
+          calendarSync.broadcast({
+            type: "CALENDAR_UPDATED",
+            actorId: ctx.user.id,
+            actorName: ctx.user.name || ctx.user.firstName || ctx.user.email || "Operater",
+            reservationId: input.id,
+            actionText: "je ažurirao/la detalje ili termin rezervacije",
+            timestamp: new Date().toISOString(),
+          });
+        } catch (e) {
+          // ignore notification broadcast failures
         }
 
         await createAuditEntry({
