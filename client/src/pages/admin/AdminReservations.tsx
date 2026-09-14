@@ -78,9 +78,9 @@ export default function AdminReservations() {
   const { lang } = useLang();
   const utils = trpc.useUtils();
 
-  // Filters and view modes
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
-  const [statusFilter, setStatusFilter] = useState<string>("pending");
+  // Filters and view modes (default: table view and all reservations)
+  const [viewMode, setViewMode] = useState<"cards" | "table">("table");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedCrane, setSelectedCrane] = useState<string>("all");
   const [selectedUser, setSelectedUser] = useState<string>("all");
   const [search, setSearch] = useState<string>("");
@@ -269,13 +269,13 @@ export default function AdminReservations() {
             {/* Status tabs filter */}
             <div className="flex flex-wrap items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl">
               {[
+                { id: "all", label: "Sve rezervacije" },
                 { id: "pending", label: "Na čekanju" },
                 { id: "approved", label: "Odobrene" },
                 { id: "waitlisted", label: "Čeka suhi vez" },
                 { id: "completed", label: "Završene" },
                 { id: "rejected", label: "Odbijene" },
                 { id: "cancelled", label: "Otkazane" },
-                { id: "all", label: "Sve" },
               ].map((tab) => (
                 <button
                   key={tab.id}
