@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus, ClipboardList } from "lucide-react";
+import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus, ClipboardList, Ban } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -401,6 +401,16 @@ export default function AdminCalendar() {
         onError: (err: any) => toast.error(err.message),
     });
 
+    const cancelMutation = trpc.reservation.cancel.useMutation({
+        onSuccess: () => {
+            toast.success("Rezervacija je otkazana i termin je oslobođen.");
+            utils.reservation.listAll.invalidate();
+            utils.calendar.events.invalidate();
+            setIsEditOpen(false);
+        },
+        onError: (err: any) => toast.error(err.message),
+    });
+
     const handleCreateMaintenance = (e: React.FormEvent) => {
         e.preventDefault();
         const start = fromZagreb(maintDate, maintStart);
@@ -474,6 +484,10 @@ export default function AdminCalendar() {
 
     const calendarEvents = useMemo(() => {
         const resEvents = allReservations.map((r: any) => {
+            // By default (no status filter clicked), hide cancelled and rejected reservations so they don't occupy calendar space
+            if (statusFilters.length === 0 && (r.status === 'cancelled' || r.status === 'rejected')) {
+                return null;
+            }
             const rawDate = r.scheduledStart ? new Date(r.scheduledStart) : (r.requestedDate ? fromZagreb(r.requestedDate, "08:00") : null);
             if (!rawDate || isNaN(rawDate.getTime())) return null;
 
@@ -1008,11 +1022,11 @@ export default function AdminCalendar() {
                                         </div>
                                     </div>
                                     <DialogFooter className="px-6 pb-6 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
-                                        <div>
+                                        <div className="flex flex-wrap items-center gap-2">
                                             {editingRes && (editingRes.status === "approved" || editingRes.status === "in_progress") && (
                                                 <Button
                                                     type="button"
-                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 w-full sm:w-auto"
+                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
                                                     onClick={() => {
                                                         const target = editingRes;
                                                         setIsEditOpen(false);
@@ -1021,6 +1035,25 @@ export default function AdminCalendar() {
                                                 >
                                                     <ClipboardList className="h-4 w-4" />
                                                     Radni nalog
+                                                </Button>
+                                            )}
+                                            {editingRes && (editingRes.status === "approved" || editingRes.status === "pending") && (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5"
+                                                    onClick={() => {
+                                                        if (confirm("Jeste li sigurni da želite otkazati ovu rezervaciju? Termin će se odmah osloboditi na kalendaru.")) {
+                                                            cancelMutation.mutate({
+                                                                id: editingRes.id,
+                                                                cancelReason: "Otkazano telefonom / preko kalendara",
+                                                            });
+                                                        }
+                                                    }}
+                                                    disabled={cancelMutation.isPending}
+                                                >
+                                                    {cancelMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                                                    Otkaži termin
                                                 </Button>
                                             )}
                                         </div>

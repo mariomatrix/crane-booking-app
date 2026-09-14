@@ -2475,41 +2475,88 @@ export const appRouter = router({
       }),
 
     cancel: protectedProcedure
-      .input(z.object({ id: z.string().uuid(), reason: z.string().min(3) }))
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          reason: z.string().optional(),
+          cancelReason: z.string().optional(),
+        })
+      )
       .mutation(async ({ input, ctx }) => {
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
-        if (reservation.userId !== ctx.user.id)
-          throw new TRPCError({ code: "FORBIDDEN" });
 
-        if (
-          reservation.status !== "pending" &&
-          reservation.status !== "approved"
-        ) {
+        const isStaff =
+          ctx.user.role === "admin" || ctx.user.role === "operator";
+
+        if (!isStaff && reservation.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        if (reservation.status === "completed") {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message:
-              "Mogu se otkazati samo rezervacije na čekanju ili odobrene rezervacije.",
+            message: "Završena rezervacija se ne može otkazati.",
           });
         }
+        if (reservation.status === "cancelled") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Rezervacija je već otkazana.",
+          });
+        }
+
+        const effectiveReason =
+          input.cancelReason ||
+          input.reason ||
+          (isStaff
+            ? "Otkazano od strane operatera na zahtjev korisnika"
+            : "Otkazao korisnik");
 
         await updateReservationStatus(
           input.id,
           "cancelled",
+          isStaff ? ctx.user.id : undefined,
           undefined,
-          undefined,
-          input.reason,
-          "user"
+          effectiveReason,
+          isStaff ? "admin" : "user"
         );
+
+        // Cancel any waiting list queue entry linked to this reservation
+        const db = await getDb();
+        if (db) {
+          const { landWaitingList } = await import("../drizzle/schema");
+          await db
+            .update(landWaitingList)
+            .set({ status: "cancelled", updatedAt: new Date() })
+            .where(eq(landWaitingList.reservationId, input.id));
+        }
+
+        try {
+          const { calendarSync } = await import("./services/calendarSync");
+          calendarSync.broadcast({
+            type: "CALENDAR_UPDATED",
+            actorId: ctx.user.id,
+            actorName:
+              ctx.user.name ||
+              ctx.user.firstName ||
+              ctx.user.email ||
+              (isStaff ? "Operater" : "Korisnik"),
+            reservationId: input.id,
+            actionText: "je otkazao/la rezervaciju",
+            timestamp: new Date().toISOString(),
+          });
+        } catch (e) {}
+
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "reservation_cancelled",
           entityType: "reservation",
           entityId: input.id,
-          payload: { reason: input.reason },
+          payload: { reason: effectiveReason },
         });
 
-        if (reservation.status === "approved" && reservation.craneId) {
+        if (reservation.craneId) {
           const dateStr = reservation.scheduledStart
             ? toZagreb(reservation.scheduledStart).dateStr
             : "";
@@ -3042,6 +3089,73 @@ export const appRouter = router({
             : "";
           notifyWaitingList(reservation.craneId, dateStr).catch(console.error);
         }
+
+        return { success: true };
+      }),
+
+    // Operator/Admin: Permanently delete a mistake/duplicate reservation
+    delete: operatorProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(async ({ input, ctx }) => {
+        const reservation = await getReservationById(input.id);
+        if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
+
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        // 1. Check if an invoice exists for this reservation
+        const { invoices, workOrders, messages, landWaitingList, landOccupancies } = await import("../drizzle/schema");
+        const existingInvoices = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(invoices)
+          .where(eq(invoices.reservationId, input.id));
+        if (Number(existingInvoices[0]?.count ?? 0) > 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Nije moguće obrisati rezervaciju jer ima izdane račune u sustavu. Molimo stornirajte ili otkažite rezervaciju.",
+          });
+        }
+
+        // 2. Check if a non-cancelled work order exists
+        const existingWorkOrders = await db
+          .select({ count: sql<number>`count(*)` })
+          .from(workOrders)
+          .where(and(eq(workOrders.reservationId, input.id), ne(workOrders.status, "cancelled")));
+        if (Number(existingWorkOrders[0]?.count ?? 0) > 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Nije moguće obrisati rezervaciju jer ima aktivan ili završen radni nalog.",
+          });
+        }
+
+        // 3. Clean up related records
+        await db.delete(messages).where(eq(messages.reservationId, input.id));
+        await db.update(landWaitingList).set({ reservationId: null }).where(eq(landWaitingList.reservationId, input.id));
+        await db.update(landOccupancies).set({ reservationId: null }).where(eq(landOccupancies.reservationId, input.id));
+        await db.delete(workOrders).where(eq(workOrders.reservationId, input.id));
+
+        // 4. Delete the reservation
+        await db.delete(reservations).where(eq(reservations.id, input.id));
+
+        try {
+          const { calendarSync } = await import("./services/calendarSync");
+          calendarSync.broadcast({
+            type: "CALENDAR_UPDATED",
+            actorId: ctx.user.id,
+            actorName: ctx.user.name || ctx.user.firstName || ctx.user.email || "Operater",
+            reservationId: input.id,
+            actionText: "je obrisao/la rezervaciju",
+            timestamp: new Date().toISOString(),
+          });
+        } catch (e) {}
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "reservation_deleted",
+          entityType: "reservation",
+          entityId: input.id,
+          payload: { reservationNumber: reservation.reservationNumber },
+        });
 
         return { success: true };
       }),

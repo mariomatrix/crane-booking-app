@@ -63,6 +63,8 @@ import {
   CalendarClock,
   Phone,
   RefreshCw,
+  Ban,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ReservationChat } from "@/components/ReservationChat";
@@ -99,6 +101,15 @@ export default function AdminReservations() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectNote, setRejectNote] = useState("");
+
+  // Cancel dialog state
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelId, setCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
+
+  // Delete dialog state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteRes, setDeleteRes] = useState<any | null>(null);
 
   // Chat modal state
   const [chatReservationId, setChatReservationId] = useState<string | null>(null);
@@ -140,6 +151,31 @@ export default function AdminReservations() {
       setRejectOpen(false);
       setRejectId(null);
       setRejectNote("");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const cancelMutation = trpc.reservation.cancel.useMutation({
+    onSuccess: () => {
+      toast.success("Rezervacija je otkazana i termin je oslobođen.");
+      utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
+      utils.calendar.events.invalidate();
+      setCancelOpen(false);
+      setCancelId(null);
+      setCancelReason("");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const deleteMutation = trpc.reservation.delete.useMutation({
+    onSuccess: () => {
+      toast.success("Rezervacija je trajno obrisana iz sustava.");
+      utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
+      utils.calendar.events.invalidate();
+      setDeleteOpen(false);
+      setDeleteRes(null);
     },
     onError: (error) => toast.error(error.message),
   });
@@ -554,6 +590,18 @@ export default function AdminReservations() {
                         <X className="h-3.5 w-3.5 mr-1" />
                         Odbij
                       </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setDeleteRes(reservation);
+                          setDeleteOpen(true);
+                        }}
+                        className="h-7 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
+                        title="Trajno obriši rezervaciju"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </>
                   )}
 
@@ -595,6 +643,21 @@ export default function AdminReservations() {
                       <Button
                         size="sm"
                         variant="outline"
+                        onClick={() => {
+                          setCancelId(reservation.id);
+                          setCancelReason("");
+                          setCancelOpen(true);
+                        }}
+                        className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 px-2"
+                        title="Otkaži termin i oslobodi dizalicu"
+                      >
+                        <Ban className="h-3.5 w-3.5 mr-1" />
+                        Otkaži
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => revertMutation.mutate({ id: reservation.id })}
                         disabled={revertMutation.isPending}
                         className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 px-2"
@@ -602,20 +665,48 @@ export default function AdminReservations() {
                       >
                         <RotateCcw className="h-3 w-3" />
                       </Button>
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setDeleteRes(reservation);
+                          setDeleteOpen(true);
+                        }}
+                        className="h-7 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
+                        title="Trajno obriši rezervaciju"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </>
                   )}
 
                   {(reservation.status === "rejected" || reservation.status === "cancelled") && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => revertMutation.mutate({ id: reservation.id })}
-                      disabled={revertMutation.isPending}
-                      className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5 mr-1" />
-                      Vrati u obradu
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => revertMutation.mutate({ id: reservation.id })}
+                        disabled={revertMutation.isPending}
+                        className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                        Vrati u obradu
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setDeleteRes(reservation);
+                          setDeleteOpen(true);
+                        }}
+                        className="h-7 rounded-lg text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 px-2"
+                        title="Trajno obriši rezervaciju"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
                   )}
                 </div>
               </Card>
@@ -774,8 +865,21 @@ export default function AdminReservations() {
                               variant="outline"
                               onClick={() => handleOpenReject(reservation.id)}
                               className="h-7 rounded-lg text-xs text-destructive border-destructive/30 hover:bg-destructive/10 px-2"
+                              title="Odbij"
                             >
                               <X className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setDeleteRes(reservation);
+                                setDeleteOpen(true);
+                              }}
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                              title="Trajno obriši"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </>
                         )}
@@ -816,6 +920,20 @@ export default function AdminReservations() {
                             <Button
                               size="sm"
                               variant="outline"
+                              onClick={() => {
+                                setCancelId(reservation.id);
+                                setCancelReason("");
+                                setCancelOpen(true);
+                              }}
+                              className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-400 px-2"
+                              title="Otkaži termin i oslobodi dizalicu"
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
                               onClick={() => revertMutation.mutate({ id: reservation.id })}
                               disabled={revertMutation.isPending}
                               className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
@@ -823,7 +941,60 @@ export default function AdminReservations() {
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
                             </Button>
+
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setDeleteRes(reservation);
+                                setDeleteOpen(true);
+                              }}
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                              title="Trajno obriši"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                           </>
+                        )}
+
+                        {(reservation.status === "rejected" || reservation.status === "cancelled") && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => revertMutation.mutate({ id: reservation.id })}
+                              disabled={revertMutation.isPending}
+                              className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
+                              title="Vrati u obradu"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setDeleteRes(reservation);
+                                setDeleteOpen(true);
+                              }}
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                              title="Trajno obriši"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
+                        )}
+
+                        {reservation.status === "completed" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => revertMutation.mutate({ id: reservation.id })}
+                            disabled={revertMutation.isPending}
+                            className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
+                            title="Vrati u obradu"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
                         )}
                       </div>
                     </TableCell>
@@ -951,6 +1122,107 @@ export default function AdminReservations() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* ── Cancel Reservation Dialog ────────────────────────────────────────── */}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+              <Ban className="h-5 w-5" />
+              Otkaži rezervaciju
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Rezervacija će biti otkazana, zakazani termin na dizalici bit će odmah oslobođen i uklonjen s kalendara, a korisnik će primiti obavijest.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label className="text-xs font-semibold">Razlog otkazivanja (opcionalno)</Label>
+            <Textarea
+              className="rounded-xl text-xs"
+              placeholder="Npr. Korisnik telefonski otkazao termin radi kvara motora..."
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={3}
+            />
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setCancelOpen(false)}
+              disabled={cancelMutation.isPending}
+            >
+              Odustani
+            </Button>
+            <Button
+              variant="default"
+              className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+              onClick={() => {
+                if (!cancelId) return;
+                cancelMutation.mutate({ id: cancelId, reason: cancelReason || undefined });
+              }}
+              disabled={cancelMutation.isPending}
+            >
+              {cancelMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Potvrdi otkazivanje
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Reservation Dialog ────────────────────────────────────────── */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Trajno brisanje rezervacije
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed">
+              Jeste li sigurni da želite trajno ukloniti rezervaciju{" "}
+              <span className="font-mono font-bold text-foreground">
+                {deleteRes?.reservationNumber || deleteRes?.id}
+              </span>
+              {deleteRes?.vesselName && ` (${deleteRes.vesselName})`}?
+              <br />
+              Ova se radnja ne može poništiti. Koristite je za uklanjanje pogrešno unesenih, testnih ili dupliciranih zahtjeva.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+            <Info className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>
+              Napomena: Ako je za rezervaciju već izdan račun ili je radni nalog u tijeku/završen, brisanje je onemogućeno radi računovodstvene sigurnosti. U tom slučaju upotrijebite opciju <strong>Otkaži</strong>.
+            </span>
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleteMutation.isPending}
+            >
+              Odustani
+            </Button>
+            <Button
+              variant="destructive"
+              className="rounded-xl font-semibold"
+              onClick={() => {
+                if (!deleteRes) return;
+                deleteMutation.mutate({ id: deleteRes.id });
+              }}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              Trajno obriši
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
