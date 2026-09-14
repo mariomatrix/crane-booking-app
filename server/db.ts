@@ -1360,6 +1360,8 @@ export async function listLandWaitingList() {
         name: vessels.name,
         type: vessels.type,
         registration: vessels.registration,
+        lengthM: vessels.lengthM,
+        beamM: vessels.beamM,
       },
       preferredZone: {
         id: landZones.id,

@@ -28,6 +28,7 @@ import { useIsMobile } from "@/hooks/useMobile";
 import { trpc } from "@/lib/trpc";
 import {
   CalendarDays,
+  CalendarCheck,
   ClipboardList,
   Construction,
   Home,
@@ -172,6 +173,7 @@ function DashboardLayoutContent({
 
   const mainMenuItems = [
     { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
+    { icon: CalendarCheck, label: lang === "hr" ? "Dnevne operacije" : "Daily Operations", path: "/admin/daily-operations" },
     { icon: Compass, label: lang === "hr" ? "Akvatorij i vezovi" : "Berths & Basin", path: "/admin/akvatorij" },
     { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },

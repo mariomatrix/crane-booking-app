@@ -144,6 +144,7 @@ import {
   landOccupancies,
   landZones,
   vessels,
+  workOrders,
 } from "../drizzle/schema";
 import {
   and,
@@ -151,6 +152,7 @@ import {
   gte,
   gt,
   isNull,
+  isNotNull,
   or,
   lte,
   lt,
@@ -2689,6 +2691,115 @@ export const appRouter = router({
         return { data, total: Number(countRow.count) };
       }),
 
+    listDailyOperations: operatorProcedure
+      .input(
+        z
+          .object({
+            dateStr: z.string().optional(), // YYYY-MM-DD in Europe/Zagreb
+            craneId: z.string().uuid().optional(),
+            status: z
+              .enum(["all", "pending", "approved", "completed", "cancelled"])
+              .optional()
+              .default("all"),
+          })
+          .optional()
+          .default({ status: "all" })
+      )
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+
+        const targetDateStr = input.dateStr || toZagreb(new Date()).dateStr;
+        const dayStartUtc = fromZagreb(targetDateStr, "00:00");
+        const dayEndUtc = fromZagreb(targetDateStr, "23:59:59");
+
+        const conditions: any[] = [
+          gte(reservations.scheduledStart, dayStartUtc),
+          lte(reservations.scheduledStart, dayEndUtc),
+        ];
+
+        if (input.craneId && input.craneId !== "all") {
+          conditions.push(eq(reservations.craneId, input.craneId));
+        }
+
+        if (input.status && input.status !== "all") {
+          conditions.push(eq(reservations.status, input.status as any));
+        }
+
+        const items = await db
+          .select({
+            reservation: reservations,
+            user: {
+              id: users.id,
+              name: users.name,
+              firstName: users.firstName,
+              lastName: users.lastName,
+              email: users.email,
+              phone: users.phone,
+              oib: users.oib,
+              clientCategory: users.clientCategory,
+              role: users.role,
+            },
+            vessel: {
+              id: vessels.id,
+              name: vessels.name,
+              registration: vessels.registration,
+              type: vessels.type,
+              lengthM: vessels.lengthM,
+              beamM: vessels.beamM,
+              weightTons: vessels.weightTons,
+            },
+            crane: {
+              id: cranes.id,
+              name: cranes.name,
+              type: cranes.type,
+              maxCapacityKN: cranes.maxCapacityKN,
+              maxPoolWidth: cranes.maxPoolWidth,
+              location: cranes.location,
+            },
+            serviceType: {
+              id: serviceTypes.id,
+              name: serviceTypes.name,
+              operationCategory: serviceTypes.operationCategory,
+            },
+            landZone: {
+              id: landZones.id,
+              name: landZones.name,
+              code: landZones.code,
+            },
+            workOrder: {
+              id: workOrders.id,
+              orderNumber: workOrders.orderNumber,
+              status: workOrders.status,
+              startedAt: workOrders.startedAt,
+              completedAt: workOrders.completedAt,
+              actualDurationMin: workOrders.actualDurationMin,
+              operatorNotes: workOrders.operatorNotes,
+              commercialTotal: workOrders.commercialTotal,
+              isStatutoryCovered: workOrders.isStatutoryCovered,
+            },
+          })
+          .from(reservations)
+          .leftJoin(users, eq(reservations.userId, users.id))
+          .leftJoin(vessels, eq(reservations.vesselId, vessels.id))
+          .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+          .leftJoin(landZones, eq(reservations.landZoneId, landZones.id))
+          .leftJoin(workOrders, eq(reservations.id, workOrders.reservationId))
+          .where(and(...conditions))
+          .orderBy(asc(reservations.scheduledStart));
+
+        return items.map(row => ({
+          ...row.reservation,
+          user: row.user?.id ? row.user : null,
+          vessel: row.vessel?.id ? row.vessel : null,
+          crane: row.crane?.id ? row.crane : null,
+          serviceType: row.serviceType?.id ? row.serviceType : null,
+          landZone: row.landZone?.id ? row.landZone : null,
+          workOrder: row.workOrder?.id ? row.workOrder : null,
+        }));
+      }),
+
     approve: operatorProcedure
       .input(
         z.object({
@@ -3302,6 +3413,7 @@ export const appRouter = router({
           userNote: z.string().optional(),
           adminNote: z.string().optional(),
           landZoneId: z.string().uuid().nullable().optional(),
+          durationMin: z.number().int().min(15).max(480).optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -3311,31 +3423,42 @@ export const appRouter = router({
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
 
+        const updates: Record<string, any> = {
+          vesselRegistration:
+            input.vesselRegistration !== undefined
+              ? input.vesselRegistration
+              : reservation.vesselRegistration,
+          contactPhone:
+            input.contactPhone !== undefined
+              ? input.contactPhone
+              : reservation.contactPhone,
+          userNote:
+            input.userNote !== undefined
+              ? input.userNote
+              : reservation.userNote,
+          adminNote:
+            input.adminNote !== undefined
+              ? input.adminNote
+              : reservation.adminNote,
+          landZoneId:
+            input.landZoneId !== undefined
+              ? input.landZoneId
+              : reservation.landZoneId,
+          updatedAt: new Date(),
+        };
+
+        if (input.durationMin !== undefined && input.durationMin !== reservation.durationMin) {
+          updates.durationMin = input.durationMin;
+          if (reservation.scheduledStart) {
+            updates.scheduledEnd = new Date(
+              new Date(reservation.scheduledStart).getTime() + input.durationMin * 60000
+            );
+          }
+        }
+
         await db
           .update(reservations)
-          .set({
-            vesselRegistration:
-              input.vesselRegistration !== undefined
-                ? input.vesselRegistration
-                : reservation.vesselRegistration,
-            contactPhone:
-              input.contactPhone !== undefined
-                ? input.contactPhone
-                : reservation.contactPhone,
-            userNote:
-              input.userNote !== undefined
-                ? input.userNote
-                : reservation.userNote,
-            adminNote:
-              input.adminNote !== undefined
-                ? input.adminNote
-                : reservation.adminNote,
-            landZoneId:
-              input.landZoneId !== undefined
-                ? input.landZoneId
-                : reservation.landZoneId,
-            updatedAt: new Date(),
-          })
+          .set(updates)
           .where(eq(reservations.id, input.id));
 
         if (reservation.vesselId && input.vesselRegistration) {
@@ -4917,6 +5040,8 @@ export const appRouter = router({
           craneId: z.string().uuid(),
           scheduledStart: z.date(),
           durationMin: z.number().int().positive().default(30),
+          zoneId: z.string().uuid().optional(),
+          spotNumber: z.number().int().positive().optional(),
           adminNote: z.string().optional(),
         })
       )
@@ -4932,20 +5057,6 @@ export const appRouter = router({
         if (waitlistEntry.length === 0)
           throw new TRPCError({ code: "NOT_FOUND" });
         const entry = waitlistEntry[0];
-
-        if (!entry.reservationId) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Ovaj unos na listi nema povezanu rezervaciju dizalice.",
-          });
-        }
-
-        const reservation = await getReservationById(entry.reservationId);
-        if (!reservation)
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Povezana rezervacija nije pronađena.",
-          });
 
         // Validate crane
         const crane = await getCraneById(input.craneId);
@@ -4967,33 +5078,97 @@ export const appRouter = router({
           sysSettings
         );
 
-        const hasOverlap = await checkOverlap(
-          input.craneId,
-          input.scheduledStart,
-          scheduledEnd,
-          entry.reservationId
-        );
-        if (hasOverlap)
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Drugi termin se preklapa s ovim.",
-          });
+        let activeReservationId = entry.reservationId;
 
-        // Update reservation to approved
-        await db
-          .update(reservations)
-          .set({
-            craneId: input.craneId,
-            scheduledStart: input.scheduledStart,
+        if (activeReservationId) {
+          const reservation = await getReservationById(activeReservationId);
+          if (!reservation)
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Povezana rezervacija nije pronađena.",
+            });
+
+          const hasOverlap = await checkOverlap(
+            input.craneId,
+            input.scheduledStart,
             scheduledEnd,
-            durationMin: input.durationMin,
-            status: "approved",
-            adminNote: input.adminNote || reservation.adminNote,
-            approvedBy: ctx.user.id,
-            approvedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(reservations.id, entry.reservationId));
+            activeReservationId
+          );
+          if (hasOverlap)
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Drugi termin dizalice se preklapa s ovim.",
+            });
+
+          // Update reservation to approved with crane and land zone
+          await db
+            .update(reservations)
+            .set({
+              craneId: input.craneId,
+              scheduledStart: input.scheduledStart,
+              scheduledEnd,
+              durationMin: input.durationMin,
+              landZoneId: input.zoneId || entry.preferredZoneId || reservation.landZoneId,
+              status: "approved",
+              adminNote: input.adminNote || reservation.adminNote,
+              approvedBy: ctx.user.id,
+              approvedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(reservations.id, activeReservationId));
+        } else {
+          // If waitlist entry doesn't have an existing reservation, create one on the fly
+          const hasOverlap = await checkOverlap(
+            input.craneId,
+            input.scheduledStart,
+            scheduledEnd
+          );
+          if (hasOverlap)
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "Drugi termin dizalice se preklapa s ovim.",
+            });
+
+          const allSt = await db.select().from(serviceTypes);
+          const stLift = allSt.find(s => s.operationCategory === "lift_from_sea") || allSt[0];
+          const userObj = await getUserById(entry.userId);
+          const vesselObj = entry.vesselId
+            ? await db.select().from(vessels).where(eq(vessels.id, entry.vesselId)).limit(1).then(r => r[0])
+            : null;
+          const resNumber = `REZ-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+
+          const [newRes] = await db
+            .insert(reservations)
+            .values({
+              reservationNumber: resNumber,
+              userId: entry.userId,
+              vesselId: entry.vesselId,
+              serviceTypeId: stLift ? stLift.id : undefined,
+              craneId: input.craneId,
+              scheduledStart: input.scheduledStart,
+              scheduledEnd,
+              durationMin: input.durationMin,
+              status: "approved",
+              userOib: userObj?.oib || null,
+              vesselName: vesselObj?.name || null,
+              vesselType: vesselObj?.type || null,
+              vesselLengthM: vesselObj?.lengthM || null,
+              vesselBeamM: vesselObj?.beamM || null,
+              vesselWeightTons: vesselObj?.weightTons || null,
+              vesselRegistration: vesselObj?.registration || null,
+              landZoneId: input.zoneId || entry.preferredZoneId || null,
+              adminNote: input.adminNote || entry.note || null,
+              approvedBy: ctx.user.id,
+              approvedAt: new Date(),
+            })
+            .returning({ id: reservations.id });
+
+          activeReservationId = newRes.id;
+          await db
+            .update(landWaitingList)
+            .set({ reservationId: newRes.id, updatedAt: new Date() })
+            .where(eq(landWaitingList.id, input.id));
+        }
 
         // Update waitlist entry to assigned
         await updateLandWaitingListStatus(input.id, "assigned");
@@ -5005,7 +5180,7 @@ export const appRouter = router({
           entityId: input.id,
         });
 
-        // Send confirmation email
+        // Send confirmation email if available
         const user = await getUserById(entry.userId);
         if (user?.email) {
           const { sendReservationConfirmation } = await import("./_core/email");
@@ -5020,7 +5195,145 @@ export const appRouter = router({
           }).catch(console.error);
         }
 
-        return { success: true };
+        return { success: true, reservationId: activeReservationId };
+      }),
+
+    getOverview: operatorProcedure
+      .input(
+        z
+          .object({
+            dateStr: z.string().optional(),
+          })
+          .optional()
+          .default({})
+      )
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return { zones: [], cranes: [], waitlistStats: { waiting: 0, offered: 0, declined: 0, total: 0 } };
+
+        const targetDateStr = input.dateStr || toZagreb(new Date()).dateStr;
+        const dayStartUtc = fromZagreb(targetDateStr, "00:00");
+        const dayEndUtc = fromZagreb(targetDateStr, "23:59:59");
+
+        // 1. All active land zones
+        const allZones = await db
+          .select()
+          .from(landZones)
+          .where(eq(landZones.isActive, true))
+          .orderBy(asc(landZones.sortOrder), asc(landZones.code));
+
+        // Active occupancies per zone (where returnedAt is null)
+        const activeOccupancies = await db
+          .select({
+            zoneId: landOccupancies.zoneId,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(landOccupancies)
+          .where(isNull(landOccupancies.returnedAt))
+          .groupBy(landOccupancies.zoneId);
+
+        const occMap = new Map<string, number>();
+        activeOccupancies.forEach(o => occMap.set(o.zoneId, o.count));
+
+        // Upcoming launches from dry berth (service types with lower_to_sea)
+        const upcomingLaunches = await db
+          .select({
+            zoneId: reservations.landZoneId,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(reservations)
+          .innerJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
+          .where(
+            and(
+              eq(serviceTypes.operationCategory, "lower_to_sea"),
+              or(eq(reservations.status, "approved"), eq(reservations.status, "completed")),
+              isNotNull(reservations.landZoneId)
+            )
+          )
+          .groupBy(reservations.landZoneId);
+
+        const launchMap = new Map<string, number>();
+        upcomingLaunches.forEach(l => {
+          if (l.zoneId) launchMap.set(l.zoneId, l.count);
+        });
+
+        const zonesWithStats = allZones.map(z => {
+          const occCount = occMap.get(z.id) || 0;
+          const totalOccupied = occCount + (z.manualOccupiedSpots || 0);
+          const freeSpots = Math.max(0, z.totalSpots - totalOccupied);
+          const launchCount = launchMap.get(z.id) || 0;
+          return {
+            ...z,
+            activeOccupanciesCount: occCount,
+            totalOccupied,
+            freeSpots,
+            upcomingLaunchesCount: launchCount,
+          };
+        });
+
+        // 2. All active cranes
+        const allCranes = await db
+          .select()
+          .from(cranes)
+          .where(eq(cranes.craneStatus, "active"))
+          .orderBy(asc(cranes.name));
+
+        const bookingsForDate = await db
+          .select({
+            craneId: reservations.craneId,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(reservations)
+          .where(
+            and(
+              gte(reservations.scheduledStart, dayStartUtc),
+              lte(reservations.scheduledStart, dayEndUtc),
+              or(
+                eq(reservations.status, "approved"),
+                eq(reservations.status, "completed")
+              )
+            )
+          )
+          .groupBy(reservations.craneId);
+
+        const craneBookingMap = new Map<string, number>();
+        bookingsForDate.forEach(b => {
+          if (b.craneId) craneBookingMap.set(b.craneId, b.count);
+        });
+
+        const cranesWithStats = allCranes.map(c => ({
+          ...c,
+          bookingsCountForDate: craneBookingMap.get(c.id) || 0,
+        }));
+
+        // 3. Waitlist counts
+        const waitlistStatsRows = await db
+          .select({
+            status: landWaitingList.status,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(landWaitingList)
+          .groupBy(landWaitingList.status);
+
+        let waitingCount = 0;
+        let offeredCount = 0;
+        let declinedCount = 0;
+        waitlistStatsRows.forEach(row => {
+          if (row.status === "waiting") waitingCount = row.count;
+          if (row.status === "offered") offeredCount = row.count;
+          if (row.status === "declined") declinedCount = row.count;
+        });
+
+        return {
+          zones: zonesWithStats,
+          cranes: cranesWithStats,
+          waitlistStats: {
+            waiting: waitingCount,
+            offered: offeredCount,
+            declined: declinedCount,
+            total: waitingCount + offeredCount + declinedCount,
+          },
+        };
       }),
 
     listByZone: operatorProcedure

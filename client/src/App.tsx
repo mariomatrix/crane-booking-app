@@ -28,6 +28,7 @@ import AdminUserCard from "./pages/admin/AdminUserCard";
 import AdminLandZones from "./pages/admin/AdminLandZones";
 import AdminLandWaiting from "./pages/admin/AdminLandWaiting";
 import AdminCraneOps from "./pages/admin/AdminCraneOps";
+import AdminDailyOperations from "./pages/admin/AdminDailyOperations";
 import Profile from "./pages/Profile";
 import MyCard from "./pages/MyCard";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
@@ -64,6 +65,12 @@ function Router() {
       </Route>
       <Route path="/admin/reservations">
         <AdminLayout><AdminReservations /></AdminLayout>
+      </Route>
+      <Route path="/admin/daily-operations">
+        <AdminLayout><AdminDailyOperations /></AdminLayout>
+      </Route>
+      <Route path="/admin/today">
+        <AdminLayout><AdminDailyOperations /></AdminLayout>
       </Route>
       <Route path="/admin/cranes">
         <AdminLayout><AdminCranes /></AdminLayout>
