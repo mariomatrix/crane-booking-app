@@ -3514,6 +3514,22 @@ export const appRouter = router({
         const reservation = await getReservationById(input.id);
         if (!reservation) throw new TRPCError({ code: "NOT_FOUND" });
 
+        // Check if reservation is completed or has a completed work order
+        const { workOrders } = await import("../drizzle/schema");
+        const [attachedWo] = await db
+          .select({ status: workOrders.status, orderNumber: workOrders.orderNumber })
+          .from(workOrders)
+          .where(and(eq(workOrders.reservationId, input.id), ne(workOrders.status, "cancelled")))
+          .limit(1);
+
+        const isCompleted = reservation.status === "completed" || attachedWo?.status === "completed";
+        if (isCompleted && (input.scheduledStart || input.craneId || input.durationMin)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Nije moguće mijenjati termin, dizalicu ili trajanje jer je radni nalog ${attachedWo?.orderNumber || "operacije"} već zaključen.`,
+          });
+        }
+
         const updates: Record<string, any> = {
           vesselRegistration:
             input.vesselRegistration !== undefined

@@ -90,10 +90,11 @@ export default function AdminDailyOperations() {
     const handleQuickEditSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingRes) return;
+        const isEditingCompleted = editingRes.status === "completed" || editingRes.workOrder?.status === "completed";
         updateResMutation.mutate({
             id: editingRes.id,
             adminNote: editAdminNote,
-            durationMin: Number(editDurationMin) || 30,
+            durationMin: isEditingCompleted ? undefined : (Number(editDurationMin) || 30),
         });
     };
 
@@ -579,21 +580,23 @@ export default function AdminDailyOperations() {
                                                         </Button>
                                                     )}
 
-                                                    <div>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            className="text-xs text-muted-foreground hover:text-foreground h-6 px-1.5"
-                                                            onClick={() => {
-                                                                setEditingRes(op);
-                                                                setEditAdminNote(op.adminNote || "");
-                                                                setEditDurationMin(String(op.durationMin || 30));
-                                                            }}
-                                                        >
-                                                            <Edit3 className="h-3 w-3 mr-1" />
-                                                            {isHr ? "Uredi termin" : "Edit slot"}
-                                                        </Button>
-                                                    </div>
+                                                    {woStatus !== "completed" && op.status !== "completed" && (
+                                                        <div>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="ghost"
+                                                                className="text-xs text-muted-foreground hover:text-foreground h-6 px-1.5"
+                                                                onClick={() => {
+                                                                    setEditingRes(op);
+                                                                    setEditAdminNote(op.adminNote || "");
+                                                                    setEditDurationMin(String(op.durationMin || 30));
+                                                                }}
+                                                            >
+                                                                <Edit3 className="h-3 w-3 mr-1" />
+                                                                {isHr ? "Uredi termin" : "Edit slot"}
+                                                            </Button>
+                                                        </div>
+                                                    )}
                                                 </TableCell>
                                             </TableRow>
                                         );
@@ -639,18 +642,37 @@ export default function AdminDailyOperations() {
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleQuickEditSubmit} className="space-y-4 py-2">
-                        <div className="space-y-2">
-                            <Label htmlFor="durationInput">{isHr ? "Planirano trajanje (minuta)" : "Duration (minutes)"}</Label>
-                            <Input
-                                id="durationInput"
-                                type="number"
-                                step="15"
-                                min="15"
-                                max="240"
-                                value={editDurationMin}
-                                onChange={(e) => setEditDurationMin(e.target.value)}
-                            />
-                        </div>
+                        {(() => {
+                            const isEditingCompleted = editingRes?.status === "completed" || editingRes?.workOrder?.status === "completed";
+                            return (
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <Label htmlFor="durationInput">{isHr ? "Planirano trajanje (minuta)" : "Duration (minutes)"}</Label>
+                                        {isEditingCompleted && (
+                                            <Badge variant="outline" className="text-[10px] text-amber-700 bg-amber-50 border-amber-200">
+                                                {isHr ? "Zaključeno nalogom" : "Locked by work order"}
+                                            </Badge>
+                                        )}
+                                    </div>
+                                    <Input
+                                        id="durationInput"
+                                        type="number"
+                                        step="15"
+                                        min="15"
+                                        max="240"
+                                        value={editDurationMin}
+                                        onChange={(e) => setEditDurationMin(e.target.value)}
+                                        disabled={isEditingCompleted}
+                                        className={isEditingCompleted ? "bg-muted text-muted-foreground cursor-not-allowed" : ""}
+                                    />
+                                    {isEditingCompleted && (
+                                        <p className="text-[11px] text-muted-foreground italic">
+                                            {isHr ? "Trajanje operacije je zaključeno prema izvršenom radnom nalogu i ne može se mijenjati." : "Duration is locked according to completed work order."}
+                                        </p>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         <div className="space-y-2">
                             <Label htmlFor="adminNoteInput">{isHr ? "Interna napomena operatera" : "Operator internal note"}</Label>
