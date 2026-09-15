@@ -50,6 +50,7 @@ interface TaskItem {
     workOrderId?: string | null;
     workOrderNumber?: string | null;
     workOrderStatus?: string | null;
+    operatorNotes?: string | null;
     vessel: {
         id: string;
         name: string;
@@ -142,6 +143,11 @@ export default function MobileOperatorApp() {
     const [finishZoneId, setFinishZoneId] = useState<string>("");
     const [finishSpotNumber, setFinishSpotNumber] = useState<string>("");
     const [isSubmittingFinish, setIsSubmittingFinish] = useState(false);
+
+    // Completed Order / Notes Modal State
+    const [viewingTask, setViewingTask] = useState<TaskItem | null>(null);
+    const [viewingNotes, setViewingNotes] = useState<string>("");
+    const [isSavingNotes, setIsSavingNotes] = useState(false);
 
     // Land Zones state for Dry Berth Assignment dialog
     const [landZones, setLandZones] = useState<LandZone[]>([]);
@@ -329,10 +335,46 @@ export default function MobileOperatorApp() {
     const handleOpenFinishModal = (task: TaskItem) => {
         setFinishingTask(task);
         setFinishDurationMin(task.durationMin || 30);
-        setFinishNotes("");
+        setFinishNotes(task.operatorNotes || "");
         setSelectedResources({});
         setFinishZoneId(task.dryBerthPlacement?.zoneId || "");
         setFinishSpotNumber(task.dryBerthPlacement?.spotNumber ? String(task.dryBerthPlacement.spotNumber) : "");
+    };
+
+    const handleOpenViewingModal = (task: TaskItem) => {
+        setViewingTask(task);
+        setViewingNotes(task.operatorNotes || "");
+    };
+
+    const handleSaveViewingNotes = async () => {
+        if (!viewingTask) return;
+        setIsSavingNotes(true);
+        try {
+            const url = viewingTask.workOrderId
+                ? `/api/mobile/v1/work-orders/${viewingTask.workOrderId}/notes`
+                : `/api/mobile/v1/reservations/${viewingTask.id}/notes`;
+
+            const res = await fetch(url, {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ operatorNotes: viewingNotes.trim() })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast.success("Napomena operatera uspješno spremljena!");
+                setViewingTask(null);
+                fetchSchedule();
+            } else {
+                toast.error(data.error || "Greška pri spremanju napomene");
+            }
+        } catch (e) {
+            toast.error("Mrežna greška");
+        } finally {
+            setIsSavingNotes(false);
+        }
     };
 
     const handleCompleteWorkOrder = async () => {
@@ -752,13 +794,18 @@ export default function MobileOperatorApp() {
                                             {/* Time & Vessel Title */}
                                             <div className="flex items-start justify-between gap-2 border-b pb-3">
                                                 <div>
-                                                    <div className="flex items-center gap-2">
+                                                    <div className="flex items-center gap-2 flex-wrap">
                                                         <span className="text-sm font-black text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-lg border border-indigo-100">
                                                             🕒 {timeStr}
                                                         </span>
                                                         <span className="text-xs font-bold text-slate-900">
                                                             {t.vessel?.registration ? `[${t.vessel.registration}]` : ""} {t.vessel?.name || "Nepoznato plovilo"}
                                                         </span>
+                                                        {t.workOrderNumber && (
+                                                            <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                                                                RN: {t.workOrderNumber}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     <p className="text-xs font-medium text-slate-500 mt-1">
                                                         {t.serviceType?.name || "Operacija dizalice"} ({t.crane?.name || "Dizalica"})
@@ -817,6 +864,17 @@ export default function MobileOperatorApp() {
                                                 </button>
                                             </div>
 
+                                            {/* Operator Note Badge / Box */}
+                                            {t.operatorNotes && (
+                                                <div className="text-xs bg-amber-50/90 text-amber-950 border border-amber-200/90 rounded-xl p-2.5 flex items-start gap-1.5 shadow-2xs">
+                                                    <span className="text-sm shrink-0 leading-none">📝</span>
+                                                    <div className="leading-snug min-w-0">
+                                                        <span className="font-bold text-[10px] uppercase text-amber-800 tracking-wide block">Napomena operatera:</span>
+                                                        <span className="font-medium break-words">{t.operatorNotes}</span>
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {/* Action Buttons Row */}
                                             <div className="flex items-center gap-2 pt-1">
                                                 {t.owner?.phone && (
@@ -853,6 +911,14 @@ export default function MobileOperatorApp() {
                                                     >
                                                         <CheckCircle2 className="h-3.5 w-3.5" />
                                                         <span>Završi</span>
+                                                    </button>
+                                                )}
+                                                {t.status === "completed" && (
+                                                    <button
+                                                        onClick={() => handleOpenViewingModal(t)}
+                                                        className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 border border-slate-300 active:scale-95 transition shadow-2xs"
+                                                    >
+                                                        <span>📝 Pregled naloga / Napomena</span>
                                                     </button>
                                                 )}
                                             </div>
@@ -1079,6 +1145,72 @@ export default function MobileOperatorApp() {
                             >
                                 {isSubmittingFinish ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                                 <span>Potvrdi i Završi</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Completed Task Preview & Edit Notes Modal Dialog */}
+            {viewingTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
+                    <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 w-full max-w-md space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200 max-h-[90vh] overflow-y-auto">
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <div>
+                                <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                    <span>📋 Radni Nalog {viewingTask.workOrderNumber || viewingTask.reservationNumber}</span>
+                                </h3>
+                                <p className="text-[11px] text-emerald-700 font-bold mt-0.5">
+                                    ✓ Operacija zaključena ({viewingTask.durationMin || 30} min)
+                                </p>
+                            </div>
+                            <button onClick={() => setViewingTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-sm">✕</button>
+                        </div>
+
+                        {/* Vessel & Reservation Details */}
+                        <div className="text-xs space-y-1.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                            <div className="font-bold text-slate-900 text-sm">
+                                {viewingTask.vessel?.registration ? `[${viewingTask.vessel.registration}] ` : ""}{viewingTask.vessel?.name || "Plovilo"}
+                            </div>
+                            <div className="text-slate-600">Vlasnik: <strong>{viewingTask.owner?.name || "—"}</strong></div>
+                            <div className="text-slate-600">Usluga: <strong>{viewingTask.serviceType?.name || "Dizalica"} ({viewingTask.crane?.name || "Dizalica"})</strong></div>
+                            {viewingTask.dryBerthPlacement && (
+                                <div className="text-indigo-700 font-semibold pt-1 border-t border-slate-200/60 flex items-center gap-1">
+                                    <MapPin className="h-3.5 w-3.5" />
+                                    <span>Mjesto na kopnu: {viewingTask.dryBerthPlacement.zoneCode} ({viewingTask.dryBerthPlacement.zoneName}) {viewingTask.dryBerthPlacement.spotNumber ? `• Mjesto ${viewingTask.dryBerthPlacement.spotNumber}` : ""}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Notes editing */}
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-800 block flex items-center justify-between">
+                                <span>Napomena operatera:</span>
+                                <span className="text-[10px] text-slate-400 font-normal">Može se dopuniti nakon završetka</span>
+                            </label>
+                            <textarea
+                                value={viewingNotes}
+                                onChange={(e) => setViewingNotes(e.target.value)}
+                                rows={4}
+                                placeholder="Unesite ili izmijenite zapažanja, stanje trupa, korištene resurse..."
+                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:border-indigo-400 resize-none"
+                            />
+                        </div>
+
+                        <div className="flex gap-2 pt-1">
+                            <button
+                                onClick={() => setViewingTask(null)}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs"
+                            >
+                                Zatvori
+                            </button>
+                            <button
+                                disabled={isSavingNotes}
+                                onClick={handleSaveViewingNotes}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md disabled:opacity-50 flex items-center justify-center gap-1.5 active:scale-95 transition"
+                            >
+                                {isSavingNotes ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                <span>Spremi napomenu</span>
                             </button>
                         </div>
                     </div>

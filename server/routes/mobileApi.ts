@@ -183,7 +183,8 @@ router.get("/schedule/today", requireMobileAuth, async (req: AuthenticatedReques
     if (resIds.length > 0) {
         activeWorkOrders = await db.select()
             .from(workOrders)
-            .where(and(inArray(workOrders.reservationId, resIds), ne(workOrders.status, "cancelled")));
+            .where(and(inArray(workOrders.reservationId, resIds), ne(workOrders.status, "cancelled")))
+            .orderBy(desc(workOrders.createdAt));
     }
 
     const result = filteredRows.map(r => {
@@ -225,6 +226,7 @@ router.get("/schedule/today", requireMobileAuth, async (req: AuthenticatedReques
             workOrderId: wOrder?.id || null,
             workOrderNumber: wOrder?.orderNumber || null,
             workOrderStatus: wOrder?.status || null,
+            operatorNotes: wOrder?.operatorNotes || null,
             vessel: r.vessel ? {
                 id: r.vessel.id,
                 name: r.vessel.name,
@@ -266,6 +268,10 @@ router.post("/reservations/:id/start-work", requireMobileAuth, async (req: Authe
 
     const [resRow] = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
     if (!resRow) return res.status(404).json({ error: "Rezervacija nije pronađena" });
+
+    if (resRow.status === "completed") {
+        return res.status(400).json({ error: "Nije moguće pokrenuti već završenu operaciju." });
+    }
 
     // Check future date restriction
     const targetDate = resRow.scheduledStart ? new Date(resRow.scheduledStart) : (resRow.requestedDate ? new Date(resRow.requestedDate) : null);
@@ -401,6 +407,15 @@ router.post("/reservations/:id/complete-work", requireMobileAuth, async (req: Au
 
     const [resRow] = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
     if (!resRow) return res.status(404).json({ error: "Rezervacija nije pronađena" });
+
+    if (resRow.status === "completed") {
+        return res.status(400).json({ error: "Rezervacija je već zaključena kao završena." });
+    }
+
+    const [completedOrderCheck] = await db.select().from(workOrders).where(and(eq(workOrders.reservationId, id), eq(workOrders.status, "completed"))).limit(1);
+    if (completedOrderCheck) {
+        return res.status(400).json({ error: `Radni nalog ${completedOrderCheck.orderNumber} je već zaključen.` });
+    }
 
     // Check future date restriction
     const targetDate = resRow.scheduledStart ? new Date(resRow.scheduledStart) : (resRow.requestedDate ? new Date(resRow.requestedDate) : null);
@@ -581,8 +596,74 @@ router.patch("/reservations/:id/status", requireMobileAuth, async (req: Authenti
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "DB unavailable" });
 
+    const [currRes] = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
+    if (!currRes) return res.status(404).json({ error: "Rezervacija nije pronađena" });
+
+    if (currRes.status === "completed" && status !== "completed") {
+        return res.status(400).json({ error: "Nije moguće mijenjati status već završene operacije." });
+    }
+
     await db.update(reservations).set({ status: status as any, updatedAt: new Date() }).where(eq(reservations.id, id));
     return res.json({ success: true, id, status });
+});
+
+// 6b. Update Operator Notes on Work Order: PATCH /api/mobile/v1/work-orders/:id/notes
+router.patch("/work-orders/:id/notes", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { id } = req.params;
+    const { operatorNotes } = req.body;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, id)).limit(1);
+    if (!wo) return res.status(404).json({ error: "Radni nalog nije pronađen" });
+
+    const updatedNotes = typeof operatorNotes === "string" ? operatorNotes.trim() : null;
+    await db.update(workOrders)
+        .set({ operatorNotes: updatedNotes, updatedAt: new Date() })
+        .where(eq(workOrders.id, id));
+
+    await createAuditEntry({
+        actorId: user.id,
+        action: "work_order_notes_updated_mobile",
+        entityType: "work_order",
+        entityId: id,
+        payload: { operatorNotes: updatedNotes, orderNumber: wo.orderNumber },
+    });
+
+    return res.json({ success: true, id, operatorNotes: updatedNotes });
+});
+
+// 6c. Update Operator Notes by Reservation: PATCH /api/mobile/v1/reservations/:id/notes
+router.patch("/reservations/:id/notes", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { id } = req.params;
+    const { operatorNotes } = req.body;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const [wo] = await db.select()
+        .from(workOrders)
+        .where(and(eq(workOrders.reservationId, id), ne(workOrders.status, "cancelled")))
+        .orderBy(desc(workOrders.createdAt))
+        .limit(1);
+
+    if (!wo) return res.status(404).json({ error: "Nije pronađen radni nalog za ovu rezervaciju" });
+
+    const updatedNotes = typeof operatorNotes === "string" ? operatorNotes.trim() : null;
+    await db.update(workOrders)
+        .set({ operatorNotes: updatedNotes, updatedAt: new Date() })
+        .where(eq(workOrders.id, wo.id));
+
+    await createAuditEntry({
+        actorId: user.id,
+        action: "work_order_notes_updated_mobile",
+        entityType: "work_order",
+        entityId: wo.id,
+        payload: { operatorNotes: updatedNotes, orderNumber: wo.orderNumber, reservationId: id },
+    });
+
+    return res.json({ success: true, workOrderId: wo.id, operatorNotes: updatedNotes });
 });
 
 // 6b. Get Active Resources: GET /api/mobile/v1/resources
