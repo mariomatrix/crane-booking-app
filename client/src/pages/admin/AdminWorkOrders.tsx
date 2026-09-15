@@ -273,6 +273,11 @@ export default function AdminWorkOrders() {
                                         <TableCell className="text-xs">
                                             <div className="font-medium">{o.vesselName || "Plovilo"}</div>
                                             <div className="text-muted-foreground">{o.vesselRegistration || "—"} ({o.vesselLengthM ? `${o.vesselLengthM} m` : "—"})</div>
+                                            {o.operatorNotes && (
+                                                <div className="text-[11px] text-amber-800 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-300 rounded px-1.5 py-0.5 mt-1 border border-amber-200/80 max-w-[220px] truncate" title={`Napomena operatera: ${o.operatorNotes}`}>
+                                                    📝 {o.operatorNotes}
+                                                </div>
+                                            )}
                                         </TableCell>
                                         <TableCell className="text-xs font-medium">
                                             {o.craneName || "Dizalica"}

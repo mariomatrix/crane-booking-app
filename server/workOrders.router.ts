@@ -206,6 +206,74 @@ export const workOrdersRouter = router({
             return order || null;
         }),
 
+    // ─── Get Order for Reservation (Active or Completed) ───────────────
+    getByReservation: operatorProcedure
+        .input(z.object({ reservationId: z.string().uuid() }))
+        .query(async ({ input }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+            const [order] = await db
+                .select()
+                .from(workOrders)
+                .where(and(eq(workOrders.reservationId, input.reservationId), ne(workOrders.status, "cancelled")))
+                .orderBy(desc(workOrders.createdAt))
+                .limit(1);
+
+            if (!order) return null;
+
+            const orderResources = await db
+                .select({
+                    id: workOrderResources.id,
+                    resourceId: workOrderResources.resourceId,
+                    quantity: workOrderResources.quantity,
+                    unitPriceEur: workOrderResources.unitPriceEur,
+                    totalPriceEur: workOrderResources.totalPriceEur,
+                    notes: workOrderResources.notes,
+                    name: resources.name,
+                    unit: resources.unit,
+                })
+                .from(workOrderResources)
+                .leftJoin(resources, eq(workOrderResources.resourceId, resources.id))
+                .where(eq(workOrderResources.workOrderId, order.id));
+
+            return {
+                ...order,
+                resources: orderResources,
+            };
+        }),
+
+    // ─── Update Work Order Notes ───────────────────────────────────────
+    updateNotes: operatorProcedure
+        .input(
+            z.object({
+                workOrderId: z.string().uuid(),
+                operatorNotes: z.string(),
+            })
+        )
+        .mutation(async ({ input, ctx }) => {
+            const db = await getDb();
+            if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+            await db
+                .update(workOrders)
+                .set({
+                    operatorNotes: input.operatorNotes,
+                    updatedAt: new Date(),
+                })
+                .where(eq(workOrders.id, input.workOrderId));
+
+            await createAuditEntry({
+                actorId: ctx.user.id,
+                action: "work_order_notes_updated",
+                entityType: "work_order",
+                entityId: input.workOrderId,
+                payload: { notes: input.operatorNotes },
+            });
+
+            return { success: true };
+        }),
+
     // ─── Start Work Order (Pokreni radni nalog) ────────────────────────
     startFromReservation: operatorProcedure
         .input(

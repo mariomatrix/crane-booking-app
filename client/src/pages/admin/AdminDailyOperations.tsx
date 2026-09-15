@@ -523,6 +523,11 @@ export default function AdminDailyOperations() {
                                                             <div className="text-[11px] text-slate-500">
                                                                 {isHr ? "Dovršeno" : "Completed"} ({wo.actualDurationMin || duration} min)
                                                             </div>
+                                                            {wo.operatorNotes && (
+                                                                <div className="text-[11px] text-amber-900 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-200 border border-amber-200/80 rounded px-1.5 py-0.5 mt-1 text-left line-clamp-2 italic" title={`Napomena: ${wo.operatorNotes}`}>
+                                                                    📝 {wo.operatorNotes}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     ) : (
                                                         <div className="space-y-1">
@@ -533,6 +538,11 @@ export default function AdminDailyOperations() {
                                                             <div className="text-[11px] text-blue-700 font-medium">
                                                                 {isHr ? "U radu" : "In execution"}
                                                             </div>
+                                                            {wo.operatorNotes && (
+                                                                <div className="text-[11px] text-amber-900 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-200 border border-amber-200/80 rounded px-1.5 py-0.5 mt-1 text-left line-clamp-2 italic" title={`Napomena: ${wo.operatorNotes}`}>
+                                                                    📝 {wo.operatorNotes}
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </TableCell>

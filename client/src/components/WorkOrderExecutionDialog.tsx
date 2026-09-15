@@ -10,9 +10,12 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
     Loader2, Play, CheckCircle2, ShieldCheck, AlertCircle,
-    FileText, Anchor, Clock, MapPin, PackagePlus, Plus, Minus, Info
+    FileText, Anchor, Clock, MapPin, PackagePlus, Plus, Minus, Info,
+    Printer, Download, Check
 } from "lucide-react";
 import { format } from "date-fns";
+import { PDFDownloadLink, PDFViewer } from "@react-pdf/renderer";
+import { WorkOrderPdf } from "@/components/WorkOrderPdfTemplate";
 
 interface WorkOrderExecutionDialogProps {
     open: boolean;
@@ -48,14 +51,30 @@ export function WorkOrderExecutionDialog({
     const [operatorNotes, setOperatorNotes] = useState<string>("");
     const [selectedResources, setSelectedResources] = useState<Record<string, number>>({});
     const [showResourcePicker, setShowResourcePicker] = useState<boolean>(false);
+    const [showPdf, setShowPdf] = useState<boolean>(false);
 
     const utils = trpc.useUtils();
 
-    // Query active work order for this reservation
-    const { data: activeOrder, isLoading: isLoadingActive } = trpc.workOrders.getActiveByReservation.useQuery(
+    // Query work order (active or completed) for this reservation
+    const { data: existingOrder, isLoading: isLoadingOrder, refetch: refetchOrder } = trpc.workOrders.getByReservation.useQuery(
         { reservationId },
         { enabled: open && !!reservationId }
     );
+
+    const activeOrder = existingOrder?.status === "in_progress" ? existingOrder : null;
+    const isCompleted = existingOrder?.status === "completed";
+    const isInProgress = existingOrder?.status === "in_progress";
+
+    // Mutation for updating notes on a completed or active work order
+    const updateNotesMutation = trpc.workOrders.updateNotes.useMutation({
+        onSuccess: () => {
+            toast.success("Napomena operatera je uspješno ažurirana!");
+            refetchOrder();
+            utils.reservation.listDailyOperations.invalidate();
+            utils.workOrders.list.invalidate();
+        },
+        onError: (err: any) => toast.error(err.message || "Greška pri spremanju napomene."),
+    });
 
     // Query reservation details
     const { data: resDetails, isLoading: isLoadingRes } = trpc.reservation.getById.useQuery(
@@ -75,9 +94,42 @@ export function WorkOrderExecutionDialog({
         { enabled: open }
     );
 
-    // Initialize state when resDetails changes
+    // Initialize state when existingOrder changes
     useEffect(() => {
-        if (resDetails) {
+        if (existingOrder) {
+            if (existingOrder.operatorNotes !== undefined && existingOrder.operatorNotes !== null) {
+                setOperatorNotes(existingOrder.operatorNotes);
+            }
+            if (existingOrder.actualDurationMin) {
+                setDurationMin(Number(existingOrder.actualDurationMin));
+            }
+            if ((resDetails as any)?.landZoneId) {
+                setSelectedZoneId((resDetails as any).landZoneId);
+            } else if ((resDetails as any)?.landZone?.id) {
+                setSelectedZoneId((resDetails as any).landZone.id);
+            }
+            if (existingOrder.startedAt) {
+                const d = new Date(existingOrder.startedAt);
+                if (!isNaN(d.getTime())) {
+                    setStartDate(format(d, "yyyy-MM-dd"));
+                    setStartTime(format(d, "HH:mm"));
+                }
+            }
+            if (existingOrder.resources && Array.isArray(existingOrder.resources)) {
+                const resMap: Record<string, number> = {};
+                for (const r of existingOrder.resources) {
+                    if (r.resourceId) {
+                        resMap[r.resourceId] = Number(r.quantity) || 1;
+                    }
+                }
+                setSelectedResources(resMap);
+            }
+        }
+    }, [existingOrder]);
+
+    // Initialize state when resDetails changes (fallback if no order yet)
+    useEffect(() => {
+        if (resDetails && !existingOrder) {
             const sched = (resDetails as any).scheduledStart || (resDetails as any).scheduledDate || (resDetails as any).requestedDate;
             if (sched) {
                 const d = new Date(sched);
@@ -111,7 +163,7 @@ export function WorkOrderExecutionDialog({
                 setSelectedResources(resMap);
             }
         }
-    }, [resDetails]);
+    }, [resDetails, existingOrder]);
 
     const userObj = (resDetails as any)?.user;
     const displayName =
@@ -285,11 +337,13 @@ export function WorkOrderExecutionDialog({
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2 text-xl font-bold">
                         <Anchor className="h-5 w-5 text-primary" />
-                        Radni Nalog — Evidencija Terenskog Rada
+                        {isCompleted && existingOrder
+                            ? `Pregled Radnog Naloga — ${existingOrder.orderNumber}`
+                            : "Radni Nalog — Evidencija Terenskog Rada"}
                     </DialogTitle>
                 </DialogHeader>
 
-                {isLoadingActive || isLoadingRes ? (
+                {isLoadingOrder || isLoadingRes ? (
                     <div className="flex justify-center p-8">
                         <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     </div>
@@ -324,6 +378,24 @@ export function WorkOrderExecutionDialog({
                                 <div><span className="text-muted-foreground">Dizalica:</span> {displayCraneName}</div>
                             </div>
                         </div>
+
+                        {/* Completed Order Banner */}
+                        {isCompleted && existingOrder && (
+                            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
+                                <div className="flex items-center gap-2.5">
+                                    <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                                    <div>
+                                        <div className="font-semibold text-sm">
+                                            Radni nalog {existingOrder.orderNumber} je zaključen
+                                        </div>
+                                        <div className="text-xs text-muted-foreground">
+                                            Evidentirano: {existingOrder.completedAt ? new Date(existingOrder.completedAt).toLocaleString("hr-HR") : "Dovršeno"} • Stvarno trajanje: {existingOrder.actualDurationMin || durationMin} min
+                                        </div>
+                                    </div>
+                                </div>
+                                <Badge className="bg-emerald-600 text-white font-semibold">DOVRŠENO</Badge>
+                            </div>
+                        )}
 
                         {/* Active Order Banner if already running */}
                         {activeOrder && (
@@ -365,7 +437,7 @@ export function WorkOrderExecutionDialog({
                         )}
 
                         {/* Future date warning */}
-                        {isFuture && (
+                        {isFuture && !isCompleted && (
                             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
                                 <AlertCircle className="h-4 w-4 shrink-0 text-amber-600" />
                                 <span>
@@ -378,7 +450,7 @@ export function WorkOrderExecutionDialog({
                         <div className="border rounded-lg p-4 space-y-4 bg-card">
                             <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                                 <Clock className="h-3.5 w-3.5" />
-                                Vrijeme i trajanje operacije
+                                {isCompleted ? "Evidentirano vrijeme i trajanje" : "Vrijeme i trajanje operacije"}
                             </div>
 
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -388,7 +460,7 @@ export function WorkOrderExecutionDialog({
                                         type="date"
                                         value={startDate}
                                         onChange={(e) => setStartDate(e.target.value)}
-                                        disabled={!!activeOrder}
+                                        disabled={!!activeOrder || isCompleted}
                                     />
                                 </div>
                                 <div className="space-y-1.5">
@@ -397,7 +469,7 @@ export function WorkOrderExecutionDialog({
                                         type="time"
                                         value={startTime}
                                         onChange={(e) => setStartTime(e.target.value)}
-                                        disabled={!!activeOrder}
+                                        disabled={!!activeOrder || isCompleted}
                                     />
                                 </div>
                                 <div className="space-y-1.5">
@@ -408,6 +480,7 @@ export function WorkOrderExecutionDialog({
                                         onChange={(e) => setDurationMin(Math.max(5, Number(e.target.value)))}
                                         min={5}
                                         step={5}
+                                        disabled={isCompleted}
                                     />
                                 </div>
                             </div>
@@ -419,7 +492,7 @@ export function WorkOrderExecutionDialog({
                                         <MapPin className="h-3.5 w-3.5 text-primary" />
                                         Kopnena zona / Smještaj na suhom vezu
                                     </Label>
-                                    <Select value={selectedZoneId} onValueChange={setSelectedZoneId}>
+                                    <Select value={selectedZoneId} onValueChange={setSelectedZoneId} disabled={isCompleted}>
                                         <SelectTrigger className="w-full">
                                             <SelectValue placeholder="Odaberi zonu na kopnu" />
                                         </SelectTrigger>
@@ -455,23 +528,36 @@ export function WorkOrderExecutionDialog({
                                         <PackagePlus className="h-3.5 w-3.5" />
                                         Dodatni resursi i oprema
                                     </div>
-                                    <Button
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 text-xs text-primary"
-                                        onClick={() => setShowResourcePicker(!showResourcePicker)}
-                                    >
-                                        {showResourcePicker ? "Sakrij resurse" : "Uredi resurse"}
-                                        {extraResourcesTotalEur > 0 && (
-                                            <Badge variant="secondary" className="ml-2 font-mono">
-                                                +{extraResourcesTotalEur.toFixed(2)} €
-                                            </Badge>
-                                        )}
-                                    </Button>
+                                    {!isCompleted && (
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 text-xs text-primary"
+                                            onClick={() => setShowResourcePicker(!showResourcePicker)}
+                                        >
+                                            {showResourcePicker ? "Sakrij resurse" : "Uredi resurse"}
+                                            {extraResourcesTotalEur > 0 && (
+                                                <Badge variant="secondary" className="ml-2 font-mono">
+                                                    +{extraResourcesTotalEur.toFixed(2)} €
+                                                </Badge>
+                                            )}
+                                        </Button>
+                                    )}
                                 </div>
 
-                                {showResourcePicker && (
+                                {isCompleted && existingOrder?.resources && existingOrder.resources.length > 0 && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                        {existingOrder.resources.map((res: any) => (
+                                            <div key={res.id} className="p-2 rounded border text-xs bg-muted/20 flex justify-between items-center">
+                                                <span className="font-medium">{res.name}</span>
+                                                <span className="font-mono font-semibold">{res.quantity} {res.unit || 'kom'}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {!isCompleted && showResourcePicker && (
                                     <div className="space-y-2 pt-1">
                                         {availableResources.length === 0 ? (
                                             <p className="text-xs text-muted-foreground italic">Nema definiranih dodatnih resursa u cjeniku.</p>
@@ -530,13 +616,42 @@ export function WorkOrderExecutionDialog({
 
                             {/* Operator Notes */}
                             <div className="space-y-1.5 pt-1">
-                                <Label className="text-xs">Napomena operatera / zapažanja na trupu</Label>
+                                <div className="flex items-center justify-between">
+                                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                                        <FileText className="h-3.5 w-3.5 text-primary" />
+                                        Napomena operatera / zapažanja na trupu
+                                    </Label>
+                                    {isCompleted && existingOrder && operatorNotes !== (existingOrder.operatorNotes || "") && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-6 text-[11px] text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+                                            onClick={() => updateNotesMutation.mutate({ workOrderId: existingOrder.id, operatorNotes })}
+                                            disabled={updateNotesMutation.isPending}
+                                        >
+                                            {updateNotesMutation.isPending ? (
+                                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                            ) : (
+                                                <Check className="h-3 w-3 mr-1 text-emerald-600" />
+                                            )}
+                                            Spremi izmjenu napomene
+                                        </Button>
+                                    )}
+                                </div>
                                 <Textarea
                                     value={operatorNotes}
                                     onChange={(e) => setOperatorNotes(e.target.value)}
                                     placeholder="Npr. podupiranje izvršeno bez problema, trup opran, pripremljeno za suhi vez..."
-                                    rows={2}
+                                    rows={isCompleted ? 3 : 2}
+                                    className={isCompleted ? "bg-amber-50/20 border-amber-200/80 font-medium text-slate-800" : ""}
                                 />
+                                {isCompleted && existingOrder?.operatorNotes && (
+                                    <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                                        <Check className="h-3 w-3 text-emerald-600" />
+                                        Evidentirana napomena: <span className="font-semibold text-foreground italic">"{existingOrder.operatorNotes}"</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -544,11 +659,34 @@ export function WorkOrderExecutionDialog({
 
                 <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-between items-center gap-2 pt-3 border-t">
                     <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-                        Odustani
+                        {isCompleted ? "Zatvori pregled" : "Odustani"}
                     </Button>
 
                     <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                        {activeOrder ? (
+                        {isCompleted && existingOrder ? (
+                            <>
+                                {operatorNotes !== (existingOrder.operatorNotes || "") && (
+                                    <Button
+                                        type="button"
+                                        onClick={() => updateNotesMutation.mutate({ workOrderId: existingOrder.id, operatorNotes })}
+                                        disabled={updateNotesMutation.isPending}
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 text-xs font-semibold"
+                                    >
+                                        {updateNotesMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                        Spremi izmjenu napomene
+                                    </Button>
+                                )}
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="gap-1.5 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-semibold"
+                                    onClick={() => setShowPdf(true)}
+                                >
+                                    <Printer className="h-3.5 w-3.5" />
+                                    Ispis naloga (A4 PDF)
+                                </Button>
+                            </>
+                        ) : activeOrder ? (
                             <Button
                                 onClick={handleCompleteActive}
                                 disabled={isPending}
@@ -587,6 +725,81 @@ export function WorkOrderExecutionDialog({
                     </div>
                 </DialogFooter>
             </DialogContent>
+
+            {/* Work Order PDF Modal */}
+            {showPdf && existingOrder && (
+                <Dialog open={showPdf} onOpenChange={setShowPdf}>
+                    <DialogContent className="max-w-4xl h-[85vh] flex flex-col p-4 rounded-3xl">
+                        <DialogHeader className="flex flex-row items-center justify-between pb-2 border-b">
+                            <DialogTitle className="text-lg font-bold">
+                                Radni nalog {existingOrder.orderNumber} (A4 Memorandum)
+                            </DialogTitle>
+                            <PDFDownloadLink
+                                document={
+                                    <WorkOrderPdf
+                                        order={{
+                                            orderNumber: existingOrder.orderNumber,
+                                            startedAt: existingOrder.startedAt,
+                                            completedAt: existingOrder.completedAt,
+                                            actualDurationMin: existingOrder.actualDurationMin,
+                                            clientType: displayIsMember ? "member" : "external",
+                                            isStatutoryCovered: Boolean(existingOrder.isStatutoryCovered),
+                                            chargeItemCode: (existingOrder as any).chargeItemCode || null,
+                                            chargeItemName: (existingOrder as any).chargeItemName || null,
+                                            vesselLengthM: displayVesselLength,
+                                            commercialTotal: existingOrder.commercialTotal,
+                                            operatorNotes: operatorNotes || existingOrder.operatorNotes || null,
+                                            userName: displayName,
+                                            userOib: displayOib,
+                                            userEmail: userObj?.email || null,
+                                            userPhone: userObj?.phone || (resDetails as any)?.contactPhone || null,
+                                            vesselName: displayVesselName,
+                                            vesselRegistration: (resDetails as any)?.vesselRegistration || (resDetails as any)?.vessel?.registration || null,
+                                            craneName: displayCraneName,
+                                            operatorName: null,
+                                        }}
+                                    />
+                                }
+                                fileName={`${existingOrder.orderNumber}.pdf`}
+                            >
+                                {({ loading }: any) => (
+                                    <Button size="sm" className="gap-1.5 rounded-xl" disabled={loading}>
+                                        <Download className="h-4 w-4" />
+                                        Preuzmi PDF
+                                    </Button>
+                                )}
+                            </PDFDownloadLink>
+                        </DialogHeader>
+                        <div className="flex-1 w-full h-full pt-2">
+                            <PDFViewer width="100%" height="100%" className="rounded-2xl border">
+                                <WorkOrderPdf
+                                    order={{
+                                        orderNumber: existingOrder.orderNumber,
+                                        startedAt: existingOrder.startedAt,
+                                        completedAt: existingOrder.completedAt,
+                                        actualDurationMin: existingOrder.actualDurationMin,
+                                        clientType: displayIsMember ? "member" : "external",
+                                        isStatutoryCovered: Boolean(existingOrder.isStatutoryCovered),
+                                        chargeItemCode: (existingOrder as any).chargeItemCode || null,
+                                        chargeItemName: (existingOrder as any).chargeItemName || null,
+                                        vesselLengthM: displayVesselLength,
+                                        commercialTotal: existingOrder.commercialTotal,
+                                        operatorNotes: operatorNotes || existingOrder.operatorNotes || null,
+                                        userName: displayName,
+                                        userOib: displayOib,
+                                        userEmail: userObj?.email || null,
+                                        userPhone: userObj?.phone || (resDetails as any)?.contactPhone || null,
+                                        vesselName: displayVesselName,
+                                        vesselRegistration: (resDetails as any)?.vesselRegistration || (resDetails as any)?.vessel?.registration || null,
+                                        craneName: displayCraneName,
+                                        operatorName: null,
+                                    }}
+                                />
+                            </PDFViewer>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+            )}
         </Dialog>
     );
 }
