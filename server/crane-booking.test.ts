@@ -43,7 +43,7 @@ beforeAll(async () => {
     await db.delete(cranes).catch(() => {});
     await db.delete(users).catch(() => {});
 
-    // Seed mock users
+    // Seed mock users (use onConflictDoNothing if already present in DB)
     await db.insert(users).values([
       {
         id: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
@@ -69,7 +69,7 @@ beforeAll(async () => {
         loginMethod: "manus",
         userStatus: "active",
       }
-    ]);
+    ]).onConflictDoNothing();
   }
 });
 
