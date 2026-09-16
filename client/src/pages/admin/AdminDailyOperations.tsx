@@ -118,17 +118,28 @@ export default function AdminDailyOperations() {
         const completedOrders = operations.filter((o: any) => o.workOrder?.status === "completed").length;
         const inProgressOrders = operations.filter((o: any) => o.workOrder?.status === "in_progress").length;
         const notStartedOrders = operations.filter((o: any) => !o.workOrder).length;
-        const totalMinutes = operations.reduce((acc: number, curr: any) => {
-            return acc + (Number(curr.workOrder?.actualDurationMin) || Number(curr.durationMin) || 30);
+
+        // Total planned slot minutes across all scheduled operations
+        const plannedMinutes = operations.reduce((acc: number, curr: any) => {
+            return acc + (Number(curr.durationMin) || 30);
         }, 0);
-        const totalHours = (totalMinutes / 60).toFixed(1);
+        const plannedHours = (plannedMinutes / 60).toFixed(1);
+
+        // Actual crane operation minutes for COMPLETED work orders only
+        const completedMinutes = operations
+            .filter((o: any) => o.workOrder?.status === "completed")
+            .reduce((acc: number, curr: any) => {
+                return acc + (Number(curr.workOrder?.actualDurationMin) || Number(curr.durationMin) || 30);
+            }, 0);
+        const completedHours = (completedMinutes / 60).toFixed(1);
 
         return {
             total,
             completedOrders,
             inProgressOrders,
             notStartedOrders,
-            totalHours,
+            plannedHours,
+            completedHours,
         };
     }, [operations]);
 
@@ -341,7 +352,12 @@ export default function AdminDailyOperations() {
                             <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
                                 {isHr ? "Ukupno rezervacija" : "Total Bookings"}
                             </p>
-                            <h3 className="text-2xl font-bold text-slate-900 mt-1">{metrics.total}</h3>
+                            <h3 className="text-2xl font-bold text-slate-900 mt-1">
+                                {metrics.total}
+                                <span className="text-xs font-normal text-slate-500 ml-1.5">
+                                    ({metrics.plannedHours} h {isHr ? "planirano" : "planned"})
+                                </span>
+                            </h3>
                         </div>
                         <CalendarCheck className="h-8 w-8 text-slate-400 opacity-60" />
                     </CardContent>
@@ -380,7 +396,7 @@ export default function AdminDailyOperations() {
                             <h3 className="text-2xl font-bold text-emerald-900 mt-1">
                                 {metrics.completedOrders}
                                 <span className="text-xs font-normal text-slate-500 ml-1.5">
-                                    ({metrics.totalHours} h rada)
+                                    ({metrics.completedHours} h {isHr ? "rada" : "work"})
                                 </span>
                             </h3>
                         </div>
@@ -459,7 +475,9 @@ export default function AdminDailyOperations() {
                                                 {/* Time slot */}
                                                 <TableCell className="font-medium align-top py-3.5">
                                                     <div className="font-semibold text-slate-900 text-sm">{timeSlotStr}</div>
-                                                    <div className="text-xs text-muted-foreground mt-0.5">({duration} min)</div>
+                                                    <div className="text-xs text-muted-foreground mt-0.5">
+                                                        {isHr ? `(termin: ${duration} min)` : `(slot: ${duration} min)`}
+                                                    </div>
                                                 </TableCell>
 
                                                 {/* Crane */}
