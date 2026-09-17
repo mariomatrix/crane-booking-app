@@ -1243,13 +1243,13 @@ export default function AdminCalendar() {
                     )}
                     <style dangerouslySetInnerHTML={{ __html: `
                         .fc-theme-standard td, .fc-theme-standard th { border-color: var(--border) !important; }
-                        .fc-timegrid-slot { height: 40px !important; }
-                        .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 11px; color: var(--muted-foreground); }
+                        .fc-timegrid-slot { height: 50px !important; }
+                        .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 11px; color: var(--muted-foreground); font-weight: 500; }
                         .fc-col-header-cell { background-color: var(--muted); padding: 8px 0; font-size: 12px; font-weight: 600; }
                         .fc-event { cursor: pointer; transition: transform 0.1s ease; }
                         .fc-event:hover { transform: scale(1.01); z-index: 5; }
                         .fc-timegrid-event { border-radius: 4px; border: none !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                        .fc-v-event .fc-event-main { padding: 4px; }
+                        .fc-v-event .fc-event-main { padding: 4px 6px; }
                     `}} />
                     <FullCalendar
                         key={`${viewMode}-${selectedCrane}-${activeCranes.length}-${workStart}-${workEnd}`}
@@ -1375,31 +1375,31 @@ export default function AdminCalendar() {
 
                             return (
                                 <div
-                                    className="flex flex-col h-full overflow-hidden p-1 rounded-sm text-white leading-tight"
+                                    className="flex flex-col h-full overflow-hidden p-1.5 rounded-sm text-white leading-tight"
                                     style={{ backgroundColor: statusColor }}
                                 >
-                                    <div className="flex items-center justify-between font-bold text-[10px] truncate">
+                                    <div className="flex items-center justify-between font-bold text-[11px] truncate">
                                         <span className="truncate">{p.user}</span>
                                         {p.status === 'pending' && <Clock className="h-3 w-3 animate-pulse shrink-0 ml-0.5" />}
                                         {p.status === 'completed' && <CheckCircle2 className="h-3 w-3 shrink-0 ml-0.5 text-white/95" />}
                                     </div>
                                     {p.serviceTypeName && (
-                                        <div className="text-[9px] font-semibold opacity-95 truncate">
+                                        <div className="text-[10px] font-semibold opacity-95 truncate">
                                             {p.serviceTypeName}
                                         </div>
                                     )}
                                     {details && (
-                                        <div className="text-[9px] font-medium opacity-90 truncate">
+                                        <div className="text-[10px] font-medium opacity-90 truncate">
                                             {details}
                                         </div>
                                     )}
                                     {p.adminNote && (
-                                        <div className="text-[9px] italic opacity-85 truncate">
+                                        <div className="text-[9.5px] italic opacity-85 truncate">
                                             📝 {p.adminNote}
                                         </div>
                                     )}
                                     {p.status === 'cancelled' && p.cancelReason && (
-                                        <div className="text-[9px] italic opacity-90 truncate mt-0.5 border-t border-white/20 pt-0.5">
+                                        <div className="text-[9.5px] italic opacity-90 truncate mt-0.5 border-t border-white/20 pt-0.5">
                                             {p.cancelReason}
                                         </div>
                                     )}
