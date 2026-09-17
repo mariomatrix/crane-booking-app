@@ -14,10 +14,30 @@ async function runMigration() {
     const migrationClient = postgres(process.env.DATABASE_URL, { max: 1 });
     const db = drizzle(migrationClient);
 
+    // ─── Timezone Safety: Ensure timestamptz on reservation & schedule columns ───
+    try {
+        await migrationClient`
+            ALTER TABLE "reservations" 
+            ALTER COLUMN "scheduled_start" SET DATA TYPE timestamp with time zone,
+            ALTER COLUMN "scheduled_end" SET DATA TYPE timestamp with time zone;
+        `;
+        console.log("reservations timezone columns verified (timestamptz).");
+    } catch (e: any) {
+        console.warn("reservations timestamptz verification warning:", e?.message || e);
+    }
+
+    try {
+        await migrationClient`
+            ALTER TABLE "maintenance_blocks" 
+            ALTER COLUMN "start_at" SET DATA TYPE timestamp with time zone,
+            ALTER COLUMN "end_at" SET DATA TYPE timestamp with time zone;
+        `;
+        console.log("maintenance_blocks timezone columns verified (timestamptz).");
+    } catch (e: any) {
+        console.warn("maintenance_blocks timestamptz verification warning:", e?.message || e);
+    }
+
     // ─── Pre-migration check ───────────────────────────────────────────
-    // If __drizzle_migrations exists but key tables are missing, the DB was
-    // reset without clearing migration history. Drop the tracking table to
-    // force Drizzle to re-run all migrations from scratch.
     // Ensure new user columns exist prior to ORM queries
     try {
         await migrationClient`
@@ -973,6 +993,7 @@ async function runMigration() {
     console.log("Admin check completed.");
 
     await migrationClient.end();
+    process.exit(0);
 }
 
 runMigration().catch((err) => {
