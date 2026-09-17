@@ -510,11 +510,14 @@ export default function AdminCalendar() {
                 const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
                 const zgEnd = toZagreb(rawEnd);
 
-                const start = addDays(viewDate, actualCraneIdx);
-                start.setHours(zgStart.hours, zgStart.minutes, 0, 0);
-
-                const end = addDays(viewDate, actualCraneIdx);
-                end.setHours(zgEnd.hours, zgEnd.minutes, 0, 0);
+                // Master view: each crane maps to an "offset day" column.
+                // Build dates using toZagreb(viewDate) + day offset to stay timezone-safe
+                // on any server/browser (UTC servers included).
+                const viewDateZg = toZagreb(viewDate);
+                const craneBaseDate = new Date(Date.UTC(viewDateZg.year, viewDateZg.month - 1, viewDateZg.day + actualCraneIdx));
+                const craneDayStr = toZagreb(craneBaseDate).dateStr;
+                const masterStart = fromZagreb(craneDayStr, zgStart.timeStr);
+                const masterEnd = fromZagreb(craneDayStr, zgEnd.timeStr);
 
                 const isLocked = r.isMaintenance || r.status === 'completed' || r.status === 'cancelled' || r.status === 'rejected';
 
@@ -523,8 +526,8 @@ export default function AdminCalendar() {
                     title: r.isMaintenance
                         ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
                         : `${craneIdx === -1 ? "⚠️ " : ""}${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
-                    start,
-                    end,
+                    start: masterStart,
+                    end: masterEnd,
                     backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
                     borderColor: "transparent",
                     editable: !isLocked,
@@ -551,13 +554,12 @@ export default function AdminCalendar() {
                     return null;
                 }
 
-                const [y, m, d] = zgStart.dateStr.split("-").map(Number);
-                const start = new Date(y, m - 1, d, zgStart.hours, zgStart.minutes, 0, 0);
+                // Use fromZagreb() for proper UTC instants regardless of server/browser timezone
+                const start = fromZagreb(zgStart.dateStr, zgStart.timeStr);
 
                 const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
                 const zgEnd = toZagreb(rawEnd);
-                const [ey, em, ed] = zgEnd.dateStr.split("-").map(Number);
-                const end = new Date(ey, em - 1, ed, zgEnd.hours, zgEnd.minutes, 0, 0);
+                const end = fromZagreb(zgEnd.dateStr, zgEnd.timeStr);
 
                 const isLocked = r.isMaintenance || r.status === 'completed' || r.status === 'cancelled' || r.status === 'rejected';
 
@@ -1278,6 +1280,7 @@ export default function AdminCalendar() {
                         slotLabelInterval="00:30:00"
                         snapDuration="00:30:00"
                         expandRows={true}
+                        timeZone="Europe/Zagreb"
                         slotLabelFormat={{
                             hour: '2-digit',
                             minute: '2-digit',
