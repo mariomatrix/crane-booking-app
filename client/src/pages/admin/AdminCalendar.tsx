@@ -661,14 +661,18 @@ export default function AdminCalendar() {
 
         if (viewMode !== 'master') {
             const dropStart = info.event.start!;
-            const targetDateStr = `${dropStart.getFullYear()}-${String(dropStart.getMonth() + 1).padStart(2, "0")}-${String(dropStart.getDate()).padStart(2, "0")}`;
+            // Use toZagreb() instead of getHours() — always correct regardless of
+            // FullCalendar's internal Date representation or browser/server timezone
+            const zgDrop = toZagreb(dropStart);
+            const targetDateStr = zgDrop.dateStr;
 
             let timeStr: string;
             if (viewMode === 'dayGridMonth') {
                 const origStart = info.oldEvent.start!;
-                timeStr = `${String(origStart.getHours()).padStart(2, "0")}:${String(origStart.getMinutes()).padStart(2, "0")}`;
+                const zgOrig = toZagreb(origStart);
+                timeStr = zgOrig.timeStr;
             } else {
-                timeStr = `${String(dropStart.getHours()).padStart(2, "0")}:${String(dropStart.getMinutes()).padStart(2, "0")}`;
+                timeStr = zgDrop.timeStr;
             }
 
             const newStart = fromZagreb(targetDateStr, timeStr);
@@ -698,8 +702,8 @@ export default function AdminCalendar() {
 
         const newTargetCrane = activeCranes[diffDays];
         const dateStr = formatToSqlDate(viewDate);
-        const timeStr = `${String(newOffsetDate.getHours()).padStart(2, "0")}:${String(newOffsetDate.getMinutes()).padStart(2, "0")}`;
-        const newStart = fromZagreb(dateStr, timeStr);
+        const zgOffset = toZagreb(newOffsetDate);
+        const newStart = fromZagreb(dateStr, zgOffset.timeStr);
         const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
         rescheduleMutation.mutate({
@@ -748,17 +752,15 @@ export default function AdminCalendar() {
             }
             craneId = activeCranes[diffDays].id;
             const dateStr = formatToSqlDate(viewDate);
-            const startTimeStr = `${String(startObj.getHours()).padStart(2, "0")}:${String(startObj.getMinutes()).padStart(2, "0")}`;
-            const endTimeStr = `${String(endObj.getHours()).padStart(2, "0")}:${String(endObj.getMinutes()).padStart(2, "0")}`;
-            newStart = fromZagreb(dateStr, startTimeStr);
-            newEnd = fromZagreb(dateStr, endTimeStr);
+            const zgStart = toZagreb(startObj);
+            const zgEnd = toZagreb(endObj);
+            newStart = fromZagreb(dateStr, zgStart.timeStr);
+            newEnd = fromZagreb(dateStr, zgEnd.timeStr);
         } else {
-            const targetDateStr = `${startObj.getFullYear()}-${String(startObj.getMonth() + 1).padStart(2, "0")}-${String(startObj.getDate()).padStart(2, "0")}`;
-            const targetEndDateStr = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, "0")}-${String(endObj.getDate()).padStart(2, "0")}`;
-            const startTimeStr = `${String(startObj.getHours()).padStart(2, "0")}:${String(startObj.getMinutes()).padStart(2, "0")}`;
-            const endTimeStr = `${String(endObj.getHours()).padStart(2, "0")}:${String(endObj.getMinutes()).padStart(2, "0")}`;
-            newStart = fromZagreb(targetDateStr, startTimeStr);
-            newEnd = fromZagreb(targetEndDateStr, endTimeStr);
+            const zgStart = toZagreb(startObj);
+            const zgEnd = toZagreb(endObj);
+            newStart = fromZagreb(zgStart.dateStr, zgStart.timeStr);
+            newEnd = fromZagreb(zgEnd.dateStr, zgEnd.timeStr);
         }
 
         rescheduleMutation.mutate({
@@ -1280,7 +1282,6 @@ export default function AdminCalendar() {
                         slotLabelInterval="00:30:00"
                         snapDuration="00:30:00"
                         expandRows={true}
-                        timeZone="Europe/Zagreb"
                         slotLabelFormat={{
                             hour: '2-digit',
                             minute: '2-digit',
@@ -1307,16 +1308,15 @@ export default function AdminCalendar() {
                                     }
                                     targetCrane = activeCranes[diffDays];
                                     const dateStr = formatToSqlDate(viewDate);
-                                    const timeStr = `${String(dropDate.getHours()).padStart(2, "0")}:${String(dropDate.getMinutes()).padStart(2, "0")}`;
-                                    startDate = fromZagreb(dateStr, timeStr);
+                                    const zgDrop = toZagreb(dropDate);
+                                    startDate = fromZagreb(dateStr, zgDrop.timeStr);
                                 } else {
                                     if (selectedCrane !== "all") {
                                         const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
                                         if (found) targetCrane = found;
                                     }
-                                    const targetDateStr = `${dropDate.getFullYear()}-${String(dropDate.getMonth() + 1).padStart(2, "0")}-${String(dropDate.getDate()).padStart(2, "0")}`;
-                                    const timeStr = `${String(dropDate.getHours()).padStart(2, "0")}:${String(dropDate.getMinutes()).padStart(2, "0")}`;
-                                    startDate = fromZagreb(targetDateStr, timeStr);
+                                    const zgDrop = toZagreb(dropDate);
+                                    startDate = fromZagreb(zgDrop.dateStr, zgDrop.timeStr);
                                 }
 
                                 info.revert(); // Remove the temp DOM element
