@@ -488,8 +488,13 @@ export default function AdminCalendar() {
             if (statusFilters.length === 0 && (r.status === 'cancelled' || r.status === 'rejected')) {
                 return null;
             }
-            const rawDate = r.scheduledStart ? new Date(r.scheduledStart) : (r.requestedDate ? fromZagreb(r.requestedDate, "08:00") : null);
-            if (!rawDate || isNaN(rawDate.getTime())) return null;
+            // A reservation MUST have scheduledStart to appear on the calendar grid.
+            // Items on waiting list or without confirmed scheduled time should never appear as grey events.
+            if (!r.scheduledStart || r.status === 'waiting_list' || r.status === 'land_wait') {
+                return null;
+            }
+            const rawDate = new Date(r.scheduledStart);
+            if (isNaN(rawDate.getTime())) return null;
 
             const craneIdx = activeCranes.findIndex(c => String(c.id).toLowerCase() === String(r.craneId || "").toLowerCase());
             const zgStart = toZagreb(rawDate);

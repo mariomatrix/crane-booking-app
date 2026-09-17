@@ -38,12 +38,14 @@ import {
   SlidersHorizontal,
   AlertTriangle,
   Info,
+  Clock,
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate, formatToSqlDate, fromZagreb, toZagreb } from "@/lib/date-utils";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
+import { cn } from "@/lib/utils";
 
 export default function AdminLandWaiting() {
   const { lang } = useLang();
@@ -81,6 +83,26 @@ export default function AdminLandWaiting() {
     { userId },
     { enabled: !!userId }
   );
+
+  // Available slots query for direct assign dialog (mirrors ReservationScheduleModal)
+  const directDateStr = directDate ? formatToSqlDate(directDate) : "";
+  const directSlotsQuery = trpc.calendar.availableSlots.useQuery(
+    {
+      craneId: directCraneId || undefined,
+      date: directDateStr,
+      durationMin: Number(directDuration) || 30,
+    },
+    {
+      enabled: directAssignDialogOpen && !!directDate && !!directCraneId,
+      refetchOnWindowFocus: false,
+    }
+  );
+  const directSlotData = directSlotsQuery.data;
+  const directAllSlots = directSlotData?.slots || [];
+  const directFreeSlots = directSlotData?.availableSlots || [];
+  const directIsWorkingDay = directSlotData?.isWorkingDay ?? true;
+  const directWorkingHours = directSlotData?.workingHours;
+  const directSeasonName = directSlotData?.seasonName;
 
   // Identify the largest crane (highest capacity in kN) for PŠD Špinut 9-15m rule
   const largestCrane = [...cranes]
@@ -296,14 +318,6 @@ export default function AdminLandWaiting() {
     ? directAssignEntry.vessel
     : userVessels.find(v => v.id === vesselId);
   const currentVesselLength = Number(currentModalVessel?.lengthM) || 0;
-
-  // Time slot options in 30-min intervals (from 06:00 to 20:00)
-  const timeSlotOptions: string[] = [];
-  for (let h = 6; h <= 20; h++) {
-    const hh = String(h).padStart(2, "0");
-    timeSlotOptions.push(`${hh}:00`);
-    if (h < 20) timeSlotOptions.push(`${hh}:30`);
-  }
 
   return (
     <div className="space-y-6">
@@ -962,15 +976,38 @@ export default function AdminLandWaiting() {
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs font-semibold">{isHr ? "Vrijeme termina" : "Slot Time"} *</Label>
-                <Select value={directTime} onValueChange={setDirectTime}>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold flex items-center gap-1">
+                    <Clock className="h-3.5 w-3.5 text-slate-500" />
+                    {isHr ? "Vrijeme termina" : "Slot Time"} *
+                  </Label>
+                  {directSlotsQuery.isFetching && (
+                    <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                      <Loader2 className="h-3 w-3 animate-spin" /> {isHr ? "Provjera..." : "Checking..."}
+                    </span>
+                  )}
+                </div>
+                <Select value={directTime} onValueChange={setDirectTime} disabled={!directCraneId || !directDate}>
                   <SelectTrigger className="rounded-xl">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="max-h-56">
-                    {timeSlotOptions.map(t => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
+                    {!directIsWorkingDay ? (
+                      <SelectItem value="none" disabled>{isHr ? "Neradni dan" : "Non-working day"}</SelectItem>
+                    ) : directAllSlots.length === 0 ? (
+                      <SelectItem value="none" disabled>{isHr ? "Nema termina" : "No slots available"}</SelectItem>
+                    ) : (
+                      directAllSlots.map((slot: any) => (
+                        <SelectItem
+                          key={slot.time}
+                          value={slot.time}
+                          disabled={!slot.available}
+                          className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
+                        >
+                          {slot.available ? `✓ ${slot.time} (${isHr ? "Slobodno" : "Free"})` : `✗ ${slot.time} (${isHr ? "Zauzeto" : "Busy"})`}
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -990,6 +1027,49 @@ export default function AdminLandWaiting() {
                 </Select>
               </div>
             </div>
+
+            {/* Season working hours notice */}
+            {directWorkingHours && directSeasonName && (
+              <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded-lg border border-primary/10">
+                🕒 {isHr ? "Radno vrijeme" : "Working hours"} ({directSeasonName}): {directWorkingHours.from} — {directWorkingHours.to}h
+              </p>
+            )}
+
+            {/* Non-working day warning */}
+            {!directIsWorkingDay && directCraneId && directDate && (
+              <p className="text-[11px] text-amber-700 font-medium flex items-center gap-1.5 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-800">
+                ⚠️ {isHr ? "Odabrani datum je neradni dan prema aktivnoj sezoni." : "Selected date is a non-working day in the active season."}
+              </p>
+            )}
+
+            {/* Quick-pick free slot chips */}
+            {directIsWorkingDay && directFreeSlots.length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                  ⚡ {isHr ? "Brzi odabir slobodnog 30-min termina:" : "Quick pick free slot:"}
+                </span>
+                <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/40 max-h-24 overflow-y-auto">
+                  {directFreeSlots.map((slot: string) => {
+                    const isSelected = directTime === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setDirectTime(slot)}
+                        className={cn(
+                          "px-2 py-0.5 rounded-lg text-xs font-mono font-medium transition-all shadow-xs",
+                          isSelected
+                            ? "bg-emerald-600 text-white font-bold ring-2 ring-emerald-400"
+                            : "bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100 dark:bg-slate-800 dark:text-emerald-300 dark:border-emerald-800"
+                        )}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* 5. Operator note */}
             <div className="space-y-1">
