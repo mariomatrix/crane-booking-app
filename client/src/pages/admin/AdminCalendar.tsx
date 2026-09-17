@@ -979,7 +979,7 @@ export default function AdminCalendar() {
                                     </DialogHeader>
                                 </div>
                                 <div className="px-6 pb-6">
-                                    <div className="grid gap-5 py-6">
+                                    <div className="grid gap-5 py-6 min-w-0">
                                         <div className="grid gap-2">
                                             <Label>Datum</Label>
                                             <Popover>
@@ -987,7 +987,7 @@ export default function AdminCalendar() {
                                                     <Button
                                                         variant={"outline"}
                                                         className={cn(
-                                                            "w-full justify-start text-left font-normal",
+                                                            "w-[200px] justify-start text-left font-normal",
                                                             !editDate && "text-muted-foreground"
                                                         )}
                                                     >
@@ -1030,9 +1030,10 @@ export default function AdminCalendar() {
                                             </div>
                                         </div>
                                         {editSeasonWorkingHours && (
-                                            <p className="text-[11px] text-primary/80 font-medium flex items-center gap-1.5 bg-primary/5 px-2.5 py-1 rounded border border-primary/10">
-                                                🕒 Radno vrijeme sezone ({editSeasonWorkingHours.seasonName}): {editSeasonWorkingHours.from} — {editSeasonWorkingHours.to}h
-                                            </p>
+                                            <div className="text-[11px] text-primary/90 font-medium flex flex-wrap items-center gap-1.5 bg-primary/5 px-2.5 py-1.5 rounded border border-primary/10 w-fit max-w-full leading-tight">
+                                                <span>🕒 Radno vrijeme sezone ({editSeasonWorkingHours.seasonName}):</span>
+                                                <span className="font-bold">{editSeasonWorkingHours.from} — {editSeasonWorkingHours.to}h</span>
+                                            </div>
                                         )}
                                         <div className="grid gap-2">
                                             <Label>Dizalica</Label>
