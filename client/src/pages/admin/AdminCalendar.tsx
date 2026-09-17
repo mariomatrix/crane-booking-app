@@ -1243,7 +1243,6 @@ export default function AdminCalendar() {
                     )}
                     <style dangerouslySetInnerHTML={{ __html: `
                         .fc-theme-standard td, .fc-theme-standard th { border-color: var(--border) !important; }
-                        .fc-timegrid-slot { height: 50px !important; }
                         .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 11px; color: var(--muted-foreground); font-weight: 500; }
                         .fc-col-header-cell { background-color: var(--muted); padding: 8px 0; font-size: 12px; font-weight: 600; }
                         .fc-event { cursor: pointer; transition: transform 0.1s ease; }
@@ -1273,6 +1272,7 @@ export default function AdminCalendar() {
                         slotDuration="00:30:00"
                         slotLabelInterval="00:30:00"
                         snapDuration="00:30:00"
+                        expandRows={true}
                         slotLabelFormat={{
                             hour: '2-digit',
                             minute: '2-digit',
@@ -1292,7 +1292,7 @@ export default function AdminCalendar() {
                                 let startDate: Date;
 
                                 if (viewMode === 'master') {
-                                    const diffDays = Math.round((dropDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+                                    const diffDays = Math.floor((dropDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
                                     if (diffDays < 0 || diffDays >= activeCranes.length) {
                                         info.revert();
                                         return;
