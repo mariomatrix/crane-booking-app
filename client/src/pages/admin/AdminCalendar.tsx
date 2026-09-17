@@ -1257,7 +1257,8 @@ export default function AdminCalendar() {
                         .fc-event { cursor: pointer; transition: transform 0.1s ease; }
                         .fc-event:hover { transform: scale(1.01); z-index: 5; }
                         .fc-timegrid-event { border-radius: 4px; border: none !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                        .fc-v-event .fc-event-main { padding: 4px 6px; }
+                        .fc-v-event .fc-event-main { padding: 2px 4px; }
+                        .fc .fc-timegrid-slot { height: 38px !important; }
                     `}} />
                     <FullCalendar
                         key={`${viewMode}-${selectedCrane}-${activeCranes.length}-${workStart}-${workEnd}`}
@@ -1383,7 +1384,7 @@ export default function AdminCalendar() {
 
                             return (
                                 <div
-                                    className="flex flex-col h-full overflow-hidden p-1.5 rounded-sm text-white leading-tight"
+                                    className="flex flex-col h-full overflow-hidden py-1 px-1.5 rounded-sm text-white leading-tight"
                                     style={{ backgroundColor: statusColor }}
                                 >
                                     <div className="flex items-center justify-between font-bold text-[11px] truncate">
@@ -1412,7 +1413,7 @@ export default function AdminCalendar() {
                                         </div>
                                     )}
                                     {!p.isMaintenance && p.status === 'pending' && (
-                                        <div className="mt-auto flex gap-1 pt-1 border-t border-white/20">
+                                        <div className="mt-auto flex gap-1 pt-0.5 border-t border-white/20">
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); window.location.href = `/admin/reservations?status=pending`; }}
                                                 className="hover:bg-white/20 rounded p-0.5"

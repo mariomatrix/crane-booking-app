@@ -217,6 +217,12 @@ export default function Calendar() {
             background-color: rgba(59, 130, 246, 0.05) !important;
             cursor: pointer;
           }
+          .fc .fc-timegrid-slot {
+            height: 38px !important;
+          }
+          .fc-v-event .fc-event-main {
+            padding: 2px 4px;
+          }
           .fc-daygrid-day:hover {
             background-color: rgba(59, 130, 246, 0.05) !important;
             cursor: pointer;
