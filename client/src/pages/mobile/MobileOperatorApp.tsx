@@ -20,9 +20,10 @@ import {
     User,
     Ship,
     Loader2,
-    RefreshCw
+    RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { toZagreb } from "@shared/timezone";
 
 interface OperatorUser {
     id: string;
@@ -127,7 +128,7 @@ export default function MobileOperatorApp() {
 
     // Tasks & Schedule State
     const [tasks, setTasks] = useState<TaskItem[]>([]);
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
+    const [selectedDate, setSelectedDate] = useState(() => toZagreb(new Date()).dateStr);
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCraneId, setSelectedCraneId] = useState<string>("all");
     const [isLoadingTasks, setIsLoadingTasks] = useState(false);
@@ -766,13 +767,9 @@ export default function MobileOperatorApp() {
                                     let timeStr = "—";
                                     if (t.scheduledStart) {
                                         try {
-                                            timeStr = new Date(t.scheduledStart).toLocaleTimeString("hr-HR", {
-                                                timeZone: "Europe/Zagreb",
-                                                hour: "2-digit",
-                                                minute: "2-digit",
-                                            });
+                                            timeStr = toZagreb(t.scheduledStart).timeStr;
                                         } catch {
-                                            timeStr = new Date(t.scheduledStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                            timeStr = "—";
                                         }
                                     } else if (t.requestedTimeSlot) {
                                         timeStr = t.requestedTimeSlot;

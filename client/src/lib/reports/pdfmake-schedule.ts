@@ -1,6 +1,7 @@
 import pdfMake from "../pdfmake";
 import { format, startOfWeek, endOfWeek, eachDayOfInterval } from "date-fns";
 import { hr } from "date-fns/locale";
+import { toZagreb } from "@shared/timezone";
 import type { TDocumentDefinitions, Content, TableCell } from "pdfmake/interfaces";
 
 export interface GeneratePdfOptions {
@@ -225,14 +226,15 @@ export function exportSchedulePdf(options: GeneratePdfOptions) {
             ];
 
             days.forEach(day => {
+                const dayDateStr = format(day, "yyyy-MM-dd");
                 const dayItems = reservations.filter((r: any) => {
                     if (r.craneId !== crane.id || !r.scheduledStart) return false;
-                    return isSameDay(safeParseDate(r.scheduledStart), day);
+                    return toZagreb(r.scheduledStart).dateStr === dayDateStr;
                 });
 
                 if (dayItems.length > 0) {
                     const cellStack: any[] = dayItems.map((item: any) => {
-                        const timeStr = item.scheduledStart ? format(safeParseDate(item.scheduledStart), "HH:mm") : "";
+                        const timeStr = item.scheduledStart ? toZagreb(item.scheduledStart).timeStr : "";
                         return {
                             stack: [
                                 { text: `${timeStr} ${item.clientName || "Klijent"}`, bold: true, fontSize: 7, color: item.isMaintenance ? "#9a3412" : "#0f172a" },

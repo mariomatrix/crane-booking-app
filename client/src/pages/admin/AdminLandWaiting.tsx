@@ -955,7 +955,7 @@ export default function AdminLandWaiting() {
                 <Input
                   className="rounded-xl"
                   type="date"
-                  value={directDate ? directDate.toISOString().split("T")[0] : ""}
+                  value={directDate ? formatToSqlDate(directDate) : ""}
                   onChange={e => setDirectDate(e.target.value ? new Date(e.target.value) : undefined)}
                   required
                 />

@@ -1,6 +1,6 @@
 import { Document, Page, Text, View, StyleSheet, Image, Font } from "@react-pdf/renderer";
 import { format, eachDayOfInterval } from "date-fns";
-import { toZagreb } from "@shared/timezone";
+import { toZagreb, formatZagrebDate } from "@shared/timezone";
 
 // Register custom font to support Latin diacritics in PDF
 Font.register({
@@ -233,10 +233,10 @@ export function CraneSchedulePdf({ data, dateFrom, dateTo, marinaName, marinaLog
                 {data.map((item, idx) => (
                     <View key={idx} style={styles.tableRow}>
                         <Text style={[styles.tableCell, { width: "10%" }]}>
-                            {item.scheduledStart ? format(new Date(item.scheduledStart), "dd.MM.yy") : "-"}
+                            {item.scheduledStart ? formatZagrebDate(item.scheduledStart) : "-"}
                         </Text>
                         <Text style={[styles.tableCell, { width: "9%" }]}>
-                            {item.scheduledStart ? format(new Date(item.scheduledStart), "HH:mm") : "-"}
+                            {item.scheduledStart ? toZagreb(item.scheduledStart).timeStr : "-"}
                         </Text>
                         <Text style={[styles.tableCell, { width: "21%" }]}>
                             {item.clientName || "—"}{"\n"}
@@ -784,9 +784,10 @@ export function WeeklySchedulePdf({
 
                         {/* Day columns */}
                         {days.map((day, dIdx) => {
+                            const dayDateStr = format(day, "yyyy-MM-dd");
                             const dayItems = reservations.filter((r: any) => {
                                 if (r.craneId !== crane.id || !r.scheduledStart) return false;
-                                return isSameDay(safeParseDate(r.scheduledStart), day);
+                                return toZagreb(r.scheduledStart).dateStr === dayDateStr;
                             });
 
                             return (
@@ -796,7 +797,7 @@ export function WeeklySchedulePdf({
                                             ? "#f97316"
                                             : (r.status === "approved" ? "#059669" : r.status === "completed" ? "#16a34a" : r.status === "pending" ? "#f59e0b" : "#4b5563");
 
-                                        const timeStr = r.scheduledStart ? format(safeParseDate(r.scheduledStart), "HH:mm") : "";
+                                        const timeStr = r.scheduledStart ? toZagreb(r.scheduledStart).timeStr : "";
                                         const clientName = r.user?.name || r.clientName || "Korisnik";
                                         const reg = r.vesselRegistration || "—";
                                         const action = r.isMaintenance ? "ODRŽAVANJE" : (r.serviceTypeName || r.serviceType?.name || "—");
@@ -889,10 +890,10 @@ export function MonthlySchedulePdf({
                 {reservations.map((item, idx) => (
                     <View key={idx} style={styles.tableRow}>
                         <Text style={[styles.tableCell, { width: "10%" }]}>
-                            {item.scheduledStart ? format(safeParseDate(item.scheduledStart), "dd.MM.yyyy.") : "-"}
+                            {item.scheduledStart ? formatZagrebDate(item.scheduledStart) : "-"}
                         </Text>
                         <Text style={[styles.tableCell, { width: "8%", fontFamily: "Roboto-Bold" }]}>
-                            {item.scheduledStart ? format(safeParseDate(item.scheduledStart), "HH:mm") : "-"}
+                            {item.scheduledStart ? toZagreb(item.scheduledStart).timeStr : "-"}
                         </Text>
                         <Text style={[styles.tableCell, { width: "22%" }]}>
                             {item.clientName || "—"}{"\n"}

@@ -273,7 +273,7 @@ export default function AdminCalendar() {
     // Maintenance Form State
     const [maintCraneId, setMaintCraneId] = useState("");
     const [maintDateObj, setMaintDateObj] = useState<Date | undefined>(new Date());
-    const [maintDate, setMaintDate] = useState(new Date().toISOString().split("T")[0]);
+    const [maintDate, setMaintDate] = useState(() => toZagreb(new Date()).dateStr);
     const [maintStart, setMaintStart] = useState("08:00");
     const [maintEnd, setMaintEnd] = useState("09:00");
     const [maintDesc, setMaintDesc] = useState("");
@@ -307,7 +307,7 @@ export default function AdminCalendar() {
             setIsMaintOpen(false);
             setMaintDesc("");
             setMaintDateObj(new Date());
-            setMaintDate(new Date().toISOString().split("T")[0]);
+            setMaintDate(toZagreb(new Date()).dateStr);
         },
         onError: (err: any) => toast.error(err.message),
     });
@@ -546,8 +546,13 @@ export default function AdminCalendar() {
                     return null;
                 }
 
-                const start = rawDate;
-                const end = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
+                const [y, m, d] = zgStart.dateStr.split("-").map(Number);
+                const start = new Date(y, m - 1, d, zgStart.hours, zgStart.minutes, 0, 0);
+
+                const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
+                const zgEnd = toZagreb(rawEnd);
+                const [ey, em, ed] = zgEnd.dateStr.split("-").map(Number);
+                const end = new Date(ey, em - 1, ed, zgEnd.hours, zgEnd.minutes, 0, 0);
 
                 const isLocked = r.isMaintenance || r.status === 'completed' || r.status === 'cancelled' || r.status === 'rejected';
 
@@ -645,19 +650,22 @@ export default function AdminCalendar() {
         }
 
         const id = String(info.event.extendedProps.reservationId || info.event.id);
+        const durationMin = info.event.extendedProps?.durationMin || 30;
 
         if (viewMode !== 'master') {
-            const origStart = info.oldEvent.start!;
-            const origEnd = info.oldEvent.end || new Date(origStart.getTime() + (info.event.extendedProps?.durationMin || 30) * 60000);
-            const durationMs = origEnd.getTime() - origStart.getTime();
+            const dropStart = info.event.start!;
+            const targetDateStr = `${dropStart.getFullYear()}-${String(dropStart.getMonth() + 1).padStart(2, "0")}-${String(dropStart.getDate()).padStart(2, "0")}`;
 
-            let newStart = info.event.start!;
+            let timeStr: string;
             if (viewMode === 'dayGridMonth') {
-                const dateStr = formatToSqlDate(info.event.start!);
-                const zgOrig = toZagreb(origStart);
-                newStart = fromZagreb(dateStr, zgOrig.timeStr);
+                const origStart = info.oldEvent.start!;
+                timeStr = `${String(origStart.getHours()).padStart(2, "0")}:${String(origStart.getMinutes()).padStart(2, "0")}`;
+            } else {
+                timeStr = `${String(dropStart.getHours()).padStart(2, "0")}:${String(dropStart.getMinutes()).padStart(2, "0")}`;
             }
-            const newEnd = new Date(newStart.getTime() + durationMs);
+
+            const newStart = fromZagreb(targetDateStr, timeStr);
+            const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
             rescheduleMutation.mutate({
                 id,
@@ -685,11 +693,7 @@ export default function AdminCalendar() {
         const dateStr = formatToSqlDate(viewDate);
         const timeStr = `${String(newOffsetDate.getHours()).padStart(2, "0")}:${String(newOffsetDate.getMinutes()).padStart(2, "0")}`;
         const newStart = fromZagreb(dateStr, timeStr);
-
-        const origStart = info.oldEvent.start!;
-        const origEnd = info.oldEvent.end || new Date(origStart.getTime() + (info.event.extendedProps?.durationMin || 30) * 60000);
-        const durationMs = origEnd.getTime() - origStart.getTime();
-        const newEnd = new Date(newStart.getTime() + durationMs);
+        const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
         rescheduleMutation.mutate({
             id,
@@ -722,24 +726,32 @@ export default function AdminCalendar() {
             return;
         }
         const id = String(info.event.extendedProps.reservationId || info.event.id);
-        let newStart = info.event.start!;
-        let newEnd = info.event.end!;
+        const startObj = info.event.start!;
+        const endObj = info.event.end!;
         let craneId = info.event.extendedProps.craneId;
 
+        let newStart: Date;
+        let newEnd: Date;
+
         if (viewMode === 'master') {
-            const diffDays = Math.floor((newStart.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+            const diffDays = Math.floor((startObj.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
             if (diffDays < 0 || diffDays >= activeCranes.length) {
                 info.revert();
                 return;
             }
             craneId = activeCranes[diffDays].id;
             const dateStr = formatToSqlDate(viewDate);
-            const timeStr = `${String(newStart.getHours()).padStart(2, "0")}:${String(newStart.getMinutes()).padStart(2, "0")}`;
-            const realStart = fromZagreb(dateStr, timeStr);
-
-            const durationMs = newEnd.getTime() - newStart.getTime();
-            newStart = realStart;
-            newEnd = new Date(realStart.getTime() + durationMs);
+            const startTimeStr = `${String(startObj.getHours()).padStart(2, "0")}:${String(startObj.getMinutes()).padStart(2, "0")}`;
+            const endTimeStr = `${String(endObj.getHours()).padStart(2, "0")}:${String(endObj.getMinutes()).padStart(2, "0")}`;
+            newStart = fromZagreb(dateStr, startTimeStr);
+            newEnd = fromZagreb(dateStr, endTimeStr);
+        } else {
+            const targetDateStr = `${startObj.getFullYear()}-${String(startObj.getMonth() + 1).padStart(2, "0")}-${String(startObj.getDate()).padStart(2, "0")}`;
+            const targetEndDateStr = `${endObj.getFullYear()}-${String(endObj.getMonth() + 1).padStart(2, "0")}-${String(endObj.getDate()).padStart(2, "0")}`;
+            const startTimeStr = `${String(startObj.getHours()).padStart(2, "0")}:${String(startObj.getMinutes()).padStart(2, "0")}`;
+            const endTimeStr = `${String(endObj.getHours()).padStart(2, "0")}:${String(endObj.getMinutes()).padStart(2, "0")}`;
+            newStart = fromZagreb(targetDateStr, startTimeStr);
+            newEnd = fromZagreb(targetEndDateStr, endTimeStr);
         }
 
         rescheduleMutation.mutate({
@@ -1245,6 +1257,11 @@ export default function AdminCalendar() {
                         plugins={[timeGridPlugin, dayGridPlugin, interactionPlugin]}
                         initialView={viewMode === 'master' ? 'timeGrid' : viewMode}
                         initialDate={viewDate}
+                        views={{
+                            timeGrid: {
+                                duration: viewMode === 'master' ? { days: Math.max(1, activeCranes.length) } : undefined
+                            }
+                        }}
                         visibleRange={viewMode === 'master' ? {
                             start: viewDate,
                             end: addDays(viewDate, Math.max(1, activeCranes.length))
@@ -1272,7 +1289,7 @@ export default function AdminCalendar() {
                                 const dropDate = info.event.start!;
 
                                 let targetCrane = activeCranes[0] || cranesList[0];
-                                let startDate = dropDate;
+                                let startDate: Date;
 
                                 if (viewMode === 'master') {
                                     const diffDays = Math.round((dropDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
@@ -1284,9 +1301,14 @@ export default function AdminCalendar() {
                                     const dateStr = formatToSqlDate(viewDate);
                                     const timeStr = `${String(dropDate.getHours()).padStart(2, "0")}:${String(dropDate.getMinutes()).padStart(2, "0")}`;
                                     startDate = fromZagreb(dateStr, timeStr);
-                                } else if (selectedCrane !== "all") {
-                                    const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
-                                    if (found) targetCrane = found;
+                                } else {
+                                    if (selectedCrane !== "all") {
+                                        const found = cranesList.find((c: any) => String(c.id) === String(selectedCrane));
+                                        if (found) targetCrane = found;
+                                    }
+                                    const targetDateStr = `${dropDate.getFullYear()}-${String(dropDate.getMonth() + 1).padStart(2, "0")}-${String(dropDate.getDate()).padStart(2, "0")}`;
+                                    const timeStr = `${String(dropDate.getHours()).padStart(2, "0")}:${String(dropDate.getMinutes()).padStart(2, "0")}`;
+                                    startDate = fromZagreb(targetDateStr, timeStr);
                                 }
 
                                 info.revert(); // Remove the temp DOM element
