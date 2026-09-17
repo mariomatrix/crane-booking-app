@@ -794,18 +794,18 @@ export default function AdminCalendar() {
     return (
         <div className="flex flex-col h-full space-y-4 pb-8">
             {/* Header & Main Actions */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Administratorski Kalendar</h1>
-                    <p className="text-muted-foreground">Upravljanje svim dizalicama i terminima.</p>
+                    <p className="text-xs text-muted-foreground">Upravljanje svim dizalicama i terminima.</p>
                 </div>
-                <div className="flex items-center gap-2">
-                    <div className="flex bg-muted p-1 rounded-md mr-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex bg-muted p-1 rounded-md">
                         <Button
                             variant={viewMode === 'master' ? 'secondary' : 'ghost'}
                             size="sm"
                             onClick={() => setViewMode('master')}
-                            className="h-8 text-xs"
+                            className="h-8 text-xs font-semibold"
                         >
                             Dnevi (Master)
                         </Button>
@@ -813,7 +813,7 @@ export default function AdminCalendar() {
                             variant={viewMode === 'timeGridWeek' ? 'secondary' : 'ghost'}
                             size="sm"
                             onClick={() => setViewMode('timeGridWeek')}
-                            className="h-8 text-xs"
+                            className="h-8 text-xs font-semibold"
                         >
                             Tjedni
                         </Button>
@@ -821,12 +821,34 @@ export default function AdminCalendar() {
                             variant={viewMode === 'dayGridMonth' ? 'secondary' : 'ghost'}
                             size="sm"
                             onClick={() => setViewMode('dayGridMonth')}
-                            className="h-8 text-xs"
+                            className="h-8 text-xs font-semibold"
                         >
                             Mjesečni
                         </Button>
                     </div>
-                    <Button onClick={() => setIsCreateResOpen(true)} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90">
+
+                    <UserSearchCombobox
+                        users={usersList as any}
+                        value={selectedUser}
+                        onChange={setSelectedUser}
+                    />
+
+                    <div className="flex items-center gap-1">
+                        <Anchor className="h-4 w-4 text-muted-foreground mr-1" />
+                        <Select value={selectedCrane} onValueChange={setSelectedCrane}>
+                            <SelectTrigger className="w-[160px] h-9 bg-background">
+                                <SelectValue placeholder="Dizalica" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Sve dizalice</SelectItem>
+                                {cranesList.map((c: any) => (
+                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <Button onClick={() => setIsCreateResOpen(true)} className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90 h-9">
                         <Plus className="h-4 w-4" />
                         <span>Nova rezervacija</span>
                     </Button>
@@ -849,12 +871,6 @@ export default function AdminCalendar() {
                         </DialogContent>
                     </Dialog>
                     <Dialog open={isMaintOpen} onOpenChange={setIsMaintOpen}>
-                        <DialogTrigger asChild>
-                            <Button variant="outline" className="gap-2">
-                                <Hammer className="h-4 w-4" />
-                                <span className="hidden sm:inline">Zabilježi održavanje</span>
-                            </Button>
-                        </DialogTrigger>
                         <DialogContent>
                             <form onSubmit={handleCreateMaintenance}>
                                 <DialogHeader>
@@ -1157,94 +1173,76 @@ export default function AdminCalendar() {
                 </div>
             </div>
 
-            {/* Filters Bar */}
-            <Card className="bg-muted/30 border-none shadow-none">
-                <CardContent className="p-4 flex flex-wrap items-center gap-6">
-                    <div className="flex items-center gap-2">
-                        <Filter className="h-4 w-4 text-muted-foreground mr-1" />
-                        <span className="text-sm font-medium">Statusi:</span>
-                        <div className="flex bg-background border rounded-md p-1 items-center gap-1">
+            {/* Status Filters & Compact Date Navigator */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-muted/20 border rounded-lg px-3 py-1.5 shadow-xs">
+                <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 text-xs font-semibold text-muted-foreground mr-1">
+                        <Filter className="h-3.5 w-3.5" />
+                        <span>Statusi:</span>
+                    </div>
+                    <div className="flex bg-background border rounded-md p-0.5 items-center gap-1 flex-wrap">
+                        <Button
+                            variant={statusFilters.length === 0 ? "secondary" : "ghost"}
+                            size="sm"
+                            onClick={() => setStatusFilters([])}
+                            className="h-7 text-xs px-2.5 rounded-sm font-semibold"
+                        >
+                            Svi
+                        </Button>
+                        {["pending", "approved", "in_progress", "completed", "rejected", "cancelled"].map(s => (
                             <Button
-                                variant={statusFilters.length === 0 ? "secondary" : "ghost"}
+                                key={s}
+                                variant={statusFilters.includes(s) ? "secondary" : "ghost"}
                                 size="sm"
-                                onClick={() => setStatusFilters([])}
-                                className="h-7 text-xs px-2.5 rounded-sm font-semibold"
+                                onClick={() => toggleStatus(s)}
+                                className="h-7 text-xs px-2 rounded-sm"
                             >
-                                Svi
+                                <div
+                                    className="h-2 w-2 rounded-full mr-1.5"
+                                    style={{ backgroundColor: STATUS_COLORS[s] }}
+                                />
+                                {STATUS_LABELS[s] || s}
                             </Button>
-                            {["pending", "approved", "in_progress", "completed", "rejected", "cancelled"].map(s => (
-                                <Button
-                                    key={s}
-                                    variant={statusFilters.includes(s) ? "secondary" : "ghost"}
-                                    size="sm"
-                                    onClick={() => toggleStatus(s)}
-                                    className="h-7 text-xs px-2.5 rounded-sm"
-                                >
-                                    <div
-                                        className="h-2 w-2 rounded-full mr-1.5"
-                                        style={{ backgroundColor: STATUS_COLORS[s] }}
-                                    />
-                                    {STATUS_LABELS[s] || s}
-                                </Button>
-                            ))}
-                        </div>
+                        ))}
                     </div>
+                </div>
 
-                    <UserSearchCombobox
-                        users={usersList as any}
-                        value={selectedUser}
-                        onChange={setSelectedUser}
-                    />
-
-                    <div className="flex items-center gap-2">
-                        <Anchor className="h-4 w-4 text-muted-foreground mr-1" />
-                        <Select value={selectedCrane} onValueChange={setSelectedCrane}>
-                            <SelectTrigger className="w-[180px] h-9 bg-background"><SelectValue placeholder="Dizalica" /></SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Sve dizalice</SelectItem>
-                                {cranesList.map((c: any) => (
-                                    <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                {/* Suženi izbornik dana na točno 175px */}
+                <div className="flex items-center bg-background border rounded-md p-0.5 overflow-hidden shadow-sm w-[175px] shrink-0 justify-between">
+                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => {
+                        const newDate = viewMode === 'master' ? addDays(viewDate, -1) :
+                                       viewMode === 'timeGridWeek' ? addWeeks(viewDate, -1) :
+                                       addMonths(viewDate, -1);
+                        setViewDate(newDate);
+                        calendarRef.current?.getApi().gotoDate(newDate);
+                    }}>
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <div className="text-[11px] font-semibold tabular-nums truncate px-0.5 text-center flex-1">
+                        {viewMode === 'master' ? formatAppDate(viewDate, lang as any) : format(viewDate, "MM.yyyy", { locale: lang === 'hr' ? hr : enUS })}
                     </div>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => {
+                        const newDate = viewMode === 'master' ? addDays(viewDate, 1) :
+                                       viewMode === 'timeGridWeek' ? addWeeks(viewDate, 1) :
+                                       addMonths(viewDate, 1);
+                        setViewDate(newDate);
+                        calendarRef.current?.getApi().gotoDate(newDate);
+                    }}>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-7 px-1.5 text-[10px] font-semibold border-l rounded-none shrink-0" onClick={() => {
+                        const today = startOfDay(new Date());
+                        setViewDate(today);
+                        calendarRef.current?.getApi().gotoDate(today);
+                    }}>
+                        Danas
+                    </Button>
+                </div>
+            </div>
 
-                    <div className="ml-auto flex items-center bg-background border rounded-md p-1 overflow-hidden shadow-sm">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
-                            const newDate = viewMode === 'master' ? addDays(viewDate, -1) :
-                                           viewMode === 'timeGridWeek' ? addWeeks(viewDate, -1) :
-                                           addMonths(viewDate, -1);
-                            setViewDate(newDate);
-                            calendarRef.current?.getApi().gotoDate(newDate);
-                        }}>
-                            <ChevronLeft className="h-4 w-4" />
-                        </Button>
-                        <div className="px-3 text-sm font-semibold tabular-nums min-w-[140px] text-center">
-                            {viewMode === 'master' ? formatAppDate(viewDate, lang as any) : format(viewDate, "MMMM yyyy", { locale: lang === 'hr' ? hr : enUS })}
-                        </div>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => {
-                            const newDate = viewMode === 'master' ? addDays(viewDate, 1) :
-                                           viewMode === 'timeGridWeek' ? addWeeks(viewDate, 1) :
-                                           addMonths(viewDate, 1);
-                            setViewDate(newDate);
-                            calendarRef.current?.getApi().gotoDate(newDate);
-                        }}>
-                            <ChevronRight className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-8 px-2 text-xs font-semibold ml-1 border-l rounded-none" onClick={() => {
-                            const today = startOfDay(new Date());
-                            setViewDate(today);
-                            calendarRef.current?.getApi().gotoDate(today);
-                        }}>
-                            Danas
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Calendar Container */}
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                <div className="lg:col-span-3 bg-background border rounded-xl p-4 shadow-sm h-[700px] relative">
+            {/* Calendar Container - Podignuto i prilagođeno za Opciju A */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                <div className="lg:col-span-3 bg-background border rounded-xl p-3 shadow-sm h-[calc(100vh-210px)] min-h-[750px] relative">
                     {isResLoading && (
                         <div className="absolute inset-0 bg-background/50 backdrop-blur-[1px] z-10 flex items-center justify-center rounded-xl">
                             <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -1252,13 +1250,15 @@ export default function AdminCalendar() {
                     )}
                     <style dangerouslySetInnerHTML={{ __html: `
                         .fc-theme-standard td, .fc-theme-standard th { border-color: var(--border) !important; }
-                        .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 11px; color: var(--muted-foreground); font-weight: 500; }
+                        .fc-timegrid-axis-cushion, .fc-timegrid-slot-label-cushion { font-size: 12px; color: var(--muted-foreground); font-weight: 600; }
                         .fc-col-header-cell { background-color: var(--muted); padding: 8px 0; font-size: 12px; font-weight: 600; }
                         .fc-event { cursor: pointer; transition: transform 0.1s ease; }
                         .fc-event:hover { transform: scale(1.01); z-index: 5; }
                         .fc-timegrid-event { border-radius: 4px; border: none !important; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-                        .fc-v-event .fc-event-main { padding: 2px 4px; }
-                        .fc .fc-timegrid-slot { height: 38px !important; }
+                        .fc-v-event .fc-event-main { padding: 4px 6px; }
+                        .fc .fc-timegrid-slot { height: 60px !important; }
+                        .fc .fc-timegrid-slot-lane { height: 60px !important; }
+                        .fc .fc-timegrid-slot-label { height: 60px !important; vertical-align: middle; }
                     `}} />
                     <FullCalendar
                         key={`${viewMode}-${selectedCrane}-${activeCranes.length}-${workStart}-${workEnd}`}
@@ -1282,7 +1282,7 @@ export default function AdminCalendar() {
                         slotDuration="00:30:00"
                         slotLabelInterval="00:30:00"
                         snapDuration="00:30:00"
-                        expandRows={true}
+                        expandRows={false}
                         slotLabelFormat={{
                             hour: '2-digit',
                             minute: '2-digit',
@@ -1455,7 +1455,7 @@ export default function AdminCalendar() {
                 </div>
 
                 {/* Sidebar: Waiting List & Info */}
-                <div className="space-y-4 h-[700px] flex flex-col">
+                <div className="space-y-4 h-[calc(100vh-210px)] min-h-[750px] flex flex-col">
                     <Card className="flex-1 flex flex-col overflow-hidden">
                         <CardHeader className="py-4 px-5 border-b bg-muted/20">
                             <div className="flex items-center justify-between">
