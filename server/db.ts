@@ -20,6 +20,7 @@ import {
   landOccupancies,
   landWaitingList,
   craneOperationLog,
+  maintenanceBlocks,
   memberLinks,
   memberMemberships,
   syncRuns,
@@ -449,6 +450,94 @@ export async function checkOverlap(
   return res.length > 0;
 }
 
+/**
+ * Check if marina team capacity (max concurrent active cranes) would be exceeded
+ * during [slotStart, slotEnd] if an operation takes place on targetCraneId.
+ */
+export async function checkTeamCapacity(
+  slotStart: Date,
+  slotEnd: Date,
+  targetCraneId?: string,
+  excludeReservationId?: string,
+  maxTeams = 2
+): Promise<{
+  hasCapacity: boolean;
+  busyCranesCount: number;
+  busyCranesNames: string[];
+}> {
+  const db = await getDb();
+  if (!db) return { hasCapacity: true, busyCranesCount: 0, busyCranesNames: [] };
+
+  // Fetch all active cranes
+  const allActiveCranes = await db
+    .select({ id: cranes.id, name: cranes.name })
+    .from(cranes)
+    .where(eq(cranes.craneStatus, "active"));
+
+  // Check overlapping reservations across all cranes during [slotStart, slotEnd]
+  const conditions = [
+    or(
+      eq(reservations.status, "pending"),
+      eq(reservations.status, "approved"),
+      eq(reservations.status, "completed")
+    ),
+    lt(reservations.scheduledStart, slotEnd),
+    gt(reservations.scheduledEnd, slotStart),
+  ];
+  if (excludeReservationId) {
+    conditions.push(ne(reservations.id, excludeReservationId));
+  }
+
+  const overlappingRes = await db
+    .select({
+      id: reservations.id,
+      craneId: reservations.craneId,
+    })
+    .from(reservations)
+    .where(and(...conditions));
+
+  // Check overlapping maintenance blocks across all cranes
+  const maintConditions = [
+    lt(maintenanceBlocks.startAt, slotEnd),
+    gt(maintenanceBlocks.endAt, slotStart),
+  ];
+  const overlappingMaint = await db
+    .select({
+      id: maintenanceBlocks.id,
+      craneId: maintenanceBlocks.craneId,
+    })
+    .from(maintenanceBlocks)
+    .where(and(...maintConditions));
+
+  const busyCraneIdSet = new Set<string>();
+  for (const r of overlappingRes) {
+    if (r.craneId && (!targetCraneId || r.craneId !== targetCraneId)) {
+      busyCraneIdSet.add(r.craneId);
+    }
+  }
+  for (const m of overlappingMaint) {
+    if (m.craneId && (!targetCraneId || m.craneId !== targetCraneId)) {
+      busyCraneIdSet.add(m.craneId);
+    }
+  }
+
+  const busyCranesNames: string[] = [];
+  for (const c of allActiveCranes) {
+    if (busyCraneIdSet.has(c.id)) {
+      busyCranesNames.push(c.name);
+    }
+  }
+
+  const busyCranesCount = busyCraneIdSet.size;
+  const hasCapacity = busyCranesCount < maxTeams;
+
+  return {
+    hasCapacity,
+    busyCranesCount,
+    busyCranesNames,
+  };
+}
+
 export async function getReservationsForCalendar(start?: Date, end?: Date, includePending = true) {
   const db = await getDb();
   if (!db) return [];
@@ -545,6 +634,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   workdayEnd: "16:00",
   marinaName: "PŠD Špinut",
   marinaLogo: "",
+  maxConcurrentCraneTeams: "2",
 };
 
 export async function getAllSettings(): Promise<Record<string, string>> {
@@ -1344,6 +1434,7 @@ export async function listLandWaitingList() {
       adminNote: landWaitingList.adminNote,
       assignedOccupancyId: landWaitingList.assignedOccupancyId,
       reservationId: landWaitingList.reservationId,
+      craneId: sql<string | null>`coalesce(${landWaitingList.craneId}, ${reservations.craneId})`,
       offeredAt: landWaitingList.offeredAt,
       declinedAt: landWaitingList.declinedAt,
       declineCount: landWaitingList.declineCount,
@@ -1391,7 +1482,7 @@ export async function listLandWaitingList() {
     .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
     .leftJoin(landZones, eq(landWaitingList.preferredZoneId, landZones.id))
     .leftJoin(reservations, eq(landWaitingList.reservationId, reservations.id))
-    .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+    .leftJoin(cranes, eq(sql`coalesce(${landWaitingList.craneId}, ${reservations.craneId})`, cranes.id))
     .where(or(eq(landWaitingList.status, "waiting"), eq(landWaitingList.status, "offered"), eq(landWaitingList.status, "declined")))
     .orderBy(asc(landWaitingList.position), asc(landWaitingList.createdAt));
 }

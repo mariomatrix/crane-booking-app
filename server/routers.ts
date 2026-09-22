@@ -41,6 +41,7 @@ import {
   updateReservationStatus,
   getReservationsForCalendar,
   checkOverlap,
+  checkTeamCapacity,
   createAuditEntry,
   listAuditLog,
   getUserById,
@@ -1891,6 +1892,7 @@ export const appRouter = router({
           landZoneId: z.string().uuid().optional(),
           landWaitingId: z.string().uuid().optional(),
           overrideCapacityCheck: z.boolean().optional(),
+          overrideTeamCapacity: z.boolean().optional(),
           status: z.enum(["pending", "waitlisted"]).optional(),
           resources: z
             .array(
@@ -2175,6 +2177,23 @@ export const appRouter = router({
               message: "Drugi termin se preklapa s ovim.",
             });
 
+          // Check team capacity (max concurrent active cranes)
+          if (!input.overrideTeamCapacity) {
+            const teamCap = await checkTeamCapacity(
+              input.scheduledStart,
+              finalScheduledEnd,
+              input.craneId,
+              undefined,
+              Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+            );
+            if (!teamCap.hasCapacity) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `U ovom terminu već rade 2 dizalice (${teamCap.busyCranesNames.join(" i ")}). Nema raspoloživog tima operatera. Označite override ako želite ipak zakazati.`,
+              });
+            }
+          }
+
           finalStatus = "approved";
           finalCraneId = input.craneId;
           finalScheduledStart = input.scheduledStart;
@@ -2239,6 +2258,7 @@ export const appRouter = router({
             userId: targetUserId,
             vesselId: input.vesselId,
             preferredZoneId: input.landZoneId,
+            craneId: input.craneId || finalCraneId,
             position: nextPos,
             status: "waiting",
             reservationId: resId,
@@ -3179,6 +3199,7 @@ export const appRouter = router({
           scheduledStart: z.date(),
           scheduledEnd: z.date(),
           craneId: z.string().uuid().optional(),
+          overrideTeamCapacity: z.boolean().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -3224,6 +3245,22 @@ export const appRouter = router({
               code: "CONFLICT",
               message: "Preslagani termin se preklapa.",
             });
+
+          if (!input.overrideTeamCapacity) {
+            const teamCap = await checkTeamCapacity(
+              input.scheduledStart,
+              effectiveEnd,
+              targetCraneId,
+              input.id,
+              Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+            );
+            if (!teamCap.hasCapacity) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `U ovom terminu već rade 2 dizalice (${teamCap.busyCranesNames.join(" i ")}). Potreban je override za preklapanje timova.`,
+              });
+            }
+          }
         }
 
         const db = await getDb();
@@ -3515,6 +3552,7 @@ export const appRouter = router({
           adminNote: z.string().optional(),
           landZoneId: z.string().uuid().nullable().optional(),
           durationMin: z.number().int().min(15).max(480).optional(),
+          overrideTeamCapacity: z.boolean().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -3594,6 +3632,22 @@ export const appRouter = router({
                 code: "CONFLICT",
                 message: "Odabrani termin se preklapa s drugom rezervacijom na toj dizalici.",
               });
+            }
+
+            if (!input.overrideTeamCapacity) {
+              const teamCap = await checkTeamCapacity(
+                targetStart,
+                targetEnd,
+                targetCraneId,
+                input.id,
+                Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+              );
+              if (!teamCap.hasCapacity) {
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: `U ovom terminu već rade 2 dizalice (${teamCap.busyCranesNames.join(" i ")}). Potreban je override za preklapanje timova.`,
+                });
+              }
             }
 
             updates.craneId = targetCraneId;
@@ -4035,12 +4089,17 @@ export const appRouter = router({
         const allActiveCranes = (await listCranes()).filter(
           (c) => c.craneStatus === "active"
         );
+        const maxTeams = Number(sysSettings?.maxConcurrentCraneTeams || "2") || 2;
 
         type SlotInfo = {
           time: string;
           available: boolean;
           occupiedBy?: string;
           reason?: string;
+          canOverride?: boolean;
+          teamCapacityWarning?: boolean;
+          busyCranesCount?: number;
+          busyCranesNames?: string[];
         };
         const slots: SlotInfo[] = [];
         const availableSlots: string[] = [];
@@ -4053,7 +4112,7 @@ export const appRouter = router({
           const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
 
           if (!input.craneId) {
-            const freeCrane = allActiveCranes.find((crane) => {
+            const freeCranes = allActiveCranes.filter((crane) => {
               const overlap = existingRes.some(
                 (r) =>
                   r.craneId === crane.id &&
@@ -4065,8 +4124,20 @@ export const appRouter = router({
               );
               return !overlap;
             });
-            const isAvail = !!freeCrane;
-            slots.push({ time: timeStr, available: isAvail });
+            const occupiedCount = allActiveCranes.length - freeCranes.length;
+            const isAvail = freeCranes.length > 0 && occupiedCount < maxTeams;
+            slots.push({
+              time: timeStr,
+              available: isAvail,
+              canOverride: freeCranes.length > 0 && occupiedCount >= maxTeams,
+              teamCapacityWarning: freeCranes.length > 0 && occupiedCount >= maxTeams,
+              occupiedBy:
+                freeCranes.length === 0
+                  ? "Sve dizalice zauzete"
+                  : occupiedCount >= maxTeams
+                    ? "Zauzeta 2 tima operatera"
+                    : undefined,
+            });
             if (isAvail) availableSlots.push(timeStr);
           } else {
             const overlapping = existingRes.find(
@@ -4084,16 +4155,48 @@ export const appRouter = router({
                 : (overlapping.vesselRegistration ||
                   overlapping.vesselName ||
                   overlapping.reservationNumber ||
-                  "Zauzeto");
+                  "Zauzeta dizalica");
               slots.push({
                 time: timeStr,
                 available: false,
+                canOverride: false,
+                teamCapacityWarning: false,
                 occupiedBy: occupiedDesc,
                 reason: overlapping.liftPurpose ?? undefined,
               });
             } else {
-              slots.push({ time: timeStr, available: true });
-              availableSlots.push(timeStr);
+              // Crane itself is free. Check team capacity across other cranes!
+              const teamCap = await checkTeamCapacity(
+                slotStart,
+                slotEnd,
+                input.craneId,
+                input.excludeReservationId,
+                maxTeams
+              );
+              if (!teamCap.hasCapacity) {
+                const busyList =
+                  teamCap.busyCranesNames.length > 0
+                    ? teamCap.busyCranesNames.join(" i ")
+                    : "ostale dizalice";
+                slots.push({
+                  time: timeStr,
+                  available: false,
+                  canOverride: true,
+                  teamCapacityWarning: true,
+                  busyCranesCount: teamCap.busyCranesCount,
+                  busyCranesNames: teamCap.busyCranesNames,
+                  occupiedBy: `Zauzeta 2 tima (${busyList})`,
+                  reason: `Maksimalan kapacitet operatera (2 tima) popunjen. Dostupno uz ručni override.`,
+                });
+              } else {
+                slots.push({
+                  time: timeStr,
+                  available: true,
+                  canOverride: false,
+                  teamCapacityWarning: false,
+                });
+                availableSlots.push(timeStr);
+              }
             }
           }
         }
@@ -4305,6 +4408,7 @@ export const appRouter = router({
             "workdayEnd",
             "marinaName",
             "marinaLogo",
+            "maxConcurrentCraneTeams",
           ]),
           value: z.string(),
         })
@@ -5164,6 +5268,7 @@ export const appRouter = router({
       .input(
         z.object({
           id: z.string().uuid(),
+          craneId: z.string().uuid().nullable().optional(),
           preferredZoneId: z.string().uuid().nullable().optional(),
           note: z.string().optional(),
         })
@@ -5171,14 +5276,38 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const waitlistEntry = await db
+          .select()
+          .from(landWaitingList)
+          .where(eq(landWaitingList.id, input.id))
+          .limit(1);
+        if (waitlistEntry.length === 0)
+          throw new TRPCError({ code: "NOT_FOUND" });
+
+        const updates: any = {
+          updatedAt: new Date(),
+        };
+        if (input.craneId !== undefined) updates.craneId = input.craneId;
+        if (input.preferredZoneId !== undefined)
+          updates.preferredZoneId = input.preferredZoneId;
+        if (input.note !== undefined) updates.note = input.note;
+
         await db
           .update(landWaitingList)
-          .set({
-            preferredZoneId: input.preferredZoneId,
-            note: input.note,
-            updatedAt: new Date(),
-          })
+          .set(updates)
           .where(eq(landWaitingList.id, input.id));
+
+        if (waitlistEntry[0].reservationId && input.craneId !== undefined) {
+          await db
+            .update(reservations)
+            .set({
+              craneId: input.craneId,
+              updatedAt: new Date(),
+            })
+            .where(eq(reservations.id, waitlistEntry[0].reservationId));
+        }
+
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "land_waiting_updated",

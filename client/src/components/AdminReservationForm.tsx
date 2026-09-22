@@ -69,6 +69,7 @@ export function AdminReservationForm({
     const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
     const [landZoneId, setLandZoneId] = useState(initialData?.landZoneId || "");
     const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
+    const [overrideTeamCapacity, setOverrideTeamCapacity] = useState(false);
     const [isWaitlisted, setIsWaitlisted] = useState(false);
     const [adminNote, setAdminNote] = useState(initialData?.adminNote || "");
 
@@ -208,16 +209,21 @@ export function AdminReservationForm({
         return slots;
     }, [allSlots, activeSeasonForSelectedDate, durationMin]);
 
+    const selectedSlotObj = useMemo(() => {
+        return allSlots.find((s: any) => s.time === scheduledTime);
+    }, [allSlots, scheduledTime]);
+
     // Auto-select first available free slot when date/crane/duration changes
     useEffect(() => {
-        if (freeSlots.length > 0) {
-            if (!scheduledTime || !freeSlots.includes(scheduledTime)) {
+        const isCurrentSlotValid = allSlots.some((s: any) => s.time === scheduledTime && (s.available || s.canOverride));
+        if (!scheduledTime || !isCurrentSlotValid) {
+            if (freeSlots.length > 0) {
                 setScheduledTime(freeSlots[0]);
+            } else if (allowedTimeSlots.length > 0) {
+                setScheduledTime(allowedTimeSlots[0]);
             }
-        } else if (allowedTimeSlots.length > 0 && (!scheduledTime || !allowedTimeSlots.includes(scheduledTime))) {
-            setScheduledTime(allowedTimeSlots[0]);
         }
-    }, [freeSlots, allowedTimeSlots, scheduledTime]);
+    }, [freeSlots, allowedTimeSlots, allSlots, scheduledTime]);
 
     const { data: userVessels = [], isLoading: userVesselsLoading } =
         trpc.vessel.listByUser.useQuery({ userId }, { enabled: !!userId });
@@ -285,8 +291,8 @@ export function AdminReservationForm({
         e.preventDefault();
         
         if (isWaitlisted) {
-            if (!userId || !serviceTypeId || !requestedDate || !vesselType) {
-                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum i tip plovila).");
+            if (!userId || !serviceTypeId || !requestedDate || !craneId || !vesselType) {
+                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu i tip plovila).");
                 return;
             }
         } else {
@@ -298,7 +304,13 @@ export function AdminReservationForm({
 
         let scheduledStartDate: Date | undefined = undefined;
         if (!isWaitlisted && requestedDate) {
-            if (freeSlots.length > 0 && !freeSlots.includes(scheduledTime)) {
+            const currentSlot = allSlots.find((s: any) => s.time === scheduledTime);
+            if (currentSlot?.teamCapacityWarning) {
+                if (!overrideTeamCapacity) {
+                    toast.error(`Odabrani termin (${scheduledTime}) zahtijeva potvrdu dopuštenja (override) jer su u tom terminu angažirana 2 tima na drugim dizalicama.`);
+                    return;
+                }
+            } else if (freeSlots.length > 0 && !freeSlots.includes(scheduledTime)) {
                 toast.error(`Odabrani termin (${scheduledTime}) je već zauzet na ovoj dizalici. Molimo odaberite slobodan termin.`);
                 return;
             }
@@ -326,6 +338,7 @@ export function AdminReservationForm({
             landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
             landWaitingId: initialData?.landWaitingId || undefined,
             overrideCapacityCheck: overrideCapacityCheck || undefined,
+            overrideTeamCapacity: overrideTeamCapacity || undefined,
             status: isWaitlisted ? ("waitlisted" as const) : undefined,
             isAutoApprove: !isWaitlisted ? true : undefined,
             craneId: craneId || undefined,
@@ -669,7 +682,35 @@ export function AdminReservationForm({
 
 
 
-                        {/* Datum i Dizalica */}
+                        {/* Waitlist Toggle Checkbox */}
+                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1.5">
+                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={isWaitlisted}
+                                    onChange={(e) => {
+                                        setIsWaitlisted(e.target.checked);
+                                        if (e.target.checked) {
+                                            setOverrideCapacityCheck(false);
+                                        }
+                                    }}
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                />
+                                <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
+                                    📋 {lang === "hr" ? "Stavi na listu čekanja za suhi vez" : "Place on dry berth waiting list"}
+                                </span>
+                            </label>
+                            {isWaitlisted && (
+                                <p className="text-[11px] text-muted-foreground pl-6">
+                                    {lang === "hr"
+                                        ? "Plovilo se upisuje na listu čekanja uz odabranu dizalicu. Točan datum i termin operacije bit će dodijeljeni kada se oslobodi suhi vez."
+                                        : "Vessel is placed on the waiting list with designated crane. Operation slot will be scheduled once a dry berth spot is freed."
+                                    }
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Datum i Dizalica - Dizalica je uvijek vidljiva i obavezna! */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div className="space-y-1.5">
                                 <Label className="text-xs font-semibold">
@@ -685,19 +726,24 @@ export function AdminReservationForm({
                                     disablePastDates
                                 />
                             </div>
-                            {!isWaitlisted && (
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold">{lang === "hr" ? "Dizalica *" : "Crane *"}</Label>
-                                    <Select value={craneId} onValueChange={setCraneId}>
-                                        <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
-                                        <SelectContent>
-                                            {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
-                                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-semibold">
+                                    {lang === "hr" ? "Dizalica *" : "Crane *"}
+                                    {isWaitlisted && (
+                                        <span className="text-[10px] text-muted-foreground font-normal ml-1">
+                                            ({lang === "hr" ? "namijenjena za plovilo" : "intended for vessel"})
+                                        </span>
+                                    )}
+                                </Label>
+                                <Select value={craneId} onValueChange={setCraneId}>
+                                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Odaberite dizalicu" /></SelectTrigger>
+                                    <SelectContent>
+                                        {(cranes as any[]).filter((c: any) => c.craneStatus === "active").map((c: any) => (
+                                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
 
                         {!isWaitlisted && (
@@ -734,18 +780,40 @@ export function AdminReservationForm({
                                             ) : allSlots.length === 0 ? (
                                                 <SelectItem value="none" disabled>Nema termina unutar radnog vremena</SelectItem>
                                             ) : (
-                                                allSlots.map((slot) => (
-                                                    <SelectItem
-                                                        key={slot.time}
-                                                        value={slot.time}
-                                                        disabled={!slot.available}
-                                                        className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
-                                                    >
-                                                        {slot.available
-                                                            ? `✓ ${slot.time} — Slobodno`
-                                                            : `✗ ${slot.time} — Zauzeto (${slot.occupiedBy || "Zauzeto"})`}
-                                                    </SelectItem>
-                                                ))
+                                                allSlots.map((slot: any) => {
+                                                    if (slot.available) {
+                                                        return (
+                                                            <SelectItem
+                                                                key={slot.time}
+                                                                value={slot.time}
+                                                                className="text-emerald-700 font-medium"
+                                                            >
+                                                                ✓ {slot.time} — Slobodno
+                                                            </SelectItem>
+                                                        );
+                                                    }
+                                                    if (slot.canOverride || slot.teamCapacityWarning) {
+                                                        return (
+                                                            <SelectItem
+                                                                key={slot.time}
+                                                                value={slot.time}
+                                                                className="text-amber-700 font-semibold bg-amber-50/70"
+                                                            >
+                                                                ⚠️ {slot.time} — {slot.occupiedBy || "Zauzeta 2 tima (uz override)"}
+                                                            </SelectItem>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <SelectItem
+                                                            key={slot.time}
+                                                            value={slot.time}
+                                                            disabled
+                                                            className="text-muted-foreground opacity-60 line-through"
+                                                        >
+                                                            ✗ {slot.time} — Zauzeto ({slot.occupiedBy || "Zauzeto"})
+                                                        </SelectItem>
+                                                    );
+                                                })
                                             )}
                                         </SelectContent>
                                     </Select>
@@ -762,15 +830,52 @@ export function AdminReservationForm({
                             </p>
                         )}
 
+                        {/* Team capacity warning & override checkbox */}
+                        {!isWaitlisted && selectedSlotObj?.teamCapacityWarning && (
+                            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+                                <div className="flex items-start gap-2">
+                                    <span className="text-amber-600 font-bold text-sm leading-none mt-0.5">⚠️</span>
+                                    <div className="text-xs text-amber-900 space-y-0.5">
+                                        <p className="font-semibold">
+                                            {lang === "hr"
+                                                ? `Upozorenje: U terminu ${scheduledTime} već rade 2 dizalice (${selectedSlotObj.busyCranesNames?.join(" i ") || "ostale dizalice"}).`
+                                                : `Warning: 2 cranes are already working at ${scheduledTime} (${selectedSlotObj.busyCranesNames?.join(" & ") || "other cranes"}).`
+                                            }
+                                        </p>
+                                        <p className="text-amber-800 text-[11px]">
+                                            {lang === "hr"
+                                                ? "Ova dizalica je fizički slobodna, ali su 2 tima operatera već zauzeta na drugim dizalicama. Za zakazivanje termina označite ručni override."
+                                                : "This crane is physically free, but 2 operator teams are busy on other cranes. Manual override is required to schedule."
+                                            }
+                                        </p>
+                                    </div>
+                                </div>
+                                <label className="flex items-center gap-2 text-xs font-semibold text-amber-950 bg-amber-100/80 p-2 rounded border border-amber-300 cursor-pointer select-none">
+                                    <input
+                                        type="checkbox"
+                                        checked={overrideTeamCapacity}
+                                        onChange={(e) => setOverrideTeamCapacity(e.target.checked)}
+                                        className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                                    />
+                                    <span>
+                                        {lang === "hr"
+                                            ? "Dopusti dodjelu termina unatoč zauzetosti timova (ručni override)"
+                                            : "Allow slot assignment despite team capacity (manual override)"
+                                        }
+                                    </span>
+                                </label>
+                            </div>
+                        )}
+
                         {/* Interactive Free Slots Chips */}
                         {!isWaitlisted && isWorkingDay && (
-                            <div className="space-y-1.5 pt-1">
+                            <div className="space-y-2 pt-1">
                                 <div className="flex items-center justify-between">
                                     <span className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                                        ⚡ {lang === "hr" ? "Brzi odabir slobodnog termina:" : "Quick pick available slot:"}
+                                        ⚡ {lang === "hr" ? "Brzi odabir termina:" : "Quick pick slot:"}
                                     </span>
                                     <span className="text-[11px] text-muted-foreground font-mono">
-                                        {freeSlots.length} {lang === "hr" ? "slobodnih termina" : "available"}
+                                        {freeSlots.length} {lang === "hr" ? "potpuno slobodnih" : "free"}
                                     </span>
                                 </div>
 
@@ -828,6 +933,36 @@ export function AdminReservationForm({
                                                 </div>
                                             </div>
                                         )}
+                                    </div>
+                                )}
+
+                                {/* Amber slots for team capacity warning */}
+                                {allSlots.filter((s: any) => s.teamCapacityWarning || s.canOverride).length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-1.5 p-2 bg-amber-50/70 rounded-lg border border-amber-200">
+                                        <span className="text-[11px] font-semibold text-amber-900 mr-1 flex items-center gap-1">
+                                            ⚠️ {lang === "hr" ? "Zauzeta 2 tima (uz override):" : "2 teams busy (with override):"}
+                                        </span>
+                                        {allSlots
+                                            .filter((s: any) => s.teamCapacityWarning || s.canOverride)
+                                            .map((s: any) => {
+                                                const isSelected = scheduledTime === s.time;
+                                                return (
+                                                    <button
+                                                        key={s.time}
+                                                        type="button"
+                                                        tabIndex={-1}
+                                                        onClick={() => setScheduledTime(s.time)}
+                                                        className={cn(
+                                                            "px-2.5 py-1 rounded-md text-xs font-mono font-medium transition-all shadow-sm",
+                                                            isSelected
+                                                                ? "bg-amber-600 text-white shadow-amber-200 ring-2 ring-amber-400 font-bold"
+                                                                : "bg-white text-amber-900 border border-amber-300 hover:bg-amber-100"
+                                                        )}
+                                                    >
+                                                        {s.time}
+                                                    </button>
+                                                );
+                                            })}
                                     </div>
                                 )}
                             </div>
@@ -1055,12 +1190,13 @@ export function AdminReservationForm({
                             !userId || 
                             !serviceTypeId || 
                             !requestedDate || 
+                            !craneId ||
                             !vesselType || 
                             (!isWaitlisted && (
-                                !craneId ||
                                 !durationMin ||
                                 !scheduledTime || 
-                                (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck)
+                                (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck) ||
+                                (selectedSlotObj?.teamCapacityWarning && !overrideTeamCapacity)
                             ))
                         }
                         className="min-w-[140px]"

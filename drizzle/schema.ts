@@ -485,6 +485,7 @@ export const landWaitingList = pgTable("land_waiting_list", {
     adminNote: text("admin_note"),  // interna napomena operatera
     assignedOccupancyId: uuid("assigned_occupancy_id").references(() => landOccupancies.id),
     reservationId: uuid("reservation_id").references(() => reservations.id),
+    craneId: uuid("crane_id").references(() => cranes.id),
     offeredAt: timestamp("offered_at"),       // kad je ponuda poslana
     declinedAt: timestamp("declined_at"),     // kad je korisnik odbio
     declineCount: integer("decline_count").default(0).notNull(),  // koliko puta je odbio
@@ -494,6 +495,7 @@ export const landWaitingList = pgTable("land_waiting_list", {
     return {
         userIdIdx: index("land_wl_user_id_idx").on(table.userId),
         vesselIdIdx: index("land_wl_vessel_id_idx").on(table.vesselId),
+        craneIdIdx: index("land_wl_crane_id_idx").on(table.craneId),
         preferredZoneIdIdx: index("land_wl_preferred_zone_idx").on(table.preferredZoneId),
         statusIdx: index("land_wl_status_idx").on(table.status),
         positionIdx: index("land_wl_position_idx").on(table.position),

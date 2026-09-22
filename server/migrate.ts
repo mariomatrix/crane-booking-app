@@ -157,6 +157,7 @@ async function runMigration() {
         await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "offered_at" timestamp`;
         await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "declined_at" timestamp`;
         await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "decline_count" integer DEFAULT 0 NOT NULL`;
+        await migrationClient`ALTER TABLE "land_waiting_list" ADD COLUMN IF NOT EXISTS "crane_id" uuid REFERENCES "cranes"("id")`;
         console.log("land_waiting_list table verified.");
     } catch (e: any) {
         console.warn("land_waiting_list table verification warning:", e?.message || e);

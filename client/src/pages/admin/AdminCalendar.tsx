@@ -775,6 +775,23 @@ export default function AdminCalendar() {
             craneId
         }, {
             onError: (err: any) => {
+                if (err.message?.includes("2 dizalice") || err.message?.includes("tim") || err.message?.includes("override")) {
+                    if (confirm(`${err.message}\n\nŽelite li dopustiti termin unatoč popunjenosti timova (ručni override)?`)) {
+                        rescheduleMutation.mutate({
+                            id,
+                            scheduledStart: newStart,
+                            scheduledEnd: newEnd,
+                            craneId,
+                            overrideTeamCapacity: true,
+                        }, {
+                            onError: (subErr: any) => {
+                                info.revert();
+                                toast.error(subErr.message);
+                            }
+                        });
+                        return;
+                    }
+                }
                 info.revert();
                 toast.error(err.message);
             }
@@ -1128,6 +1145,7 @@ export default function AdminCalendar() {
                                         userObj: editingWaiting.user,
                                         contactPhone: editingWaiting.user?.phone || "",
                                         vesselId: editingWaiting.vesselId,
+                                        craneId: editingWaiting.craneId || editingWaiting.crane?.id,
                                         landZoneId: editingWaiting.preferredZoneId || "none",
                                         requestedDate: viewDate || new Date(),
                                         scheduledTime: "08:00",
@@ -1498,13 +1516,20 @@ export default function AdminCalendar() {
                                                     </span>
                                                 </div>
                                                 <div className="font-semibold text-sm mb-1">{w.user?.name || "Korisnik"}</div>
-                                                <div className="text-xs text-muted-foreground flex items-center justify-between mb-3">
+                                                <div className="text-xs text-muted-foreground flex items-center justify-between mb-2">
                                                     <span>{w.vessel?.registration || w.vessel?.name || "—"}</span>
                                                     <span className="flex items-center gap-1">
                                                         <Clock className="h-3 w-3" />
                                                         30 min
                                                     </span>
                                                 </div>
+                                                {w.crane?.name && (
+                                                    <div className="mb-2.5">
+                                                        <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-1 w-fit">
+                                                            🏗️ {w.crane.name}
+                                                        </span>
+                                                    </div>
+                                                )}
                                                 <div className="flex gap-2">
                                                     <Button
                                                         size="sm"

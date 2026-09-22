@@ -39,7 +39,9 @@ import {
   AlertTriangle,
   Info,
   Clock,
+  Pencil,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
@@ -69,6 +71,13 @@ export default function AdminLandWaiting() {
   const [directTime, setDirectTime] = useState("08:00");
   const [directDuration, setDirectDuration] = useState("30");
   const [directAdminNote, setDirectAdminNote] = useState("");
+
+  // Edit waitlist item states (Change crane/zone/note while keeping on waitlist)
+  const [editWaitlistOpen, setEditWaitlistOpen] = useState(false);
+  const [editingWaitlistEntry, setEditingWaitlistEntry] = useState<any | null>(null);
+  const [editCraneId, setEditCraneId] = useState("");
+  const [editZoneId, setEditZoneId] = useState("none");
+  const [editNote, setEditNote] = useState("");
 
   const utils = trpc.useUtils();
 
@@ -177,6 +186,19 @@ export default function AdminLandWaiting() {
     onError: (error) => toast.error(error.message),
   });
 
+  const updateWaitlistMutation = trpc.landWaiting.update.useMutation({
+    onSuccess: () => {
+      toast.success(isHr ? "Zahtjev na listi čekanja je uspješno ažuriran." : "Waitlist entry updated.");
+      utils.landWaiting.listAll.invalidate();
+      utils.landWaiting.getOverview.invalidate();
+      utils.reservation.listAll.invalidate();
+      utils.calendar.events.invalidate();
+      setEditWaitlistOpen(false);
+      setEditingWaitlistEntry(null);
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   const reorderMutation = trpc.landWaiting.reorder.useMutation({
     onSuccess: () => {
       toast.success(isHr ? "Redoslijed liste je uspješno spremljen." : "Waitlist reordered.");
@@ -253,6 +275,15 @@ export default function AdminLandWaiting() {
     setDirectDuration(entry.reservation?.durationMin ? String(entry.reservation.durationMin) : "30");
     setDirectAdminNote(entry.note || entry.adminNote || "");
     setDirectAssignDialogOpen(true);
+  };
+
+  // Open edit dialog to change crane, preferred zone, or note while staying on waitlist
+  const openEditWaitlist = (entry: any) => {
+    setEditingWaitlistEntry(entry);
+    setEditCraneId(entry.crane?.id || entry.craneId || entry.reservation?.craneId || defaultCrane?.id || "");
+    setEditZoneId(entry.preferredZoneId || "none");
+    setEditNote(entry.note || entry.reservation?.adminNote || "");
+    setEditWaitlistOpen(true);
   };
 
   const handleAssignSubmit = (e: React.FormEvent) => {
@@ -732,6 +763,18 @@ export default function AdminLandWaiting() {
                               {isHr ? "Rasporedi (Dizalica + Vez)" : "Schedule (Crane + Berth)"}
                             </Button>
 
+                            {/* Edit waitlist entry: change crane / zone / note while keeping on waitlist */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 rounded-lg text-slate-700 border-slate-300 hover:bg-slate-100 text-xs px-2.5 gap-1.5"
+                              onClick={() => openEditWaitlist(entry)}
+                              title={isHr ? "Uredi namijenjenu dizalicu ili zonu za ovaj zahtjev" : "Edit designated crane or zone"}
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-slate-500" />
+                              {isHr ? "Uredi" : "Edit"}
+                            </Button>
+
                             {/* Status-specific helpers */}
                             {entry.status === "waiting" && (
                               <Button
@@ -1143,6 +1186,123 @@ export default function AdminLandWaiting() {
               <Button type="submit" className="rounded-xl" disabled={assignMutation.isPending || !assignZoneId}>
                 {assignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {isHr ? "Potvrdi i dodijeli" : "Confirm & Assign"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Waitlist Entry Dialog (Change Crane / Zone / Note while staying on waitlist) */}
+      <Dialog open={editWaitlistOpen} onOpenChange={setEditWaitlistOpen}>
+        <DialogContent className="rounded-2xl max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-indigo-600 shrink-0" />
+              {isHr ? "Uredi zahtjev na listi čekanja" : "Edit Waitlist Entry"}
+            </DialogTitle>
+            <div className="text-xs text-muted-foreground pt-1">
+              {editingWaitlistEntry && (
+                <span>
+                  <strong>{editingWaitlistEntry.user?.name || "Korisnik"}</strong> • {editingWaitlistEntry.vessel?.name || editingWaitlistEntry.vessel?.registration || "Plovilo"}
+                </span>
+              )}
+            </div>
+          </DialogHeader>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!editingWaitlistEntry) return;
+              updateWaitlistMutation.mutate({
+                id: editingWaitlistEntry.id,
+                craneId: editCraneId ? editCraneId : null,
+                preferredZoneId: editZoneId !== "none" ? editZoneId : null,
+                note: editNote || undefined,
+              });
+            }}
+            className="space-y-4 pt-2"
+          >
+            {/* Crane Selection */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                🏗️ {isHr ? "Namijenjena dizalica *" : "Designated Crane *"}
+              </Label>
+              <Select value={editCraneId} onValueChange={setEditCraneId}>
+                <SelectTrigger className="rounded-xl h-10 text-xs">
+                  <SelectValue placeholder={isHr ? "Odaberite dizalicu" : "Select crane"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {cranes
+                    .filter((c: any) => c.craneStatus === "active")
+                    .map((c: any) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} {largestCrane && c.id === largestCrane.id ? "⭐ (Velika dizalica)" : ""}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {isHr
+                  ? "Povežite plovilo s odgovarajućom dizalicom (ovisno o udaljenosti mjesta na kopnu i karakteristikama plovila)."
+                  : "Link the vessel with appropriate crane based on land proximity and specs."
+                }
+              </p>
+            </div>
+
+            {/* Destination Land Zone Selection */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                📍 {isHr ? "Željena zona na kopnu (Suhi vez)" : "Preferred Land Zone"}
+              </Label>
+              <Select value={editZoneId} onValueChange={setEditZoneId}>
+                <SelectTrigger className="rounded-xl h-10 text-xs">
+                  <SelectValue placeholder={isHr ? "Bilo koja zona" : "Any zone"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{isHr ? "Bilo koja zona (bez preferencije)" : "Any zone"}</SelectItem>
+                  {zones.map((z: any) => {
+                    const free = z.totalSpots - (z.activeSpots || 0);
+                    return (
+                      <SelectItem key={z.id} value={z.id}>
+                        {z.name} ({z.code}) — {free > 0 ? `${free} slobodno` : "Popunjeno"}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                📝 {isHr ? "Interna napomena operatera" : "Internal note"}
+              </Label>
+              <Textarea
+                value={editNote}
+                onChange={(e) => setEditNote(e.target.value)}
+                placeholder={isHr ? "Napomena o zahvatu, dizalici, pripremi..." : "Note about crane, operation, prep..."}
+                rows={3}
+                className="rounded-xl text-xs"
+              />
+            </div>
+
+            <DialogFooter className="pt-3 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setEditWaitlistOpen(false)}
+                disabled={updateWaitlistMutation.isPending}
+              >
+                {isHr ? "Odustani" : "Cancel"}
+              </Button>
+              <Button
+                type="submit"
+                className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                disabled={updateWaitlistMutation.isPending || !editCraneId}
+              >
+                {updateWaitlistMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isHr ? "Spremi izmjene" : "Save Changes"}
               </Button>
             </DialogFooter>
           </form>

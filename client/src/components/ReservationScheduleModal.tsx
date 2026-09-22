@@ -76,6 +76,7 @@ export function ReservationScheduleModal({
   const [selectedTime, setSelectedTime] = useState<string>("08:00");
   const [durationMin, setDurationMin] = useState<string>("30");
   const [adminNote, setAdminNote] = useState<string>("");
+  const [overrideTeamCapacity, setOverrideTeamCapacity] = useState<boolean>(false);
 
   // Queries
   const { data: cranesList = [] } = trpc.crane.list.useQuery();
@@ -163,14 +164,21 @@ export function ReservationScheduleModal({
     return null;
   }, [workingHours, slotData, seasonsList, selectedDate]);
 
+  const selectedSlotObj = useMemo(() => {
+    return allSlots.find((s: any) => s.time === selectedTime);
+  }, [allSlots, selectedTime]);
+
   // Auto-select first free slot when freeSlots changes if needed
   useEffect(() => {
-    if (open && freeSlots.length > 0) {
-      if (!selectedTime || !freeSlots.includes(selectedTime)) {
-        setSelectedTime(freeSlots[0]);
+    if (open) {
+      const isValid = allSlots.some((s: any) => s.time === selectedTime && (s.available || s.canOverride));
+      if (!selectedTime || !isValid) {
+        if (freeSlots.length > 0) {
+          setSelectedTime(freeSlots[0]);
+        }
       }
     }
-  }, [open, freeSlots, selectedTime]);
+  }, [open, freeSlots, allSlots, selectedTime]);
 
   // Initialize form from reservation or initialData
   useEffect(() => {
@@ -279,6 +287,11 @@ export function ReservationScheduleModal({
       return;
     }
 
+    if (selectedSlotObj?.teamCapacityWarning && !overrideTeamCapacity) {
+      toast.error("U ovom terminu već rade 2 dizalice. Molimo označite potvrdni okvir za dopuštenje (override) zauzetosti timova.");
+      return;
+    }
+
     const dStr = formatToSqlDate(selectedDate);
     const scheduledStart = fromZagreb(dStr, selectedTime);
     const durNum = Number(durationMin) || 30;
@@ -307,6 +320,7 @@ export function ReservationScheduleModal({
         vesselRegistration: vesselRegistration || undefined,
         contactPhone: contactPhone || undefined,
         adminNote: adminNote || undefined,
+        overrideTeamCapacity: overrideTeamCapacity || undefined,
       });
     } else if (isCreate) {
       if (!selectedUserId) {
@@ -335,6 +349,7 @@ export function ReservationScheduleModal({
         landZoneId: finalZoneId || undefined,
         isAutoApprove: true,
         adminNote: adminNote || undefined,
+        overrideTeamCapacity: overrideTeamCapacity || undefined,
       });
     }
   };
@@ -602,16 +617,40 @@ export function ReservationScheduleModal({
                   ) : allSlots.length === 0 ? (
                     <SelectItem value="none" disabled>Nema termina</SelectItem>
                   ) : (
-                    allSlots.map((slot: any) => (
-                      <SelectItem
-                        key={slot.time}
-                        value={slot.time}
-                        disabled={!slot.available}
-                        className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
-                      >
-                        {slot.available ? `✓ ${slot.time} (Slobodno)` : `✗ ${slot.time} (Zauzeto)`}
-                      </SelectItem>
-                    ))
+                    allSlots.map((slot: any) => {
+                      if (slot.available) {
+                        return (
+                          <SelectItem
+                            key={slot.time}
+                            value={slot.time}
+                            className="text-emerald-700 font-medium"
+                          >
+                            ✓ {slot.time} (Slobodno)
+                          </SelectItem>
+                        );
+                      }
+                      if (slot.canOverride || slot.teamCapacityWarning) {
+                        return (
+                          <SelectItem
+                            key={slot.time}
+                            value={slot.time}
+                            className="text-amber-700 font-semibold bg-amber-50/70"
+                          >
+                            ⚠️ {slot.time} ({slot.occupiedBy || "Zauzeta 2 tima (uz override)"})
+                          </SelectItem>
+                        );
+                      }
+                      return (
+                        <SelectItem
+                          key={slot.time}
+                          value={slot.time}
+                          disabled
+                          className="text-muted-foreground opacity-60 line-through"
+                        >
+                          ✗ {slot.time} ({slot.occupiedBy || "Zauzeto"})
+                        </SelectItem>
+                      );
+                    })
                   )}
                 </SelectContent>
               </Select>
@@ -641,32 +680,90 @@ export function ReservationScheduleModal({
             </p>
           )}
 
-          {/* Quick pick free slot chips */}
-          {isWorkingDay && freeSlots.length > 0 && (
-            <div className="space-y-1">
-              <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
-                ⚡ Brzi odabir slobodnog 30-min termina:
-              </span>
-              <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/40 max-h-24 overflow-y-auto">
-                {freeSlots.map((slot) => {
-                  const isSelected = selectedTime === slot;
-                  return (
-                    <button
-                      key={slot}
-                      type="button"
-                      onClick={() => setSelectedTime(slot)}
-                      className={cn(
-                        "px-2 py-0.5 rounded-lg text-xs font-mono font-medium transition-all shadow-xs",
-                        isSelected
-                          ? "bg-emerald-600 text-white font-bold ring-2 ring-emerald-400"
-                          : "bg-white text-emerald-800 border border-emerald-200 hover:bg-emerald-100 dark:bg-slate-800 dark:text-emerald-300 dark:border-emerald-800"
-                      )}
-                    >
-                      {slot}
-                    </button>
-                  );
-                })}
+          {/* Team capacity warning & override checkbox */}
+          {selectedSlotObj?.teamCapacityWarning && (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <span className="text-amber-600 font-bold text-sm leading-none mt-0.5">⚠️</span>
+                <div className="text-xs text-amber-900 space-y-0.5">
+                  <p className="font-semibold">
+                    Upozorenje: U terminu {selectedTime} već rade 2 dizalice ({selectedSlotObj.busyCranesNames?.join(" i ") || "ostale dizalice"}).
+                  </p>
+                  <p className="text-amber-800 text-[11px]">
+                    Dizalica je slobodna, ali su oba operativna tima zauzeta. Za dodjelu termina označite dopuštenje (override).
+                  </p>
+                </div>
               </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-amber-950 bg-amber-100/80 p-2 rounded-lg border border-amber-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={overrideTeamCapacity}
+                  onChange={(e) => setOverrideTeamCapacity(e.target.checked)}
+                  className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                />
+                <span>
+                  Dopusti dodjelu termina unatoč zauzetosti timova (ručni override)
+                </span>
+              </label>
+            </div>
+          )}
+
+          {/* Quick pick slot chips */}
+          {isWorkingDay && (freeSlots.length > 0 || allSlots.filter((s: any) => s.teamCapacityWarning || s.canOverride).length > 0) && (
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                ⚡ Brzi odabir termina:
+              </span>
+              {freeSlots.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 p-2 bg-emerald-50/50 dark:bg-emerald-950/20 rounded-xl border border-emerald-100 dark:border-emerald-900/40 max-h-24 overflow-y-auto">
+                  {freeSlots.map((slot) => {
+                    const isSelected = selectedTime === slot;
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setSelectedTime(slot)}
+                        className={cn(
+                          "px-2 py-0.5 rounded-lg text-xs font-mono font-medium transition-all shadow-xs",
+                          isSelected
+                            ? "bg-emerald-600 text-white shadow-emerald-200 font-bold"
+                            : "bg-white dark:bg-slate-800 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100"
+                        )}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {allSlots.filter((s: any) => s.teamCapacityWarning || s.canOverride).length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-amber-50/70 rounded-xl border border-amber-200">
+                  <span className="text-[11px] font-semibold text-amber-900 mr-1 flex items-center gap-1">
+                    ⚠️ Zauzeta 2 tima (uz override):
+                  </span>
+                  {allSlots
+                    .filter((s: any) => s.teamCapacityWarning || s.canOverride)
+                    .map((s: any) => {
+                      const isSelected = selectedTime === s.time;
+                      return (
+                        <button
+                          key={s.time}
+                          type="button"
+                          onClick={() => setSelectedTime(s.time)}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg text-xs font-mono font-medium transition-all shadow-xs",
+                            isSelected
+                              ? "bg-amber-600 text-white shadow-amber-200 font-bold"
+                              : "bg-white text-amber-900 border border-amber-300 hover:bg-amber-100"
+                          )}
+                        >
+                          {s.time}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           )}
 
@@ -718,7 +815,7 @@ export function ReservationScheduleModal({
             <Button
               type="submit"
               className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
-              disabled={isSubmitting || !craneId || !selectedDate || !selectedTime}
+              disabled={isSubmitting || !craneId || !selectedDate || !selectedTime || (selectedSlotObj?.teamCapacityWarning && !overrideTeamCapacity)}
             >
               {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {isApprove && <Check className="h-4 w-4 mr-1.5" />}
