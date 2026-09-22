@@ -825,7 +825,7 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
-        // Validation of mandatory name/companyName
+        // Validation of mandatory fields: firstName, lastName, phone (or companyName, phone for legal entities)
         if (input.isLegalEntity) {
           if (!input.companyName || input.companyName.trim() === "") {
             throw new TRPCError({
@@ -840,6 +840,19 @@ export const appRouter = router({
               message: "Ime je obavezno.",
             });
           }
+          if (!input.lastName || input.lastName.trim() === "") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Prezime je obavezno.",
+            });
+          }
+        }
+
+        if (!input.phone || input.phone.trim() === "") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Broj mobitela / telefona je obavezan.",
+          });
         }
 
         // Email handling: optional
@@ -2574,6 +2587,7 @@ export const appRouter = router({
             status: z.array(z.string()).optional(),
             userId: z.string().uuid().optional(),
             vesselId: z.string().uuid().optional(),
+            craneId: z.string().uuid().optional(),
             scheduledStart: z.date().optional(),
             scheduledEnd: z.date().optional(),
             page: z.number().int().min(1).default(1),
@@ -2610,6 +2624,8 @@ export const appRouter = router({
           conditions.push(eq(reservations.userId, filters.userId));
         if (filters.vesselId)
           conditions.push(eq(reservations.vesselId, filters.vesselId));
+        if (filters.craneId)
+          conditions.push(eq(reservations.craneId, filters.craneId));
 
         // Date range filtering - check both confirmed schedule and requested date (for pending)
         if (filters.scheduledStart && filters.scheduledEnd) {

@@ -318,6 +318,15 @@ export default function AdminUsers() {
                 toast.error("Ime korisnika je obavezno.");
                 return;
             }
+            if (!newLastName.trim()) {
+                toast.error("Prezime korisnika je obavezno.");
+                return;
+            }
+        }
+
+        if (!newPhone.trim()) {
+            toast.error("Broj mobitela / telefona je obavezan.");
+            return;
         }
 
         if (newOib.trim() && (newOib.trim().length !== 11 || !isValidOib(newOib.trim()))) {
@@ -905,12 +914,13 @@ export default function AdminUsers() {
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <Label htmlFor="newLastName" className="text-xs font-semibold">Prezime</Label>
+                                    <Label htmlFor="newLastName" className="text-xs font-semibold">Prezime *</Label>
                                     <Input
                                         id="newLastName"
                                         value={newLastName}
                                         onChange={(e) => setNewLastName(e.target.value)}
                                         placeholder="npr. Horvat"
+                                        required
                                     />
                                 </div>
                             </div>
@@ -972,12 +982,13 @@ export default function AdminUsers() {
                             </div>
 
                             <div className="space-y-1">
-                                <Label htmlFor="newPhone" className="text-xs font-semibold">Telefon (opcionalno)</Label>
+                                <Label htmlFor="newPhone" className="text-xs font-semibold">Mobitel / Telefon *</Label>
                                 <Input
                                     id="newPhone"
                                     value={newPhone}
                                     onChange={(e) => setNewPhone(e.target.value)}
                                     placeholder="091 234 5678"
+                                    required
                                 />
                             </div>
                         </div>
@@ -1142,7 +1153,7 @@ export default function AdminUsers() {
                     <DialogFooter className="pt-2 border-t">
                         <Button variant="outline" onClick={() => setShowCreateDialog(false)}>{t.admin.cancel}</Button>
                         <Button
-                            disabled={newIsLegalEntity ? !newCompanyName.trim() || adminCreateUser.isPending : !newFirstName.trim() || adminCreateUser.isPending}
+                            disabled={newIsLegalEntity ? (!newCompanyName.trim() || !newPhone.trim() || adminCreateUser.isPending) : (!newFirstName.trim() || !newLastName.trim() || !newPhone.trim() || adminCreateUser.isPending)}
                             onClick={handleCreate}
                         >
                             {adminCreateUser.isPending ? t.admin.creating : t.admin.addUser}

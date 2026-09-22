@@ -64,12 +64,17 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
 
     const handleCreate = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newEmailValid(email)) {
+        const cleanEmail = email.trim();
+        if (cleanEmail && !newEmailValid(cleanEmail)) {
             toast.error("Unesite ispravnu email adresu.");
             return;
         }
         if (!firstName.trim() || !lastName.trim()) {
             toast.error("Ime i prezime su obavezni.");
+            return;
+        }
+        if (!phone.trim()) {
+            toast.error("Broj mobitela / telefona je obavezan.");
             return;
         }
         const cleanOib = oib.trim();
@@ -81,10 +86,10 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
         }
 
         createMutation.mutate({
-            email,
-            firstName,
-            lastName,
-            phone: phone || undefined,
+            email: cleanEmail || undefined,
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+            phone: phone.trim(),
             oib: cleanOib || undefined,
             role,
             clientCategory,
@@ -101,7 +106,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                 <DialogHeader>
                     <DialogTitle>{t.admin.addNewUser}</DialogTitle>
                     <DialogDescription>
-                        Ispunite podatke za novog korisnika marine. Lozinka će mu biti automatski generirana i poslana na email.
+                        Ispunite podatke za novog korisnika marine. Obavezna polja su Ime, Prezime i Mobitel/Telefon.
                     </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleCreate}>
@@ -139,17 +144,6 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                             </Select>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="email">{t.auth.email} *</Label>
-                            <Input
-                                id="email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="korisnik@example.com"
-                                required
-                            />
-                        </div>
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="firstName">{t.auth.firstName} *</Label>
@@ -157,6 +151,7 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                                     id="firstName"
                                     value={firstName}
                                     onChange={(e) => setFirstName(e.target.value)}
+                                    placeholder="Ime"
                                     required
                                 />
                             </div>
@@ -166,17 +161,29 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
                                     id="lastName"
                                     value={lastName}
                                     onChange={(e) => setLastName(e.target.value)}
+                                    placeholder="Prezime"
                                     required
                                 />
                             </div>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="phone">{t.auth.phone}</Label>
+                            <Label htmlFor="phone">Mobitel / Telefon *</Label>
                             <Input
                                 id="phone"
                                 value={phone}
                                 onChange={(e) => setPhone(e.target.value)}
                                 placeholder="+385 91 234 5678"
+                                required
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="email">{t.auth.email} (opcionalno)</Label>
+                            <Input
+                                id="email"
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="korisnik@example.com (nije obavezno)"
                             />
                         </div>
                         <div className="space-y-2">

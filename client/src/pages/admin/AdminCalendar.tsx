@@ -113,6 +113,7 @@ export default function AdminCalendar() {
     const reservationsQuery = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
         userId: selectedUser !== "all" ? selectedUser : undefined,
+        craneId: selectedCrane !== "all" ? selectedCrane : undefined,
         scheduledStart: fetchRange?.start,
         scheduledEnd: fetchRange?.end,
         pageSize: 500,
@@ -506,7 +507,11 @@ export default function AdminCalendar() {
                     return null;
                 }
 
-                const actualCraneIdx = craneIdx >= 0 ? craneIdx : 0;
+                if (craneIdx < 0) {
+                    return null;
+                }
+
+                const actualCraneIdx = craneIdx;
                 const rawEnd = r.scheduledEnd ? new Date(r.scheduledEnd) : new Date(rawDate.getTime() + (r.durationMin || 30) * 60000);
                 const zgEnd = toZagreb(rawEnd);
 
@@ -525,7 +530,7 @@ export default function AdminCalendar() {
                     id: String(r.id),
                     title: r.isMaintenance
                         ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
-                        : `${craneIdx === -1 ? "⚠️ " : ""}${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
+                        : `${r.vesselRegistration || r.vessel?.registration || "Plovilo"}${r.landZone ? ` (${r.landZone.code || r.landZone.name})` : ""}${r.vesselWeightTons ? ` - ${r.vesselWeightTons} t` : ""}`,
                     start: masterStart,
                     end: masterEnd,
                     backgroundColor: r.isMaintenance ? "#f97316" : (STATUS_COLORS[r.status] ?? "#6b7280"),
