@@ -855,9 +855,10 @@ export const appRouter = router({
           });
         }
 
-        // Email handling: optional
-        let finalEmail = input.email ? input.email.trim() : "";
-        if (finalEmail !== "") {
+        // Email handling: optional (ako nije unesen, polje ostaje prazno / null)
+        let finalEmail: string | null = null;
+        if (input.email && input.email.trim() !== "") {
+          finalEmail = input.email.trim().toLowerCase();
           const existing = await getUserByEmail(finalEmail);
           if (existing) {
             throw new TRPCError({
@@ -865,9 +866,6 @@ export const appRouter = router({
               message: "Email je već registriran.",
             });
           }
-        } else {
-          // Generate technical placeholder email
-          finalEmail = `korisnik_${Date.now()}_${Math.floor(Math.random() * 10000)}@placeholder.local`;
         }
 
         // OIB handling: optional
@@ -946,22 +944,18 @@ export const appRouter = router({
         }
 
         // Send invitation email if real email provided
-        if (
-          input.email &&
-          input.email.includes("@") &&
-          !input.email.endsWith("@placeholder.local")
-        ) {
+        if (finalEmail) {
           const baseUrl = process.env.PUBLIC_URL || "http://localhost:5173";
           const loginUrl = `${baseUrl}/auth`;
 
           await sendUserInvitation({
-            to: input.email,
+            to: finalEmail,
             userName: input.firstName || fullName,
             tempPassword,
             loginUrl,
           }).catch(err =>
             console.warn(
-              `[Email] Failed to send invitation to ${input.email}:`,
+              `[Email] Failed to send invitation to ${finalEmail}:`,
               err
             )
           );

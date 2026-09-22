@@ -194,9 +194,11 @@ export default function AdminUserCard() {
                 <div className="flex-1">
                     <h2 className="text-2xl font-bold">{user.name || `${user.firstName} ${user.lastName}`}</h2>
                     <div className="flex flex-wrap items-center gap-4 mt-1 text-sm text-muted-foreground">
-                        <span className="flex items-center gap-1.5">
-                            <Mail className="h-3.5 w-3.5" />{user.email}
-                        </span>
+                        {user.email && (
+                            <span className="flex items-center gap-1.5">
+                                <Mail className="h-3.5 w-3.5" />{user.email}
+                            </span>
+                        )}
                         {user.phone && (
                             <span className="flex items-center gap-1.5">
                                 <Phone className="h-3.5 w-3.5" />{user.phone}

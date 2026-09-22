@@ -528,15 +528,21 @@ export default function AdminUsers() {
                                     </TableCell>
                                     <TableCell>
                                         <div className="flex flex-col">
-                                            <span>{user.email}</span>
-                                            {(user as any).emailVerifiedAt ? (
-                                                <span className="text-[10px] text-green-600 font-semibold">
-                                                    Verificiran ✓
-                                                </span>
+                                            {user.email ? (
+                                                <>
+                                                    <span>{user.email}</span>
+                                                    {(user as any).emailVerifiedAt ? (
+                                                        <span className="text-[10px] text-green-600 font-semibold">
+                                                            Verificiran ✓
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-[10px] text-amber-600 font-semibold">
+                                                            Nije verificiran ✗
+                                                        </span>
+                                                    )}
+                                                </>
                                             ) : (
-                                                <span className="text-[10px] text-amber-600 font-semibold">
-                                                    Nije verificiran ✗
-                                                </span>
+                                                <span className="text-xs text-muted-foreground italic">—</span>
                                             )}
                                         </div>
                                     </TableCell>
@@ -576,7 +582,7 @@ export default function AdminUsers() {
                                             >
                                                 <Edit2 className="h-4 w-4" />
                                             </Button>
-                                            {!(user as any).emailVerifiedAt && (
+                                            {user.email && !(user as any).emailVerifiedAt && (
                                                 <Button
                                                     variant="outline"
                                                     size="sm"
@@ -691,7 +697,7 @@ export default function AdminUsers() {
             <Dialog open={!!editUser} onOpenChange={(open: boolean) => !open && setEditUser(null)}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>{t.admin.editUser}: {editUser?.email}</DialogTitle>
+                        <DialogTitle>{t.admin.editUser}: {editUser?.name || editUser?.email || "Korisnik"}</DialogTitle>
                         <DialogDescription>
                             {t.profile.subtitle}
                         </DialogDescription>

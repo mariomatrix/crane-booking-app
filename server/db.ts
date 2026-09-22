@@ -60,7 +60,7 @@ export async function getDb() {
 
 // ─── Users ────────────────────────────────────────────────────────────
 export async function createLocalUser(data: {
-  email: string;
+  email?: string | null;
   passwordHash: string;
   firstName?: string;
   lastName?: string;
@@ -81,7 +81,7 @@ export async function createLocalUser(data: {
   if (!db) throw new Error("DB not available");
   const name = data.name || data.username || (data.isLegalEntity && data.companyName ? data.companyName : `${data.firstName || ""} ${data.lastName || ""}`.trim());
   const res = await db.insert(users).values({
-    email: data.email,
+    email: data.email && data.email.trim() ? data.email.trim().toLowerCase() : null,
     passwordHash: data.passwordHash,
     firstName: data.firstName || null,
     lastName: data.lastName || null,
