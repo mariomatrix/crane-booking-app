@@ -81,7 +81,19 @@ export default function AdminCalendar() {
     const calendarRef = useRef<FullCalendar>(null);
 
     // Filters and Data with optimized caching
-    const { data: cranesList = [] } = trpc.crane.list.useQuery({ activeOnly: false }, { staleTime: 300000 });
+    const { data: rawCranesList = [] } = trpc.crane.list.useQuery({ activeOnly: true }, { staleTime: 30000 });
+    const cranesList = useMemo(() =>
+        rawCranesList.filter(c => c.craneStatus === 'active'),
+        [rawCranesList]
+    );
+
+    // --- Master View Logic: Resource-as-Day Hack ---
+    // We map each active crane to a "day" index.
+    const activeCranes = useMemo(() =>
+        cranesList.filter(c => selectedCrane === "all" || String(c.id) === selectedCrane),
+        [cranesList, selectedCrane]
+    );
+
     const usersQuery = trpc.user.list.useQuery({ pageSize: 50 }, { staleTime: 300000 });
     const usersList = usersQuery.data?.data || [];
     const { data: holidays = [] } = trpc.holiday.list.useQuery(undefined, { staleTime: 300000 });
@@ -97,7 +109,7 @@ export default function AdminCalendar() {
             const start = new Date(viewDateDayKey);
             return {
                 start: startOfDay(start),
-                end: endOfDay(addDays(start, Math.max(1, cranesList.length)))
+                end: endOfDay(addDays(start, Math.max(1, activeCranes.length)))
             };
         }
         if (visibleRange) {
@@ -108,7 +120,7 @@ export default function AdminCalendar() {
             start: startOfWeek(start, { weekStartsOn: 1 }),
             end: endOfWeek(addWeeks(start, 5), { weekStartsOn: 1 })
         };
-    }, [viewMode, viewDateDayKey, visibleRangeKey, cranesList.length]);
+    }, [viewMode, viewDateDayKey, visibleRangeKey, activeCranes.length]);
 
     const reservationsQuery = trpc.reservation.listAll.useQuery({
         status: statusFilters.length > 0 ? statusFilters : undefined,
@@ -490,13 +502,6 @@ export default function AdminCalendar() {
         performReschedule(false);
     };
 
-    // --- Master View Logic: Resource-as-Day Hack ---
-    // We map each crane to a "day" index.
-    const activeCranes = useMemo(() =>
-        cranesList.filter(c => (c.craneStatus === 'active') && (selectedCrane === "all" || String(c.id) === selectedCrane)),
-        [cranesList, selectedCrane]
-    );
-
     const calendarEvents = useMemo(() => {
         const resEvents = allReservations.map((r: any) => {
             // By default (no status filter clicked), hide cancelled and rejected reservations so they don't occupy calendar space
@@ -569,8 +574,14 @@ export default function AdminCalendar() {
                     },
                 };
             } else {
-                if (selectedCrane !== "all" && String(r.craneId).toLowerCase() !== String(selectedCrane).toLowerCase()) {
-                    return null;
+                if (selectedCrane !== "all") {
+                    if (String(r.craneId).toLowerCase() !== String(selectedCrane).toLowerCase()) {
+                        return null;
+                    }
+                } else {
+                    if (craneIdx < 0) {
+                        return null;
+                    }
                 }
 
                 // Use fromZagreb() for proper UTC instants regardless of server/browser timezone
@@ -653,9 +664,11 @@ export default function AdminCalendar() {
         let res = allReservations;
         if (selectedCrane !== "all") {
             res = res.filter((r: any) => String(r.craneId) === String(selectedCrane));
+        } else {
+            res = res.filter((r: any) => cranesList.some((c: any) => String(c.id).toLowerCase() === String(r.craneId || "").toLowerCase()));
         }
         return res;
-    }, [allReservations, selectedCrane]);
+    }, [allReservations, selectedCrane, cranesList]);
 
     const handleEventDrop = (info: EventDropArg) => {
         if (info.event.extendedProps.isMaintenance) {

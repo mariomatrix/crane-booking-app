@@ -3941,6 +3941,9 @@ export const appRouter = router({
         if (input?.craneId)
           conditions.push(eq(reservations.craneId, input.craneId));
 
+        // Inactive cranes must NOT appear in the calendar
+        conditions.push(eq(cranes.craneStatus, "active"));
+
         const items = await db
           .select({
             reservation: reservations,
@@ -3951,7 +3954,7 @@ export const appRouter = router({
             },
           })
           .from(reservations)
-          .leftJoin(cranes, eq(reservations.craneId, cranes.id))
+          .innerJoin(cranes, eq(reservations.craneId, cranes.id))
           .where(and(...conditions));
 
         const isAdminOrOperator =

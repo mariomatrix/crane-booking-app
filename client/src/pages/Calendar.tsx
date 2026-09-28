@@ -54,7 +54,11 @@ export default function Calendar() {
   const [bookingOpen, setBookingOpen] = useState(false);
   const [initialFormData, setInitialFormData] = useState<any>(null);
 
-  const { data: cranesList = [] } = trpc.crane.list.useQuery();
+  const { data: rawCranesList = [] } = trpc.crane.list.useQuery({ activeOnly: true });
+  const cranesList = useMemo(() =>
+    (rawCranesList as any[]).filter((c: any) => c.craneStatus === 'active'),
+    [rawCranesList]
+  );
   const { data: holidays = [] } = trpc.holiday.list.useQuery();
   const { data: events = [], isLoading, refetch } = trpc.calendar.events.useQuery(
     { craneId: craneIdFilter !== "all" ? craneIdFilter : undefined },
@@ -110,7 +114,10 @@ export default function Calendar() {
 
   const calendarEvents = useMemo(
     () => {
-      const resEvents = events.map((event: any) => ({
+      const activeCraneIds = new Set(cranesList.map((c: any) => String(c.id)));
+      const resEvents = events
+        .filter((event: any) => activeCraneIds.has(String(event.craneId)))
+        .map((event: any) => ({
         id: String(event.id),
         title: event.isMaintenance
           ? (lang === 'hr' ? "ODRŽAVANJE" : "MAINTENANCE")
