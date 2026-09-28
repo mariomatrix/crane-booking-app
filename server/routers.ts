@@ -3249,7 +3249,7 @@ export const appRouter = router({
           if (!input.overrideTeamCapacity) {
             const teamCap = await checkTeamCapacity(
               input.scheduledStart,
-              effectiveEnd,
+              input.scheduledEnd,
               targetCraneId,
               input.id,
               Number(sysSettings.maxConcurrentCraneTeams || "2") || 2

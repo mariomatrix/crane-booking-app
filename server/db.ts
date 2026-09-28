@@ -475,6 +475,7 @@ export async function checkTeamCapacity(
     .where(eq(cranes.craneStatus, "active"));
 
   // Check overlapping reservations across all cranes during [slotStart, slotEnd]
+  // Note: Only pending, approved and in_progress reservations represent active operations
   const conditions = [
     or(
       eq(reservations.status, "pending"),
@@ -492,6 +493,8 @@ export async function checkTeamCapacity(
     .select({
       id: reservations.id,
       craneId: reservations.craneId,
+      scheduledStart: reservations.scheduledStart,
+      scheduledEnd: reservations.scheduledEnd,
     })
     .from(reservations)
     .where(and(...conditions));
@@ -505,35 +508,78 @@ export async function checkTeamCapacity(
     .select({
       id: maintenanceBlocks.id,
       craneId: maintenanceBlocks.craneId,
+      startAt: maintenanceBlocks.startAt,
+      endAt: maintenanceBlocks.endAt,
     })
     .from(maintenanceBlocks)
     .where(and(...maintConditions));
 
-  const busyCraneIdSet = new Set<string>();
+  // Build intervals representing active crane operations that overlap [slotStart, slotEnd]
+  // on other cranes (or all cranes if targetCraneId is not specified)
+  const startMs = slotStart.getTime();
+  const endMs = slotEnd.getTime();
+
+  type ActiveInterval = { craneId: string; start: number; end: number };
+  const relevantIntervals: ActiveInterval[] = [];
+
   for (const r of overlappingRes) {
-    if (r.craneId && (!targetCraneId || r.craneId !== targetCraneId)) {
-      busyCraneIdSet.add(r.craneId);
+    if (!r.craneId || (targetCraneId && r.craneId === targetCraneId)) continue;
+    if (!r.scheduledStart || !r.scheduledEnd) continue;
+    const rStart = r.scheduledStart.getTime();
+    const rEnd = r.scheduledEnd.getTime();
+    if (rStart < endMs && rEnd > startMs) {
+      relevantIntervals.push({ craneId: r.craneId, start: rStart, end: rEnd });
     }
   }
+
   for (const m of overlappingMaint) {
-    if (m.craneId && (!targetCraneId || m.craneId !== targetCraneId)) {
-      busyCraneIdSet.add(m.craneId);
+    if (!m.craneId || (targetCraneId && m.craneId === targetCraneId)) continue;
+    if (!m.startAt || !m.endAt) continue;
+    const mStart = m.startAt.getTime();
+    const mEnd = m.endAt.getTime();
+    if (mStart < endMs && mEnd > startMs) {
+      relevantIntervals.push({ craneId: m.craneId, start: mStart, end: mEnd });
+    }
+  }
+
+  // Calculate peak concurrent cranes at any single point in time t within [startMs, endMs)
+  const timePointsSet = new Set<number>();
+  timePointsSet.add(startMs);
+  for (const item of relevantIntervals) {
+    if (item.start >= startMs && item.start < endMs) {
+      timePointsSet.add(item.start);
+    }
+  }
+
+  const timePoints = Array.from(timePointsSet).sort((a, b) => a - b);
+  let maxBusyCount = 0;
+  let maxBusyCraneIds = new Set<string>();
+
+  for (const tp of timePoints) {
+    const activeAtTp = new Set<string>();
+    for (const item of relevantIntervals) {
+      if (item.start <= tp && item.end > tp) {
+        activeAtTp.add(item.craneId);
+      }
+    }
+    if (activeAtTp.size > maxBusyCount) {
+      maxBusyCount = activeAtTp.size;
+      maxBusyCraneIds = activeAtTp;
     }
   }
 
   const busyCranesNames: string[] = [];
   for (const c of allActiveCranes) {
-    if (busyCraneIdSet.has(c.id)) {
+    if (maxBusyCraneIds.has(c.id)) {
       busyCranesNames.push(c.name);
     }
   }
 
-  const busyCranesCount = busyCraneIdSet.size;
-  const hasCapacity = busyCranesCount < maxTeams;
+  const hasCapacity = maxBusyCount < maxTeams;
 
   return {
     hasCapacity,
-    busyCranesCount,
+    busyCranesCount: maxBusyCount,
     busyCranesNames,
   };
 }

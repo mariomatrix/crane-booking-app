@@ -1,8 +1,9 @@
 import "dotenv/config";
-import { describe, expect, it, beforeAll } from "vitest";
+import { describe, expect, it, beforeAll, beforeEach } from "vitest";
+import { like } from "drizzle-orm";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { getDb } from "./db";
+import { getDb, checkTeamCapacity } from "./db";
 import {
   users,
   cranes,
@@ -20,6 +21,7 @@ import {
   syncConflicts,
   operatorCranes,
   vessels,
+  seasons,
 } from "../drizzle/schema";
 
 beforeAll(async () => {
@@ -70,6 +72,23 @@ beforeAll(async () => {
         userStatus: "active",
       }
     ]).onConflictDoNothing();
+
+    // Seed an active season for tests
+    await db.insert(seasons).values({
+      name: "Test Season 2026",
+      startDate: "2026-01-01",
+      endDate: "2026-12-31",
+      workingHours: {
+        mon: { from: "07:00", to: "17:00" },
+        tue: { from: "07:00", to: "17:00" },
+        wed: { from: "07:00", to: "17:00" },
+        thu: { from: "07:00", to: "17:00" },
+        fri: { from: "07:00", to: "17:00" },
+        sat: { from: "07:00", to: "14:00" },
+        sun: { from: "08:00", to: "12:00" },
+      },
+      isActive: true,
+    }).onConflictDoNothing();
   }
 });
 
@@ -354,3 +373,222 @@ describe("audit.list", () => {
     expect(Array.isArray(result)).toBe(true);
   });
 });
+
+// ─── Team Capacity & Crane Moving (3 Cranes - 2 Teams) ───────────────
+
+describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
+  beforeEach(async () => {
+    const db = await getDb();
+    if (db) {
+      await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
+    }
+  });
+
+  it("allows moving a reservation from Crane 1 to Crane 3 when 2 cranes are booked at the same time", async () => {
+    const db = await getDb();
+    if (!db) return;
+
+    // Seed 3 active cranes if needed
+    const crane1Id = "11111111-1111-4111-8111-111111111111";
+    const crane2Id = "22222222-2222-4222-8222-222222222222";
+    const crane3Id = "33333333-3333-4333-8333-333333333333";
+
+    await db.insert(cranes).values([
+      { id: crane1Id, name: "Dizalica 1", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+      { id: crane2Id, name: "Dizalica 2", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+      { id: crane3Id, name: "Dizalica 3", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+    ]).onConflictDoNothing();
+
+    const start = new Date("2026-11-10T09:00:00Z");
+    const end = new Date("2026-11-10T09:30:00Z");
+
+    const [resA] = await db.insert(reservations).values({
+      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      craneId: crane1Id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      status: "approved",
+      vesselRegistration: "BOAT-A",
+    }).returning();
+
+    const [resB] = await db.insert(reservations).values({
+      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      craneId: crane2Id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      status: "approved",
+      vesselRegistration: "BOAT-B",
+    }).returning();
+
+    // Check capacity when moving resA to crane3 (excluding resA)
+    const cap = await checkTeamCapacity(start, end, crane3Id, resA.id, 2);
+    expect(cap.hasCapacity).toBe(true);
+    expect(cap.busyCranesCount).toBe(1);
+
+    // Now test through trpc reschedule mutation
+    const operator = createMockOperator();
+    const ctx = createContext(operator);
+    const caller = appRouter.createCaller(ctx);
+
+    const rescheduleResult = await caller.reservation.reschedule({
+      id: resA.id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      craneId: crane3Id,
+    });
+    expect(rescheduleResult).toHaveProperty("success", true);
+
+    // Verify in db that resA is now on crane3
+    const updatedResA = await caller.reservation.getById({ id: resA.id });
+    expect(updatedResA.craneId).toBe(crane3Id);
+
+    // Clean up
+    await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
+  });
+
+  it("does not let next-slot appointment bleed into current slot capacity", async () => {
+    const db = await getDb();
+    if (!db) return;
+
+    const crane1Id = "11111111-1111-4111-8111-111111111111";
+    const crane2Id = "22222222-2222-4222-8222-222222222222";
+    const crane3Id = "33333333-3333-4333-8333-333333333333";
+
+    await db.insert(cranes).values([
+      { id: crane1Id, name: "Dizalica 1", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+      { id: crane2Id, name: "Dizalica 2", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+      { id: crane3Id, name: "Dizalica 3", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+    ]).onConflictDoNothing();
+
+    const start = new Date("2026-11-10T09:00:00Z");
+    const end = new Date("2026-11-10T09:30:00Z");
+    const nextStart = new Date("2026-11-10T09:30:00Z");
+    const nextEnd = new Date("2026-11-10T10:00:00Z");
+
+    const [resA] = await db.insert(reservations).values({
+      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      craneId: crane1Id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      status: "approved",
+      vesselRegistration: "BOAT-A",
+    }).returning();
+
+    const [resB] = await db.insert(reservations).values({
+      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      craneId: crane2Id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      status: "approved",
+      vesselRegistration: "BOAT-B",
+    }).returning();
+
+    // Next boat on crane 1 starting at 09:30
+    const [resC] = await db.insert(reservations).values({
+      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      craneId: crane1Id,
+      scheduledStart: nextStart,
+      scheduledEnd: nextEnd,
+      status: "approved",
+      vesselRegistration: "BOAT-C",
+    }).returning();
+
+    // Moving resA (09:00-09:30) to crane 3 should NOT see resC as overlapping capacity
+    const cap = await checkTeamCapacity(start, end, crane3Id, resA.id, 2);
+    expect(cap.hasCapacity).toBe(true);
+    expect(cap.busyCranesCount).toBe(1);
+
+    const operator = createMockOperator();
+    const ctx = createContext(operator);
+    const caller = appRouter.createCaller(ctx);
+
+    const res = await caller.reservation.reschedule({
+      id: resA.id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      craneId: crane3Id,
+    });
+    expect(res).toHaveProperty("success", true);
+
+    await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
+  });
+
+  it("blocks booking a 3rd concurrent crane without override and allows it with override", async () => {
+    const db = await getDb();
+    if (!db) return;
+
+    const crane1Id = "11111111-1111-4111-8111-111111111111";
+    const crane2Id = "22222222-2222-4222-8222-222222222222";
+    const crane3Id = "33333333-3333-4333-8333-333333333333";
+
+    await db.insert(cranes).values([
+      { id: crane1Id, name: "Dizalica 1", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+      { id: crane2Id, name: "Dizalica 2", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+      { id: crane3Id, name: "Dizalica 3", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
+    ]).onConflictDoNothing();
+
+    const start = new Date("2026-11-10T09:00:00Z");
+    const end = new Date("2026-11-10T09:30:00Z");
+
+    await db.insert(reservations).values([
+      {
+        userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        craneId: crane1Id,
+        scheduledStart: start,
+        scheduledEnd: end,
+        status: "approved",
+        vesselRegistration: "BOAT-1",
+      },
+      {
+        userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        craneId: crane2Id,
+        scheduledStart: start,
+        scheduledEnd: end,
+        status: "approved",
+        vesselRegistration: "BOAT-2",
+      },
+    ]);
+
+    // Reserving 3rd crane at 09:00-09:30 without excludeReservationId:
+    const cap = await checkTeamCapacity(start, end, crane3Id, undefined, 2);
+    expect(cap.hasCapacity).toBe(false);
+    expect(cap.busyCranesCount).toBe(2);
+
+    // Create a 3rd reservation at an earlier time
+    const [res3] = await db.insert(reservations).values({
+      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      craneId: crane3Id,
+      scheduledStart: new Date("2026-11-10T08:00:00Z"),
+      scheduledEnd: new Date("2026-11-10T08:30:00Z"),
+      status: "approved",
+      vesselRegistration: "BOAT-3",
+    }).returning();
+
+    const operator = createMockOperator();
+    const ctx = createContext(operator);
+    const caller = appRouter.createCaller(ctx);
+
+    // Rescheduling res3 into 09:00-09:30 (when c1 and c2 are both active) without override must fail
+    await expect(
+      caller.reservation.reschedule({
+        id: res3.id,
+        scheduledStart: start,
+        scheduledEnd: end,
+        craneId: crane3Id,
+      })
+    ).rejects.toThrow("override");
+
+    // Rescheduling with override must succeed
+    const overrideResult = await caller.reservation.reschedule({
+      id: res3.id,
+      scheduledStart: start,
+      scheduledEnd: end,
+      craneId: crane3Id,
+      overrideTeamCapacity: true,
+    });
+    expect(overrideResult).toHaveProperty("success", true);
+
+    await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
+  });
+});
+

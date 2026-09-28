@@ -451,35 +451,49 @@ export default function AdminCalendar() {
         const startDate = fromZagreb(dateStr, editStart);
         const endDate = fromZagreb(dateStr, editEnd);
 
-        rescheduleMutation.mutate({
-            id: editingRes.id,
-            scheduledStart: startDate,
-            scheduledEnd: endDate,
-            craneId: editCraneId
-        }, {
-            onSuccess: () => {
-                const finalZoneId = editLandZoneId === "none" ? null : editLandZoneId;
-                if (finalZoneId !== (editingRes.landZoneId || null)) {
-                    updateLandZoneMutation.mutate({
-                        id: editingRes.id,
-                        landZoneId: finalZoneId,
-                    }, {
-                        onSuccess: () => {
-                            utils.reservation.listAll.invalidate();
-                            setIsEditOpen(false);
+        const performReschedule = (override = false) => {
+            rescheduleMutation.mutate({
+                id: editingRes.id,
+                scheduledStart: startDate,
+                scheduledEnd: endDate,
+                craneId: editCraneId,
+                overrideTeamCapacity: override || undefined,
+            }, {
+                onSuccess: () => {
+                    const finalZoneId = editLandZoneId === "none" ? null : editLandZoneId;
+                    if (finalZoneId !== (editingRes.landZoneId || null)) {
+                        updateLandZoneMutation.mutate({
+                            id: editingRes.id,
+                            landZoneId: finalZoneId,
+                        }, {
+                            onSuccess: () => {
+                                utils.reservation.listAll.invalidate();
+                                setIsEditOpen(false);
+                            }
+                        });
+                    } else {
+                        setIsEditOpen(false);
+                    }
+                },
+                onError: (err: any) => {
+                    if (!override && (err.message?.includes("2 dizalice") || err.message?.includes("tim") || err.message?.includes("override"))) {
+                        if (confirm(`${err.message}\n\nŽelite li dopustiti termin unatoč popunjenosti timova (ručni override)?`)) {
+                            performReschedule(true);
+                            return;
                         }
-                    });
-                } else {
-                    setIsEditOpen(false);
+                    }
+                    toast.error(err.message);
                 }
-            }
-        });
+            });
+        };
+
+        performReschedule(false);
     };
 
     // --- Master View Logic: Resource-as-Day Hack ---
     // We map each crane to a "day" index.
     const activeCranes = useMemo(() =>
-        cranesList.filter(c => selectedCrane === "all" || String(c.id) === selectedCrane),
+        cranesList.filter(c => (c.craneStatus === 'active') && (selectedCrane === "all" || String(c.id) === selectedCrane)),
         [cranesList, selectedCrane]
     );
 
@@ -683,45 +697,70 @@ export default function AdminCalendar() {
             const newStart = fromZagreb(targetDateStr, timeStr);
             const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
-            rescheduleMutation.mutate({
-                id,
-                scheduledStart: newStart,
-                scheduledEnd: newEnd,
-                craneId: info.event.extendedProps.craneId
-            }, {
-                onError: (err: any) => {
-                    info.revert();
-                    toast.error(err.message);
-                }
-            });
+            const performDrop = (override = false) => {
+                rescheduleMutation.mutate({
+                    id,
+                    scheduledStart: newStart,
+                    scheduledEnd: newEnd,
+                    craneId: info.event.extendedProps.craneId,
+                    overrideTeamCapacity: override || undefined,
+                }, {
+                    onError: (err: any) => {
+                        if (!override && (err.message?.includes("2 dizalice") || err.message?.includes("tim") || err.message?.includes("override"))) {
+                            if (confirm(`${err.message}\n\nŽelite li dopustiti termin unatoč popunjenosti timova (ručni override)?`)) {
+                                performDrop(true);
+                                return;
+                            }
+                        }
+                        info.revert();
+                        toast.error(err.message);
+                    }
+                });
+            };
+            performDrop(false);
             return;
         }
 
         const newOffsetDate = info.event.start!;
-        const diffDays = Math.floor((newOffsetDate.getTime() - viewDate.getTime()) / (24 * 60 * 60 * 1000));
+        const viewDateZg = toZagreb(viewDate);
+        const zgOffset = toZagreb(newOffsetDate);
+        const dayDiff = Math.round(
+            (new Date(Date.UTC(zgOffset.year, zgOffset.month - 1, zgOffset.day)).getTime() -
+             new Date(Date.UTC(viewDateZg.year, viewDateZg.month - 1, viewDateZg.day)).getTime()) /
+            (24 * 60 * 60 * 1000)
+        );
 
-        if (diffDays < 0 || diffDays >= activeCranes.length) {
+        if (dayDiff < 0 || dayDiff >= activeCranes.length) {
             info.revert();
             return;
         }
 
-        const newTargetCrane = activeCranes[diffDays];
+        const newTargetCrane = activeCranes[dayDiff];
         const dateStr = formatToSqlDate(viewDate);
-        const zgOffset = toZagreb(newOffsetDate);
         const newStart = fromZagreb(dateStr, zgOffset.timeStr);
         const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
-        rescheduleMutation.mutate({
-            id,
-            scheduledStart: newStart,
-            scheduledEnd: newEnd,
-            craneId: newTargetCrane.id
-        }, {
-            onError: (err: any) => {
-                info.revert();
-                toast.error(err.message);
-            }
-        });
+        const performMasterDrop = (override = false) => {
+            rescheduleMutation.mutate({
+                id,
+                scheduledStart: newStart,
+                scheduledEnd: newEnd,
+                craneId: newTargetCrane.id,
+                overrideTeamCapacity: override || undefined,
+            }, {
+                onError: (err: any) => {
+                    if (!override && (err.message?.includes("2 dizalice") || err.message?.includes("tim") || err.message?.includes("override"))) {
+                        if (confirm(`${err.message}\n\nŽelite li dopustiti termin unatoč popunjenosti timova (ručni override)?`)) {
+                            performMasterDrop(true);
+                            return;
+                        }
+                    }
+                    info.revert();
+                    toast.error(err.message);
+                }
+            });
+        };
+        performMasterDrop(false);
     };
 
     const handleEventResize = (info: any) => {
