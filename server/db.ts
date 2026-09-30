@@ -1465,6 +1465,78 @@ export async function getActiveOccupancyByVessel(vesselId: string) {
   return res[0];
 }
 
+export async function isVesselCurrentlyOnLand(vesselId?: string | null, registration?: string | null): Promise<{
+  onLand: boolean;
+  occupancy?: any;
+  zoneName?: string;
+  spotNumber?: number | null;
+}> {
+  const db = await getDb();
+  if (!db) return { onLand: false };
+
+  let foundVesselId = vesselId;
+
+  if (!foundVesselId && registration && registration.trim()) {
+    const regTrimmed = registration.trim();
+    const [v] = await db.select({ id: vessels.id })
+      .from(vessels)
+      .where(sql`lower(${vessels.registration}) = lower(${regTrimmed})`)
+      .limit(1);
+    if (v) {
+      foundVesselId = v.id;
+    }
+  }
+
+  if (foundVesselId) {
+    const [occ] = await db.select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      liftedAt: landOccupancies.liftedAt,
+      zoneName: landZones.name,
+      zoneCode: landZones.code,
+    })
+    .from(landOccupancies)
+    .leftJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(eq(landOccupancies.vesselId, foundVesselId), isNull(landOccupancies.returnedAt)))
+    .limit(1);
+
+    if (occ) {
+      return { onLand: true, occupancy: occ, zoneName: occ.zoneName || occ.zoneCode || undefined, spotNumber: occ.spotNumber };
+    }
+  }
+
+  if (registration && registration.trim()) {
+    const regTrimmed = registration.trim();
+    const [occ] = await db.select({
+      id: landOccupancies.id,
+      vesselId: landOccupancies.vesselId,
+      userId: landOccupancies.userId,
+      zoneId: landOccupancies.zoneId,
+      spotNumber: landOccupancies.spotNumber,
+      liftedAt: landOccupancies.liftedAt,
+      zoneName: landZones.name,
+      zoneCode: landZones.code,
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .leftJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+    .where(and(
+      sql`lower(${vessels.registration}) = lower(${regTrimmed})`,
+      isNull(landOccupancies.returnedAt)
+    ))
+    .limit(1);
+
+    if (occ) {
+      return { onLand: true, occupancy: occ, zoneName: occ.zoneName || occ.zoneCode || undefined, spotNumber: occ.spotNumber };
+    }
+  }
+
+  return { onLand: false };
+}
+
 export async function listLandWaitingList() {
   const db = await getDb();
   if (!db) return [];

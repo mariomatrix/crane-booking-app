@@ -15,7 +15,7 @@ import { formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
-import { Loader2, Send, UserPlus, XCircle } from "lucide-react";
+import { Loader2, Send, UserPlus, XCircle, AlertTriangle } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { cn } from "@/lib/utils";
@@ -121,9 +121,13 @@ export function AdminReservationForm({
     );
 
     const { data: activeOccupancy } = trpc.landZone.getActiveOccupancy.useQuery(
-        { vesselId: selectedVesselId },
-        { enabled: !!selectedVesselId && selectedVesselId !== "new" && isLowerToSea }
+        {
+            vesselId: selectedVesselId && selectedVesselId !== "new" ? selectedVesselId : undefined,
+            registration: vesselRegistration ? vesselRegistration.trim() : undefined,
+        },
+        { enabled: (!!selectedVesselId && selectedVesselId !== "new") || (!!vesselRegistration && vesselRegistration.trim().length > 1) }
     );
+    const isVesselOnLand = !!activeOccupancy;
 
     // Auto-fill landZoneId for launch operations (lower_to_sea) from active land occupancy
     useEffect(() => {
@@ -131,6 +135,13 @@ export function AdminReservationForm({
             setLandZoneId(activeOccupancy.zone.id);
         }
     }, [isLowerToSea, activeOccupancy, landZoneId]);
+
+    // If vessel is on land and lift_from_sea is selected, clear serviceTypeId
+    useEffect(() => {
+        if (isVesselOnLand && isLiftFromSea) {
+            setServiceTypeId("");
+        }
+    }, [isVesselOnLand, isLiftFromSea]);
 
 
     const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
@@ -289,7 +300,14 @@ export function AdminReservationForm({
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        
+
+        if (isLiftFromSea && isVesselOnLand) {
+            toast.error(lang === "hr"
+                ? "Nije moguće zakazati vađenje iz mora jer se plovilo već nalazi na kopnu (suhom vezu)."
+                : "Cannot schedule lift from sea because the vessel is already on dry berth.");
+            return;
+        }
+
         if (isWaitlisted) {
             if (!userId || !serviceTypeId || !requestedDate || !craneId || !vesselType) {
                 toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu i tip plovila).");
@@ -527,6 +545,25 @@ export function AdminReservationForm({
                         <h3 className="font-medium text-sm border-b pb-2">
                             {lang === "hr" ? "Tip operacije i termin" : "Service Type & Time"}
                         </h3>
+                        {/* Warning if vessel is on land */}
+                        {isVesselOnLand && (
+                            <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg text-amber-900 text-xs flex items-start gap-2">
+                                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                                <div>
+                                    <p className="font-semibold">
+                                        {lang === "hr"
+                                            ? `Plovilo se već nalazi na kopnu (Zona: ${activeOccupancy?.zone?.name || "Suhi vez"}${activeOccupancy?.spotNumber ? `, Mjesto: ${activeOccupancy.spotNumber}` : ""})`
+                                            : `Vessel is already on land (Zone: ${activeOccupancy?.zone?.name || "Dry berth"}${activeOccupancy?.spotNumber ? `, Spot: ${activeOccupancy.spotNumber}` : ""})`}
+                                    </p>
+                                    <p className="text-[11px] text-amber-800 mt-0.5">
+                                        {lang === "hr"
+                                            ? "Operacija 'Vađenje iz mora' je zabranjena dok se plovilo ne spusti u more. Dozvoljene su operacije spuštanja u more, servisa ili pranja."
+                                            : "Operation 'Lift from sea' is forbidden because the vessel is already on dry berth."}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-2">
                             <Label>{lang === "hr" ? "Tip operacije" : "Service type"} *</Label>
                             <Select value={serviceTypeId} onValueChange={(val) => {
@@ -544,12 +581,17 @@ export function AdminReservationForm({
                                     } />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {(serviceTypes as any[]).map((st: any) => (
-                                        <SelectItem key={st.id} value={st.id}>
-                                            {st.name}
-                                            {st.defaultDurationMin && ` (~${st.defaultDurationMin} min)`}
-                                        </SelectItem>
-                                    ))}
+                                    {(serviceTypes as any[]).map((st: any) => {
+                                        const isLift = st.operationCategory === "lift_from_sea";
+                                        const isDisabled = isVesselOnLand && isLift;
+                                        return (
+                                            <SelectItem key={st.id} value={st.id} disabled={isDisabled}>
+                                                {st.name}
+                                                {st.defaultDurationMin && ` (~${st.defaultDurationMin} min)`}
+                                                {isDisabled && (lang === "hr" ? " (Zabranjeno - brod je na kopnu)" : " (Disabled - on land)")}
+                                            </SelectItem>
+                                        );
+                                    })}
                                 </SelectContent>
                             </Select>
                         </div>

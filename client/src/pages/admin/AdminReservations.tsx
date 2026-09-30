@@ -71,6 +71,7 @@ import { ReservationChat } from "@/components/ReservationChat";
 import { ReservationScheduleModal } from "@/components/ReservationScheduleModal";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
+import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
 import { toZagreb } from "@shared/timezone";
@@ -93,6 +94,7 @@ export default function AdminReservations() {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
   const [scheduleModalMode, setScheduleModalMode] = useState<"approve" | "edit" | "create">("create");
   const [selectedRes, setSelectedRes] = useState<any | null>(null);
+  const [isCreateResOpen, setIsCreateResOpen] = useState(false);
 
   // Work order dialog state
   const [selectedWorkOrderRes, setSelectedWorkOrderRes] = useState<any | null>(null);
@@ -200,9 +202,7 @@ export default function AdminReservations() {
 
   // Action handlers
   const handleOpenCreate = () => {
-    setSelectedRes(null);
-    setScheduleModalMode("create");
-    setScheduleModalOpen(true);
+    setIsCreateResOpen(true);
   };
 
   const handleOpenApprove = (res: any) => {
@@ -1041,6 +1041,27 @@ export default function AdminReservations() {
           reservationsQuery.refetch();
         }}
       />
+
+      {/* ── Nova rezervacija Dialog (isti kao na Kalendaru) ───────────────────────── */}
+      <Dialog open={isCreateResOpen} onOpenChange={setIsCreateResOpen}>
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto overflow-x-hidden p-6 sm:p-8">
+          <DialogHeader>
+            <DialogTitle>Nova rezervacija</DialogTitle>
+            <DialogDescription>
+              Kreirajte novu rezervaciju za postojećeg ili novog korisnika.
+            </DialogDescription>
+          </DialogHeader>
+          <AdminReservationForm
+            onSuccess={() => {
+              setIsCreateResOpen(false);
+              reservationsQuery.refetch();
+              utils.reservation.listAll.invalidate();
+              utils.calendar.events.invalidate();
+            }}
+            onCancel={() => setIsCreateResOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* ── Work Order Execution Dialog ─────────────────────────────────────── */}
       {selectedWorkOrderRes && (

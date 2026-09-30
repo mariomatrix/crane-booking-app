@@ -122,6 +122,19 @@ export function ReservationScheduleModal({
 
   const isLiftFromSea = currentOperationCategory === "lift_from_sea";
 
+  const effectiveVesselId = reservation?.vesselId || (selectedVesselId && selectedVesselId !== "new" ? selectedVesselId : undefined);
+  const effectiveRegistration = reservation?.vesselRegistration || vesselRegistration;
+  const { data: activeOccupancy } = trpc.landZone.getActiveOccupancy.useQuery(
+    {
+      vesselId: effectiveVesselId || undefined,
+      registration: effectiveRegistration ? effectiveRegistration.trim() : undefined,
+    },
+    {
+      enabled: open && (!!effectiveVesselId || (!!effectiveRegistration && effectiveRegistration.trim().length > 1)),
+    }
+  );
+  const isVesselOnLand = !!activeOccupancy;
+
   // Available slots query for crane, date, duration
   const dateStr = selectedDate ? formatToSqlDate(selectedDate) : "";
   const slotsQuery = trpc.calendar.availableSlots.useQuery(
@@ -284,6 +297,11 @@ export function ReservationScheduleModal({
 
     if (!selectedDate || !selectedTime || !craneId) {
       toast.error("Molimo odaberite dizalicu, datum i vrijeme termina.");
+      return;
+    }
+
+    if (isLiftFromSea && isVesselOnLand) {
+      toast.error("Nije moguće zakazati vađenje iz mora jer se plovilo već nalazi na kopnu (suhom vezu).");
       return;
     }
 
@@ -487,17 +505,32 @@ export function ReservationScheduleModal({
                     <SelectValue placeholder="Odaberite uslugu" />
                   </SelectTrigger>
                   <SelectContent>
-                    {(serviceTypes as any[]).map((st: any) => (
-                      <SelectItem key={st.id} value={st.id}>
-                        {st.name} {st.operationCategory === "lift_from_sea" ? "⬆️ (Dizanje)" : st.operationCategory === "lower_to_sea" ? "⬇️ (Spuštanje)" : ""}
-                      </SelectItem>
-                    ))}
+                    {(serviceTypes as any[]).map((st: any) => {
+                      const isLift = st.operationCategory === "lift_from_sea";
+                      const isDisabled = isVesselOnLand && isLift;
+                      return (
+                        <SelectItem key={st.id} value={st.id} disabled={isDisabled}>
+                          {st.name} {st.operationCategory === "lift_from_sea" ? "⬆️ (Dizanje)" : st.operationCategory === "lower_to_sea" ? "⬇️ (Spuštanje)" : ""}
+                          {isDisabled ? " (Zabranjeno - brod je na kopnu)" : ""}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
             </div>
           </div>
         ) : null}
+
+        {/* Warning if vessel is already on land */}
+        {isVesselOnLand && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <strong>Plovilo se već nalazi na kopnu</strong> ({activeOccupancy?.zone?.name || "Suhi vez"}{activeOccupancy?.spotNumber ? `, Mjesto: ${activeOccupancy.spotNumber}` : ""}). Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.
+            </div>
+          </div>
+        )}
 
         {/* 2. PŠD Špinut Marina Rules Guidelines Alert */}
         {currentLength > 15 ? (

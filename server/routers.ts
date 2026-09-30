@@ -105,6 +105,7 @@ import {
   createLandOccupancy,
   completeLandOccupancy,
   getActiveOccupancyByVessel,
+  isVesselCurrentlyOnLand,
   listLandWaitingList,
   addLandWaitingListEntry,
   updateLandWaitingListStatus,
@@ -2048,6 +2049,24 @@ export const appRouter = router({
           }
         }
 
+        // Check if service is "lift_from_sea" (vađenje iz mora) and whether the vessel is already on land
+        if (input.serviceTypeId) {
+          const serviceType = await getServiceTypeById(input.serviceTypeId);
+          if (serviceType?.operationCategory === "lift_from_sea") {
+            const { onLand, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
+              input.vesselId,
+              input.vesselRegistration
+            );
+            if (onLand) {
+              const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
+              });
+            }
+          }
+        }
+
         // 3. Build vessel snapshot
         let vesselSnapshot: Record<string, any> = {
           vesselType: input.vesselType,
@@ -2931,6 +2950,24 @@ export const appRouter = router({
           }
         }
 
+        // Forbid lift_from_sea if vessel is already on land
+        if (reservation.serviceTypeId) {
+          const st = await getServiceTypeById(reservation.serviceTypeId);
+          if (st?.operationCategory === "lift_from_sea") {
+            const { onLand, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
+              reservation.vesselId,
+              reservation.vesselRegistration
+            );
+            if (onLand) {
+              const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Plovilo se već nalazi na kopnu${locationStr}. Nije moguće odobriti vađenje iz mora dok se plovilo ne spusti u more.`,
+              });
+            }
+          }
+        }
+
         // Validate crane
         const crane = await getCraneById(input.craneId);
         if (!crane || crane.craneStatus !== "active") {
@@ -3603,6 +3640,24 @@ export const appRouter = router({
         };
 
         const targetDuration = input.durationMin || reservation.durationMin || 30;
+
+        // Forbid lift_from_sea if vessel is already on land
+        if (reservation.serviceTypeId) {
+          const st = await getServiceTypeById(reservation.serviceTypeId);
+          if (st?.operationCategory === "lift_from_sea") {
+            const { onLand, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
+              reservation.vesselId,
+              input.vesselRegistration || reservation.vesselRegistration
+            );
+            if (onLand) {
+              const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
+              });
+            }
+          }
+        }
 
         if (input.craneId || input.scheduledStart) {
           const targetCraneId = input.craneId || reservation.craneId;
@@ -4870,24 +4925,27 @@ export const appRouter = router({
         return getUpcomingReservedVesselsForZone(input.zoneId);
       }),
 
-    getActiveOccupancy: operatorProcedure
-      .input(z.object({ vesselId: z.string().uuid() }))
+    getActiveOccupancy: publicProcedure
+      .input(
+        z.object({
+          vesselId: z.string().uuid().optional(),
+          registration: z.string().optional(),
+        })
+      )
       .query(async ({ input }) => {
-        const occ = await getActiveOccupancyByVessel(input.vesselId);
-        if (!occ) return null;
-        const db = await getDb();
-        if (db) {
-          const [lz] = await db
-            .select()
-            .from(landZones)
-            .where(eq(landZones.id, occ.zoneId))
-            .limit(1);
-          return {
-            ...occ,
-            zone: lz ? { id: lz.id, name: lz.name, code: lz.code } : null,
-          };
+        if (!input.vesselId && (!input.registration || !input.registration.trim())) {
+          return null;
         }
-        return { ...occ, zone: null };
+        const { onLand, occupancy, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
+          input.vesselId,
+          input.registration
+        );
+        if (!onLand || !occupancy) return null;
+        return {
+          ...occupancy,
+          zone: { id: occupancy.zoneId, name: zoneName, code: occupancy.zoneCode },
+          spotNumber,
+        };
       }),
 
     create: operatorProcedure

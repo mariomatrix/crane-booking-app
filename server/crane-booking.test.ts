@@ -1,9 +1,9 @@
 import "dotenv/config";
 import { describe, expect, it, beforeAll, beforeEach } from "vitest";
-import { like } from "drizzle-orm";
+import { like, eq, inArray } from "drizzle-orm";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { getDb, checkTeamCapacity } from "./db";
+import { getDb, checkTeamCapacity, isVesselCurrentlyOnLand } from "./db";
 import {
   users,
   cranes,
@@ -22,6 +22,7 @@ import {
   operatorCranes,
   vessels,
   seasons,
+  serviceTypes,
 } from "../drizzle/schema";
 
 beforeAll(async () => {
@@ -590,5 +591,156 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
 
     await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
   });
+
+  describe("Vessel on land restriction (lift_from_sea)", () => {
+    it("correctly detects if a vessel is on land via ID or registration", async () => {
+      const db = await getDb();
+      if (!db) return;
+
+      const uid = Date.now();
+      const reg = `TLAND-A-${uid}`;
+
+      const [zone] = await db.insert(landZones).values({
+        name: `Zona Test ${uid}`,
+        code: `Z-${uid}`.slice(0, 20),
+        capacity: 10,
+        occupiedSpots: 1,
+        isActive: true,
+      }).returning();
+
+      const [vessel] = await db.insert(vessels).values({
+        name: "Brod Na Kopnu",
+        registration: reg,
+        ownerId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        type: "jedrilica",
+      }).returning();
+
+      let occId: string | null = null;
+      try {
+        const [occ] = await db.insert(landOccupancies).values({
+          vesselId: vessel.id,
+          userId: vessel.ownerId,
+          zoneId: zone.id,
+          spotNumber: 1,
+          liftedAt: new Date(),
+        }).returning();
+        occId = occ.id;
+
+        // Check by ID
+        const resById = await isVesselCurrentlyOnLand(vessel.id);
+        expect(resById.onLand).toBe(true);
+        expect(resById.zoneName).toBe(`Zona Test ${uid}`);
+        expect(resById.spotNumber).toBe(1);
+
+        // Check by registration
+        const resByReg = await isVesselCurrentlyOnLand(undefined, reg.toLowerCase());
+        expect(resByReg.onLand).toBe(true);
+
+        // After return (returnedAt is set), should not be on land
+        await db.update(landOccupancies).set({ returnedAt: new Date() }).where(eq(landOccupancies.id, occ.id));
+        const resAfterReturn = await isVesselCurrentlyOnLand(vessel.id);
+        expect(resAfterReturn.onLand).toBe(false);
+      } finally {
+        if (occId) await db.delete(landOccupancies).where(eq(landOccupancies.id, occId)).catch(() => {});
+        await db.delete(vessels).where(eq(vessels.id, vessel.id)).catch(() => {});
+        await db.delete(landZones).where(eq(landZones.id, zone.id)).catch(() => {});
+      }
+    });
+
+    it("blocks reservation creation for lift_from_sea if vessel is on land, but allows lower_to_sea", async () => {
+      const db = await getDb();
+      if (!db) return;
+
+      const uid = Date.now();
+      const reg = `TLAND-B-${uid}`;
+
+      const [zone] = await db.insert(landZones).values({
+        name: `Zona Test B ${uid}`,
+        code: `ZB-${uid}`.slice(0, 20),
+        capacity: 10,
+        occupiedSpots: 1,
+        isActive: true,
+      }).returning();
+
+      const [vessel] = await db.insert(vessels).values({
+        name: "Brod Na Kopnu 2",
+        registration: reg,
+        ownerId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        type: "jedrilica",
+      }).returning();
+
+      let occId: string | null = null;
+      let liftId: string | null = null;
+      let lowerId: string | null = null;
+      let lowerResId: string | null = null;
+
+      try {
+        const [occ] = await db.insert(landOccupancies).values({
+          vesselId: vessel.id,
+          userId: vessel.ownerId,
+          zoneId: zone.id,
+          spotNumber: 2,
+          liftedAt: new Date(),
+        }).returning();
+        occId = occ.id;
+
+        const [liftService] = await db.insert(serviceTypes).values({
+          name: `Vađenje iz mora (${uid})`,
+          operationCategory: "lift_from_sea",
+          defaultDurationMin: 60,
+          isActive: true,
+        }).returning();
+        liftId = liftService.id;
+
+        const [lowerService] = await db.insert(serviceTypes).values({
+          name: `Spuštanje u more (${uid})`,
+          operationCategory: "lower_to_sea",
+          defaultDurationMin: 60,
+          isActive: true,
+        }).returning();
+        lowerId = lowerService.id;
+
+        const user = createMockUser();
+        const ctx = createContext(user);
+        const caller = appRouter.createCaller(ctx);
+
+        // Attempting lift_from_sea on vessel that is on land must fail
+        await expect(
+          caller.reservation.create({
+            serviceTypeId: liftService.id,
+            requestedDate: "2026-11-15",
+            requestedTimeSlot: "jutro",
+            vesselId: vessel.id,
+            vesselRegistration: reg,
+            vesselType: "jedrilica",
+          })
+        ).rejects.toThrow("Plovilo se već nalazi na kopnu");
+
+        // lower_to_sea should succeed
+        const lowerRes = await caller.reservation.create({
+          serviceTypeId: lowerService.id,
+          requestedDate: "2026-11-15",
+          requestedTimeSlot: "jutro",
+          vesselId: vessel.id,
+          vesselRegistration: reg,
+          vesselType: "jedrilica",
+        });
+        expect(lowerRes).toBeDefined();
+        expect(lowerRes).toHaveProperty("id");
+        expect(lowerRes).toHaveProperty("reservationNumber");
+        lowerResId = lowerRes.id;
+      } finally {
+        if (lowerResId) await db.delete(reservations).where(eq(reservations.id, lowerResId)).catch(() => {});
+        if (liftId || lowerId) {
+          const ids = [liftId, lowerId].filter(Boolean) as string[];
+          await db.delete(serviceTypes).where(inArray(serviceTypes.id, ids)).catch(() => {});
+        }
+        if (occId) await db.delete(landOccupancies).where(eq(landOccupancies.id, occId)).catch(() => {});
+        await db.delete(vessels).where(eq(vessels.id, vessel.id)).catch(() => {});
+        await db.delete(landZones).where(eq(landZones.id, zone.id)).catch(() => {});
+      }
+    });
+  });
 });
+
 
