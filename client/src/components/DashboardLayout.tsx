@@ -179,8 +179,7 @@ function DashboardLayoutContent({
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: FileText, label: lang === "hr" ? "Radni nalozi" : "Work Orders", path: "/admin/work-orders" },
     { icon: Receipt, label: lang === "hr" ? "Računi & e-Računi" : "Invoices & e-Billing", path: "/admin/invoices" },
-    { icon: Anchor, label: lang === "hr" ? "Mjesta na kopnu" : "Dry Berths", path: "/admin/land-zones" },
-    { icon: ListOrdered, label: lang === "hr" ? "Lista čekanja za suhi vez" : "Dry Berth Waitlist", path: "/admin/land-waiting" },
+    { icon: Anchor, label: lang === "hr" ? "Kopno & Suhi vez" : "Land & Dry Berths", path: "/admin/land-hub" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
     { icon: Users, label: lang === "hr" ? "Korisnici i plovila" : "Clients & Vessels", path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
@@ -300,7 +299,12 @@ function DashboardLayoutContent({
           <SidebarContent className="gap-0">
             <SidebarMenu className="px-2 py-1 space-y-0.5">
               {mainMenuItems.map((item) => {
-                const isActive = location === item.path;
+                const isActive =
+                  location === item.path ||
+                  (item.path === "/admin/land-hub" &&
+                    (location.startsWith("/admin/land-hub") ||
+                      location.startsWith("/admin/land-zones") ||
+                      location.startsWith("/admin/land-waiting")));
                 return (
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton

@@ -28,6 +28,7 @@ import { memberSyncRouter } from "./memberSync/memberSync.router";
 import { berthsRouter } from "./berths.router";
 import { invoicesRouter } from "./invoices.router";
 import { resourcesRouter } from "./resources.router";
+import { landFlowRouter } from "./landFlow.router";
 import {
   listCranes,
   getCraneById,
@@ -5845,6 +5846,9 @@ export const appRouter = router({
         });
       }),
   }),
+
+  // ─── Land Flow & Dispatcher Matrix ─────────────────────────────────────
+  landFlow: landFlowRouter,
 });
 
 export type AppRouter = typeof appRouter;

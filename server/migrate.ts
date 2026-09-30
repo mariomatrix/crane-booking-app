@@ -127,6 +127,119 @@ async function runMigration() {
         console.warn("land_occupancies table verification warning:", e?.message || e);
     }
 
+    // ─── Land Spots, Allocations, Turnarounds & Affinities ───────────
+    try {
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "land_spots" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "zone_id" uuid NOT NULL REFERENCES "land_zones"("id") ON DELETE RESTRICT,
+                "spot_number" integer NOT NULL,
+                "code" varchar(30) NOT NULL,
+                "max_length_m" numeric(8, 2),
+                "max_beam_m" numeric(8, 2),
+                "max_weight_tons" numeric(8, 2),
+                "is_active" boolean DEFAULT true NOT NULL,
+                "is_blocked" boolean DEFAULT false NOT NULL,
+                "block_reason" text,
+                "sort_order" integer DEFAULT 0 NOT NULL,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE UNIQUE INDEX IF NOT EXISTS "land_spots_zone_number_unique" ON "land_spots" ("zone_id", "spot_number")`;
+        await migrationClient`CREATE UNIQUE INDEX IF NOT EXISTS "land_spots_code_unique" ON "land_spots" ("code")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_spots_zone_idx" ON "land_spots" ("zone_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_spots_active_idx" ON "land_spots" ("is_active", "is_blocked")`;
+
+        await migrationClient`ALTER TABLE "land_occupancies" ADD COLUMN IF NOT EXISTS "spot_id" uuid REFERENCES "land_spots"("id") ON DELETE RESTRICT`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_occ_spot_id_idx" ON "land_occupancies" ("spot_id")`;
+
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."land_spot_allocation_status" AS ENUM('proposed', 'reserved', 'confirmed', 'fulfilled', 'cancelled', 'expired');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "land_spot_allocations" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "spot_id" uuid NOT NULL REFERENCES "land_spots"("id") ON DELETE RESTRICT,
+                "vessel_id" uuid NOT NULL REFERENCES "vessels"("id") ON DELETE RESTRICT,
+                "reservation_id" uuid REFERENCES "reservations"("id") ON DELETE SET NULL,
+                "status" "public"."land_spot_allocation_status" DEFAULT 'proposed' NOT NULL,
+                "planned_from" timestamp with time zone NOT NULL,
+                "planned_until" timestamp with time zone,
+                "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+                "override_reason" text,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_alloc_spot_status_idx" ON "land_spot_allocations" ("spot_id", "status")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_alloc_reservation_idx" ON "land_spot_allocations" ("reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "land_alloc_time_idx" ON "land_spot_allocations" ("planned_from", "planned_until")`;
+
+        await migrationClient`
+            DO $$ BEGIN
+                CREATE TYPE "public"."land_turnaround_status" AS ENUM('proposed', 'confirmed', 'at_risk', 'broken', 'completed', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "land_turnaround_links" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "spot_id" uuid NOT NULL REFERENCES "land_spots"("id") ON DELETE RESTRICT,
+                "release_reservation_id" uuid NOT NULL REFERENCES "reservations"("id") ON DELETE RESTRICT,
+                "arrival_reservation_id" uuid NOT NULL REFERENCES "reservations"("id") ON DELETE RESTRICT,
+                "planned_release_at" timestamp with time zone NOT NULL,
+                "planned_occupy_at" timestamp with time zone NOT NULL,
+                "minimum_buffer_minutes" integer DEFAULT 15 NOT NULL,
+                "status" "public"."land_turnaround_status" DEFAULT 'proposed' NOT NULL,
+                "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+                "notes" text,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "cancelled_at" timestamp with time zone,
+                "cancel_reason" text
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "turnaround_spot_idx" ON "land_turnaround_links" ("spot_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "turnaround_release_res_idx" ON "land_turnaround_links" ("release_reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "turnaround_arrival_res_idx" ON "land_turnaround_links" ("arrival_reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "turnaround_status_idx" ON "land_turnaround_links" ("status")`;
+        await migrationClient`
+            CREATE UNIQUE INDEX IF NOT EXISTS "turnaround_arrival_unique_active" 
+            ON "land_turnaround_links" ("arrival_reservation_id") 
+            WHERE status IN ('proposed', 'confirmed')
+        `;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "crane_zone_affinities" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id") ON DELETE CASCADE,
+                "zone_id" uuid NOT NULL REFERENCES "land_zones"("id") ON DELETE CASCADE,
+                "affinity_score" integer DEFAULT 50 NOT NULL,
+                "extra_transport_minutes" integer DEFAULT 0 NOT NULL,
+                "is_primary" boolean DEFAULT false NOT NULL,
+                "is_blocked" boolean DEFAULT false NOT NULL,
+                "notes" text,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+                CONSTRAINT "cza_score_range" CHECK (affinity_score >= 0 AND affinity_score <= 100),
+                CONSTRAINT "cza_extra_minutes_positive" CHECK (extra_transport_minutes >= 0)
+            )
+        `;
+        await migrationClient`CREATE UNIQUE INDEX IF NOT EXISTS "cza_crane_zone_unique" ON "crane_zone_affinities" ("crane_id", "zone_id")`;
+        await migrationClient`
+            CREATE UNIQUE INDEX IF NOT EXISTS "cza_one_primary_crane_per_zone" 
+            ON "crane_zone_affinities" ("zone_id") 
+            WHERE is_primary = true
+        `;
+
+        console.log("Land spots, allocations, turnarounds & affinities verified.");
+    } catch (e: any) {
+        console.warn("Land spots / affinities verification warning:", e?.message || e);
+    }
+
     try {
         await migrationClient`
             CREATE TABLE IF NOT EXISTS "land_waiting_list" (
@@ -710,7 +823,7 @@ async function runMigration() {
     }
 
     // ─── Import schema and helpers ────────────────────────────────────
-    const { cranes, users, serviceTypes, holidays, landZones, priceListItems, memberStatutoryRights, resources } = await import("../drizzle/schema");
+    const { cranes, users, serviceTypes, holidays, landZones, landSpots, craneZoneAffinities, priceListItems, memberStatutoryRights, resources } = await import("../drizzle/schema");
     const { eq } = await import("drizzle-orm");
     const bcrypt = await import("bcryptjs");
 
@@ -944,17 +1057,85 @@ async function runMigration() {
 
     // ─── Seed: Land Zones ────────────────────────────────────────────
     const existingLandZones = await db.select().from(landZones);
+    let seededZones = existingLandZones;
     if (existingLandZones.length === 0) {
         console.log("Seeding land zones...");
-        await db.insert(landZones).values([
+        seededZones = await db.insert(landZones).values([
             { name: "Servisna zona", code: "SZ", totalSpots: 28, sortOrder: 0 },
             { name: "Arla 1",        code: "A1", totalSpots: 18, sortOrder: 1 },
             { name: "Arla 2",        code: "A2", totalSpots: 30, sortOrder: 2 },
             { name: "Arla 3",        code: "A3", totalSpots: 50, sortOrder: 3 },
             { name: "Zapadna obala",  code: "ZO", totalSpots: 16, sortOrder: 4 },
             { name: "Lukobran",       code: "LB", totalSpots: 50, sortOrder: 5 },
-        ]);
+        ]).returning();
         console.log("Land zones seeded.");
+    }
+
+    // ─── Seed: Land Spots ────────────────────────────────────────────
+    const existingSpots = await db.select().from(landSpots);
+    if (existingSpots.length === 0 && seededZones.length > 0) {
+        console.log("Seeding individual land spots...");
+        const spotsToInsert: any[] = [];
+        for (const zone of seededZones) {
+            for (let i = 1; i <= zone.totalSpots; i++) {
+                const numStr = String(i).padStart(2, "0");
+                spotsToInsert.push({
+                    zoneId: zone.id,
+                    spotNumber: i,
+                    code: `${zone.code}-${numStr}`,
+                    maxLengthM: zone.code === "LB" ? "16.00" : zone.code === "SZ" ? "12.00" : "10.00",
+                    maxBeamM: zone.code === "LB" ? "5.00" : "4.00",
+                    maxWeightTons: zone.code === "LB" ? "50.00" : "10.00",
+                    isActive: true,
+                    isBlocked: false,
+                    sortOrder: i,
+                });
+            }
+        }
+        for (let i = 0; i < spotsToInsert.length; i += 50) {
+            await db.insert(landSpots).values(spotsToInsert.slice(i, i + 50));
+        }
+        console.log(`Seeded ${spotsToInsert.length} individual land spots.`);
+    }
+
+    // ─── Seed: Crane Zone Affinities ─────────────────────────────────
+    const existingAffinities = await db.select().from(craneZoneAffinities);
+    const activeCranes = await db.select().from(cranes);
+    if (existingAffinities.length === 0 && activeCranes.length > 0 && seededZones.length > 0) {
+        console.log("Seeding crane zone affinities...");
+        const zoneMap = new Map(seededZones.map(z => [z.code, z.id]));
+        const affinitiesToInsert: any[] = [];
+
+        for (const crane of activeCranes) {
+            const cName = crane.name.toLowerCase();
+            if (cName.includes("travelift")) {
+                if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: true, isBlocked: false });
+                if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: true, isBlocked: false });
+                if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 70, extraTransportMinutes: 8, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 60, extraTransportMinutes: 10, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 50, extraTransportMinutes: 15, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Fizički neprohodno za Travelift" });
+            } else if (cName.includes("stacionarna")) {
+                if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: true, isBlocked: false });
+                if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: true, isBlocked: false });
+                if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 60, extraTransportMinutes: 10, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 40, extraTransportMinutes: 15, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 30, extraTransportMinutes: 20, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Prevelika udaljenost od platoa" });
+            } else {
+                if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: true, isBlocked: false });
+                if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: true, isBlocked: false });
+                if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 80, extraTransportMinutes: 8, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 50, extraTransportMinutes: 15, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 70, extraTransportMinutes: 10, isPrimary: false, isBlocked: false });
+                if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Izvan dohvata male dizalice" });
+            }
+        }
+
+        if (affinitiesToInsert.length > 0) {
+            await db.insert(craneZoneAffinities).values(affinitiesToInsert);
+            console.log(`Seeded ${affinitiesToInsert.length} crane zone affinities.`);
+        }
     }
 
     // ─── Seed: Admin Users ───────────────────────────────────────────

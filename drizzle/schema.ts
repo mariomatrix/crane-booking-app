@@ -11,6 +11,9 @@ import {
     jsonb,
     uuid,
     index,
+    uniqueIndex,
+    check,
+    numeric,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
@@ -440,11 +443,36 @@ export const landZones = pgTable("land_zones", {
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// ─── Pojedinačna mjesta na kopnu (Land Spots) ───────────────────────────
+export const landSpots = pgTable("land_spots", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    zoneId: uuid("zone_id").notNull().references(() => landZones.id, { onDelete: "restrict" }),
+    spotNumber: integer("spot_number").notNull(),
+    code: varchar("code", { length: 30 }).notNull(),
+    maxLengthM: numeric("max_length_m", { precision: 8, scale: 2 }),
+    maxBeamM: numeric("max_beam_m", { precision: 8, scale: 2 }),
+    maxWeightTons: numeric("max_weight_tons", { precision: 8, scale: 2 }),
+    isActive: boolean("is_active").default(true).notNull(),
+    isBlocked: boolean("is_blocked").default(false).notNull(),
+    blockReason: text("block_reason"),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+    return {
+        zoneSpotUnique: uniqueIndex("land_spots_zone_number_unique").on(table.zoneId, table.spotNumber),
+        codeUnique: uniqueIndex("land_spots_code_unique").on(table.code),
+        zoneIdx: index("land_spots_zone_idx").on(table.zoneId),
+        activeIdx: index("land_spots_active_idx").on(table.isActive, table.isBlocked),
+    };
+});
+
 export const landOccupancies = pgTable("land_occupancies", {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
     vesselId: uuid("vessel_id").notNull().references(() => vessels.id),
     userId: uuid("user_id").notNull().references(() => users.id),
     zoneId: uuid("zone_id").notNull().references(() => landZones.id),
+    spotId: uuid("spot_id").references(() => landSpots.id, { onDelete: "restrict" }),
     spotNumber: integer("spot_number"),              // opcijski: konkretno mjesto 1–N
     reservationId: uuid("reservation_id").references(() => reservations.id),  // vađenje
     returnReservationId: uuid("return_reservation_id").references(() => reservations.id),  // spuštanje
@@ -459,10 +487,100 @@ export const landOccupancies = pgTable("land_occupancies", {
         vesselIdIdx: index("land_occ_vessel_id_idx").on(table.vesselId),
         userIdIdx: index("land_occ_user_id_idx").on(table.userId),
         zoneIdIdx: index("land_occ_zone_id_idx").on(table.zoneId),
+        spotIdIdx: index("land_occ_spot_id_idx").on(table.spotId),
         returnedAtIdx: index("land_occ_returned_at_idx").on(table.returnedAt),
         liftedAtIdx: index("land_occ_lifted_at_idx").on(table.liftedAt),
         zoneReturnedIdx: index("land_occ_zone_returned_idx").on(table.zoneId, table.returnedAt),
         vesselReturnedIdx: index("land_occ_vessel_returned_idx").on(table.vesselId, table.returnedAt),
+    };
+});
+
+// ─── Planirane alokacije mjesta (Land Spot Allocations) ─────────────────
+export const landSpotAllocationStatusEnum = pgEnum("land_spot_allocation_status", [
+    "proposed",
+    "reserved",
+    "confirmed",
+    "fulfilled",
+    "cancelled",
+    "expired",
+]);
+
+export const landSpotAllocations = pgTable("land_spot_allocations", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    spotId: uuid("spot_id").notNull().references(() => landSpots.id, { onDelete: "restrict" }),
+    vesselId: uuid("vessel_id").notNull().references(() => vessels.id, { onDelete: "restrict" }),
+    reservationId: uuid("reservation_id").references(() => reservations.id, { onDelete: "set null" }),
+    status: landSpotAllocationStatusEnum("status").default("proposed").notNull(),
+    plannedFrom: timestamp("planned_from", { withTimezone: true }).notNull(),
+    plannedUntil: timestamp("planned_until", { withTimezone: true }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    overrideReason: text("override_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+    return {
+        spotStatusIdx: index("land_alloc_spot_status_idx").on(table.spotId, table.status),
+        reservationIdx: index("land_alloc_reservation_idx").on(table.reservationId),
+        plannedTimeIdx: index("land_alloc_time_idx").on(table.plannedFrom, table.plannedUntil),
+    };
+});
+
+// ─── Perzistirani rotacijski linkovi (Land Turnaround Links) ───────────
+export const landTurnaroundStatusEnum = pgEnum("land_turnaround_status", [
+    "proposed",
+    "confirmed",
+    "at_risk",
+    "broken",
+    "completed",
+    "cancelled",
+]);
+
+export const landTurnaroundLinks = pgTable("land_turnaround_links", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    spotId: uuid("spot_id").notNull().references(() => landSpots.id, { onDelete: "restrict" }),
+    releaseReservationId: uuid("release_reservation_id").notNull().references(() => reservations.id, { onDelete: "restrict" }),
+    arrivalReservationId: uuid("arrival_reservation_id").notNull().references(() => reservations.id, { onDelete: "restrict" }),
+    plannedReleaseAt: timestamp("planned_release_at", { withTimezone: true }).notNull(),
+    plannedOccupyAt: timestamp("planned_occupy_at", { withTimezone: true }).notNull(),
+    minimumBufferMinutes: integer("minimum_buffer_minutes").default(15).notNull(),
+    status: landTurnaroundStatusEnum("status").default("proposed").notNull(),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+}, (table) => {
+    return {
+        spotIdx: index("turnaround_spot_idx").on(table.spotId),
+        releaseResIdx: index("turnaround_release_res_idx").on(table.releaseReservationId),
+        arrivalResIdx: index("turnaround_arrival_res_idx").on(table.arrivalReservationId),
+        statusIdx: index("turnaround_status_idx").on(table.status),
+        arrivalUniqueActive: uniqueIndex("turnaround_arrival_unique_active")
+            .on(table.arrivalReservationId)
+            .where(sql`status IN ('proposed', 'confirmed')`),
+    };
+});
+
+// ─── Težinski faktori afiniteta dizalica i zona (Crane Zone Affinities) ─
+export const craneZoneAffinities = pgTable("crane_zone_affinities", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    craneId: uuid("crane_id").notNull().references(() => cranes.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").notNull().references(() => landZones.id, { onDelete: "cascade" }),
+    affinityScore: integer("affinity_score").default(50).notNull(),
+    extraTransportMinutes: integer("extra_transport_minutes").default(0).notNull(),
+    isPrimary: boolean("is_primary").default(false).notNull(),
+    isBlocked: boolean("is_blocked").default(false).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+    return {
+        craneZoneUnique: uniqueIndex("cza_crane_zone_unique").on(table.craneId, table.zoneId),
+        onePrimaryPerZone: uniqueIndex("cza_one_primary_crane_per_zone")
+            .on(table.zoneId)
+            .where(sql`is_primary = true`),
+        scoreRangeCheck: check("cza_score_range", sql`affinity_score >= 0 AND affinity_score <= 100`),
+        extraMinutesCheck: check("cza_extra_minutes_positive", sql`extra_transport_minutes >= 0`),
     };
 });
 
@@ -1007,4 +1125,21 @@ export type Invoice = SelectInvoice;
 export type InsertInvoiceItem = typeof invoiceItems.$inferInsert;
 export type SelectInvoiceItem = typeof invoiceItems.$inferSelect;
 export type InvoiceItem = SelectInvoiceItem;
+
+export type InsertLandSpot = typeof landSpots.$inferInsert;
+export type SelectLandSpot = typeof landSpots.$inferSelect;
+export type LandSpot = SelectLandSpot;
+
+export type InsertLandSpotAllocation = typeof landSpotAllocations.$inferInsert;
+export type SelectLandSpotAllocation = typeof landSpotAllocations.$inferSelect;
+export type LandSpotAllocation = SelectLandSpotAllocation;
+
+export type InsertLandTurnaroundLink = typeof landTurnaroundLinks.$inferInsert;
+export type SelectLandTurnaroundLink = typeof landTurnaroundLinks.$inferSelect;
+export type LandTurnaroundLink = SelectLandTurnaroundLink;
+
+export type InsertCraneZoneAffinity = typeof craneZoneAffinities.$inferInsert;
+export type SelectCraneZoneAffinity = typeof craneZoneAffinities.$inferSelect;
+export type CraneZoneAffinity = SelectCraneZoneAffinity;
+
 

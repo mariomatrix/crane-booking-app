@@ -1,8 +1,17 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
+import { useEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
+
+function RedirectTo({ to }: { to: string }) {
+  const [, setLocation] = useLocation();
+  useEffect(() => {
+    setLocation(to);
+  }, [to, setLocation]);
+  return null;
+}
 import { NewMessageToast } from "./components/NewMessageToast";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { LangProvider } from "./contexts/LangContext";
@@ -25,6 +34,7 @@ import AdminSeasons from "./pages/admin/AdminSeasons";
 import AdminHolidays from "./pages/admin/AdminHolidays";
 import AdminAuditLog from "./pages/admin/AdminAuditLog";
 import AdminUserCard from "./pages/admin/AdminUserCard";
+import AdminLandHub from "./pages/admin/AdminLandHub";
 import AdminLandZones from "./pages/admin/AdminLandZones";
 import AdminLandWaiting from "./pages/admin/AdminLandWaiting";
 import AdminCraneOps from "./pages/admin/AdminCraneOps";
@@ -108,11 +118,14 @@ function Router() {
       <Route path="/admin/audit-log">
         <AdminLayout><AdminAuditLog /></AdminLayout>
       </Route>
+      <Route path="/admin/land-hub">
+        <AdminLayout><AdminLandHub /></AdminLayout>
+      </Route>
       <Route path="/admin/land-zones">
-        <AdminLayout><AdminLandZones /></AdminLayout>
+        <RedirectTo to="/admin/land-hub?tab=zones" />
       </Route>
       <Route path="/admin/land-waiting">
-        <AdminLayout><AdminLandWaiting /></AdminLayout>
+        <RedirectTo to="/admin/land-hub?tab=waiting" />
       </Route>
       <Route path="/admin/crane-ops">
         <AdminLayout><AdminCraneOps /></AdminLayout>
