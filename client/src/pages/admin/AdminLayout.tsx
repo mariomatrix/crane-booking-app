@@ -27,6 +27,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       } else if (user.role === "operator" && isAdminOnly) {
         setLocation("/admin/calendar");
       }
+    } else if (!loading && !user) {
+      setLocation("/auth");
     }
   }, [loading, user, location, isAdminOnly, setLocation]);
 
