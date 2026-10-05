@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 
-type Status = "pending" | "approved" | "rejected" | "cancelled" | "completed" | "waitlisted";
+type Status = "pending" | "approved" | "rejected" | "cancelled" | "completed" | "waitlisted" | "not_performed";
 
 const statusConfig: Record<Status, { label: string; className: string }> = {
   pending: {
@@ -26,6 +26,10 @@ const statusConfig: Record<Status, { label: string; className: string }> = {
   completed: {
     label: "Završeno",
     className: "bg-blue-600 text-white dark:bg-blue-600 dark:text-white border-0 font-medium",
+  },
+  not_performed: {
+    label: "Nije izvedeno",
+    className: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-medium",
   },
 };
 

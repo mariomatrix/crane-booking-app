@@ -328,6 +328,7 @@ export default function AdminDailyOperations() {
                                     <SelectItem value="approved">{isHr ? "Odobreno" : "Approved"}</SelectItem>
                                     <SelectItem value="in_progress">{isHr ? "U tijeku" : "In Progress"}</SelectItem>
                                     <SelectItem value="completed">{isHr ? "Završeno" : "Completed"}</SelectItem>
+                                    <SelectItem value="not_performed">{isHr ? "Nije izvedeno" : "Not Performed"}</SelectItem>
                                     <SelectItem value="pending">{isHr ? "Na čekanju" : "Pending"}</SelectItem>
                                 </SelectContent>
                             </Select>

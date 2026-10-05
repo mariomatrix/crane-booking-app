@@ -13,11 +13,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Anchor, Loader2, Pencil, Plus, Trash2, Ship, Info, Calendar, ListOrdered } from "lucide-react";
+import { Anchor, Loader2, Pencil, Plus, Trash2, Ship, Info, Calendar, ListOrdered, ArrowRightLeft } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
+import { ZoneMoveDialog } from "@/components/landDispatch/ZoneMoveDialog";
 
 type ZoneForm = {
   name: string;
@@ -45,6 +46,13 @@ export default function AdminLandZones() {
   const [form, setForm] = useState<ZoneForm>(emptyForm);
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"active" | "reserved" | "waiting">("active");
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [moveVessel, setMoveVessel] = useState<{
+    vesselId: string;
+    vesselName: string;
+    currentZoneId: string;
+    currentZoneCode?: string;
+  } | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -362,18 +370,37 @@ export default function AdminLandZones() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50 text-xs font-semibold"
-                              onClick={() => {
-                                if (confirm(isHr ? "Potvrdite spuštanje plovila u more?" : "Confirm vessel launch?")) {
-                                  launchMutation.mutate({ id: occ.id });
-                                }
-                              }}
-                            >
-                              {isHr ? "Spusti u more" : "Launch"}
-                            </Button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg text-primary border-primary/20 hover:bg-primary/5 text-xs font-semibold gap-1"
+                                onClick={() => {
+                                  setMoveVessel({
+                                    vesselId: occ.vessel.id,
+                                    vesselName: occ.vessel.name,
+                                    currentZoneId: occ.zoneId || selectedZoneId || "",
+                                    currentZoneCode: (occ.zone as any)?.code,
+                                  });
+                                  setMoveDialogOpen(true);
+                                }}
+                              >
+                                <ArrowRightLeft className="w-3.5 h-3.5" />
+                                {isHr ? "Promijeni zonu" : "Change Zone"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50 text-xs font-semibold"
+                                onClick={() => {
+                                  if (confirm(isHr ? "Potvrdite spuštanje plovila u more?" : "Confirm vessel launch?")) {
+                                    launchMutation.mutate({ id: occ.id });
+                                  }
+                                }}
+                              >
+                                {isHr ? "Spusti u more" : "Launch"}
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -530,6 +557,17 @@ export default function AdminLandZones() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <ZoneMoveDialog
+        open={moveDialogOpen}
+        onOpenChange={setMoveDialogOpen}
+        vessel={moveVessel}
+        zones={zones.map((z) => ({ id: z.id, code: z.code, name: z.name, totalSpots: z.totalSpots }))}
+        onSuccess={() => {
+          utils.landOccupancy.listActive.invalidate();
+          utils.landZone.list.invalidate();
+        }}
+      />
     </div>
   );
 }

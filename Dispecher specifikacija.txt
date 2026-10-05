@@ -1,0 +1,1498 @@
+Konačna funkcionalna i implementacijska specifikacija
+Dispečer kopna, kapacitet zona, timovi, lista čekanja i raspodjela dizalica
+
+Verzija: 3.0
+ Status: Konačna specifikacija za implementaciju
+ Projekt: Crane Booking App
+ Modul: Kopno i suhi vez
+ Primarna ruta: /admin/land-hub
+ Primarna grana: development
+ Namjena: Specifikacija za razvojni tim i AI agenta
+
+1. Svrha dokumenta
+
+Ova specifikacija definira konačni poslovni, funkcionalni, podatkovni i korisnički model modula za dispečersko upravljanje operacijama podizanja i spuštanja plovila.
+
+Rješenje mora objediniti:
+
+zahtjeve za podizanje i spuštanje plovila;
+listu čekanja za mjesto na kopnu;
+dnevno i buduće planiranje operacija;
+raspoloživost dizalica;
+raspoloživost radnih timova;
+zbirni kapacitet kopnenih zona;
+ovisnosti između operacija;
+tehnička ograničenja;
+afinitete dizalica prema zonama;
+transparentno rangiranje mogućih kombinacija;
+početak, završetak i stvarno izvršenje operacije.
+
+Temeljna arhitektonska odluka glasi:
+
+Rezervira se operacija. Dizalica i tim dodjeljuju se kao operativni resursi. Kapacitet zone vremenski je uvjet izvedivosti.
+
+Drugo temeljno pravilo glasi:
+
+Tvrda pravila određuju što je moguće. Afiniteti i preferencije određuju što je poželjno.
+
+2. Poslovni kontekst
+2.1. Trenutačni problemi
+
+Postojeće sučelje razdvaja evidenciju zona, trenutnu zauzetost i listu čekanja. Operater mora ručno povezivati podatke iz više prikaza.
+
+Glavni problemi su:
+
+Operater nema jedinstveni pregled zahtjeva, rasporeda, dizalica, timova i kapaciteta zona.
+Statičan broj slobodnih mjesta ne uzima u obzir mjesta koja će se osloboditi budućim spuštanjem.
+Sustav ne razlikuje tehničku mogućnost od operativne poželjnosti određene dizalice.
+Dizalice se planiraju bez odgovarajućeg modela radnih timova.
+Buduća operacija podizanja ne može se pouzdano povezati s prethodnom operacijom spuštanja koja oslobađa kapacitet.
+Lista čekanja nije dovoljno povezana s dnevnim dispečerskim rasporedom.
+Sustav ne objašnjava zašto je neka kombinacija dostupna, upozoravajuća ili zabranjena.
+3. Opseg rješenja
+
+Modul mora podržavati:
+
+tri ili više dizalica;
+šest ili više zona na kopnu;
+proizvoljan broj timova;
+proizvoljan broj radnika u timu;
+operacije u slotovima od 30 minuta;
+operacije koje traju jedan ili više slotova;
+planiranje neograničen broj dana unaprijed;
+radni dan koji se inicijalno postavlja na 08:00 do 16:00;
+sezonska i posebna radna vremena;
+praznike i neradne dane;
+listu čekanja za mjesto na kopnu;
+uvjetne operacije koje ovise o prethodnom oslobađanju kapaciteta;
+ručnu konačnu odluku dispečera među dopuštenim opcijama;
+praćenje planiranih i stvarno korištenih resursa.
+4. Poslovni model
+4.1. Operacija kao osnovna jedinica rada
+
+Svaka operacija zahtijeva:
+
+1 dizalicu
++ 1 raspoloživ tim
++ vremenski interval
++ tehničku izvedivost
++ odgovarajući kapacitet zone
+
+
+Osnovne vrste operacija:
+
+lift_from_sea     Podizanje iz mora na kopno
+lower_to_sea      Spuštanje s kopna u more
+move              Premještanje
+maintenance       Održavanje
+other             Druga operacija
+
+
+Za korisničko sučelje koriste se jasni hrvatski nazivi:
+
+Podizanje na kopno
+Spuštanje u more
+Premještanje
+Održavanje
+Druga operacija
+4.2. Promjena kapaciteta zone
+
+Kod završetka podizanja:
+
+zauzetost zone +1
+slobodni kapacitet zone -1
+
+
+Kod završetka spuštanja:
+
+zauzetost zone -1
+slobodni kapacitet zone +1
+
+
+Kapacitet se stvarno mijenja tek kada je operacija završena.
+
+Planirana operacija utječe samo na projekciju budućeg kapaciteta.
+
+5. Operativni resursi
+5.1. Dizalice
+
+Dizalica je samostalan operativni resurs.
+
+Svaka dizalica ima:
+
+naziv;
+tip;
+nosivost;
+maksimalnu širinu, ako je primjenjivo;
+lokaciju;
+operativni status;
+radno vrijeme;
+razdoblja održavanja;
+tehnička ograničenja;
+odnos prema svakoj kopnenoj zoni;
+minimalni broj radnika ako se primjenjuje.
+
+Operativni status dizalice može biti:
+
+available
+busy
+maintenance
+out_of_service
+inactive
+
+
+Dizalica se ne može dodijeliti ako:
+
+nema dovoljnu nosivost;
+tehnički ne smije raditi u odabranoj zoni;
+već je zauzeta drugom operacijom;
+ima aktivnu blokadu ili održavanje;
+nije operativna;
+termin je izvan njezina radnog vremena.
+5.2. Timovi
+
+Tim je operativni resurs.
+
+Radnik nije samostalan resurs za dodjelu operaciji, nego je vremenski određeni član tima.
+
+Pravila tima:
+
+Broj timova nije unaprijed ograničen.
+Tim može imati proizvoljan broj radnika.
+Tim može privremeno biti prazan.
+Prazan tim ostaje evidentiran, ali nije operativno raspoloživ.
+Radnik može promijeniti tim.
+Promjena vrijedi od određenog trenutka nadalje.
+Promjena tima ne smije mijenjati povijesne operacije.
+Tim ne smije biti raspoređen na dvije preklapajuće operacije.
+Tim mora imati dovoljan broj raspoloživih članova.
+5.3. Minimalni broj članova
+
+Minimalan broj članova treba biti podržan od prve verzije.
+
+Osnovni minimum definira se na vrsti operacije:
+
+service_types.minimum_team_size
+
+
+Ako je potrebno, dizalica može imati dodatni minimum ili override.
+
+Primjer:
+
+Podizanje:      najmanje 3 člana
+Spuštanje:      najmanje 2 člana
+Premještanje:   najmanje 2 člana
+Održavanje:     najmanje 1 član
+
+6. Kopnene zone
+6.1. Zbirni kapacitet
+
+Zone nemaju obvezno pojedinačne numerirane pozicije.
+
+Osnovni resurs je zbirni kapacitet zone:
+
+ukupni kapacitet
+trenutačna zauzetost
+slobodni kapacitet
+projicirana buduća zauzetost
+
+
+Sustav ne uvodi tablicu pojedinačnih kopnenih mjesta kao preduvjet za ovaj modul.
+
+Postojeće polje spotNumber može ostati opcijsko za informativnu evidenciju, ali ne smije biti osnova logike kapaciteta.
+
+6.2. Izvor trenutačne zauzetosti
+
+Primarni izvor stvarne zauzetosti je broj aktivnih zapisa u land_occupancies:
+
+returned_at IS NULL
+
+
+Ako postoje povijesno neevidentirana plovila, manualOccupiedSpots može privremeno služiti kao ručna korekcija.
+
+Formula u prijelaznom razdoblju:
+
+trenutačna zauzetost
+= aktivne evidentirane zauzetosti
++ ručna korekcija neevidentirane zauzetosti
+
+
+Dugoročni cilj je da sve fizički prisutno plovilo ima aktivan zapis zauzetosti.
+
+6.3. Zona kod podizanja i spuštanja
+
+Kod podizanja:
+
+zona predstavlja planirano odredište plovila na kopnu
+
+
+Kod spuštanja:
+
+zona se određuje prema aktivnoj kopnenoj zauzetosti plovila
+
+
+Operater ne smije proizvoljno odabrati drugu zonu kod spuštanja bez prethodno evidentiranog premještanja.
+
+7. Afiniteti i tehnička ograničenja
+7.1. Afinitet
+
+Svaka kombinacija dizalice i zone može imati afinitet od 0 do 100.
+
+Afinitet je preferencija i koristi se isključivo za rangiranje dopuštenih opcija.
+
+Primjeri:
+
+Afinitet	Značenje100	Primarna i operativno najpoželjnija kombinacija
+70	Dobra sekundarna kombinacija
+40	Dopuštena, ali manje poželjna kombinacija
+0	Najniža preferencija, ali ne automatski tehnička zabrana
+
+Afinitet sam po sebi ne određuje tehničku dopuštenost.
+
+7.2. Tehnička dopuštenost
+
+Za svaki par dizalica i zona mora postojati odvojena informacija:
+
+is_technically_allowed
+
+
+Ako kombinacija nije tehnički dopuštena, ne smije se ponuditi kao izvediva opcija.
+
+Razlozi mogu uključivati:
+
+fizički pristup nije moguć;
+manipulativni prostor nije dovoljan;
+ograničenje prolaza;
+posebna sigurnosna zabrana;
+privremeno zatvaranje pristupa.
+7.3. Preporučeni zajednički model
+
+Umjesto odvojenih tablica za afinitet i zabrane može se koristiti jedna tablica:
+
+crane_zone_capabilities
+
+
+Polja:
+
+id
+crane_id
+zone_id
+is_technically_allowed
+affinity_score
+operational_penalty_slots
+notes
+valid_from
+valid_until
+created_at
+updated_at
+
+
+Ograničenja:
+
+unique(crane_id, zone_id)
+affinity_score između 0 i 100
+operational_penalty_slots >= 0
+
+7.4. Dodatno trajanje
+
+Osnovni vremenski slot iznosi 30 minuta i uključuje cijeli proces, uključujući potreban transport.
+
+Afinitet u prvoj verziji treba utjecati prvenstveno na rangiranje.
+
+operational_penalty_slots koristi se samo ako poslovno pravilo izričito zahtijeva produženje cijele operacije za određenu kombinaciju dizalice i zone.
+
+Ne uvodi se zasebno transportno vrijeme koje bi bilo odvojeno od operacije.
+
+8. Rezervacija, plan i izvršenje
+8.1. Razdvajanje podataka
+
+Potrebno je razlikovati:
+
+zahtjev korisnika;
+dispečerski plan;
+stvarno izvršenje.
+Zahtjev
+plovilo
+vrsta operacije
+željena zona
+željeni datum ili razdoblje
+željeno vrijeme
+očekivano trajanje
+napomena korisnika
+
+Plan
+planirani datum
+planirani početak
+planirani završetak
+dodijeljena dizalica
+dodijeljeni tim
+dodijeljena zona
+ovisnosti
+
+Izvršenje
+stvarni početak
+stvarni završetak
+stvarno korištena dizalica
+stvarno korišten tim
+stvarna zona
+napomena o izvršenju
+
+
+Promjena stvarnog resursa ne smije izbrisati podatak o prvobitnom planu.
+
+9. Statusni model
+
+Status procesa i operativno stanje moraju biti odvojeni.
+
+9.1. Status procesa
+requested
+planned
+confirmed
+in_progress
+completed
+cancelled
+
+
+Prikaz u hrvatskom sučelju:
+
+Kod	Nazivrequested	Zaprimljeno
+planned	Planirano
+confirmed	Potvrđeno
+in_progress	U tijeku
+completed	Završeno
+cancelled	Otkazano
+9.2. Operativno stanje
+normal
+warning
+conflict
+blocked
+delayed
+
+
+Prikaz:
+
+Kod	Nazivnormal	U redu
+warning	Upozorenje
+conflict	Konflikt
+blocked	Blokirano
+delayed	Kašnjenje
+
+Primjeri:
+
+Planirano · Upozorenje
+Potvrđeno · U redu
+U tijeku · Kašnjenje
+Planirano · Blokirano
+
+
+problem se ne koristi kao glavni status procesa.
+
+10. Lista čekanja za mjesto na kopnu
+10.1. Poslovna uloga
+
+Lista čekanja je zaseban poslovni workflow.
+
+Ona sadrži zahtjeve za podizanje plovila za koje još nije osiguran konačan izvediv plan zbog jednog ili više razloga:
+
+nema trenutačnog kapaciteta zone;
+kapacitet se treba osloboditi budućim spuštanjem;
+nema slobodne dizalice;
+nema raspoloživog tima;
+nije poznat točan datum;
+korisnik prihvaća raspon datuma;
+čeka se korisnikova potvrda;
+zahtjev još nije spreman za raspoređivanje.
+10.2. Razlika od neplanirane operacije
+Lista čekanja
+
+Zahtjev još nema konačan izvediv termin ili resurse.
+
+Neplanirana operacija
+
+Zahtjev je spreman za planiranje i ima dovoljno precizne podatke, ali dizalica, tim ili konačan termin još nisu dodijeljeni.
+
+Djelomično planirana operacija
+
+Dio plana postoji, ali nedostaje jedan ili više resursa ili potvrda.
+
+10.3. Statusi Liste čekanja
+waiting
+offered
+accepted
+assigned
+declined
+cancelled
+expired
+
+Status	Značenjewaiting	Aktivno čeka mogućnost
+offered	Korisniku je ponuđen termin
+accepted	Korisnik je prihvatio ponudu
+assigned	Kreirana je planirana operacija
+declined	Korisnik je odbio ponudu
+cancelled	Zahtjev je otkazan
+expired	Ponuda ili zahtjev više nije važeći
+10.4. Podaci zahtjeva
+
+Jedan zapis Liste čekanja mora sadržavati:
+
+korisnik
+plovilo
+vrsta operacije
+datum ulaska na listu
+željeni datum ili raspon
+preferirana zona
+alternativne dopuštene zone
+očekivano trajanje
+prioritet
+status
+broj prethodnih ponuda
+razlog prethodnog odbijanja
+napomena dispečera
+povezana rezervacija
+vrijeme isteka ponude
+
+10.5. Prioritet
+
+Osnovni red određuje datum ulaska na listu.
+
+Dopuštene korekcije prioriteta:
+
+hitna sigurnosna intervencija;
+nastavak započetog naloga;
+opravdani servisni razlog;
+ranije prihvaćena ponuda;
+ugovorno ili statutarno pravo;
+administratorska promjena uz razlog.
+
+Ručna promjena reda zahtijeva obrazloženje i audit zapis.
+
+11. Ovisnosti među operacijama
+11.1. Svrha
+
+Podizanje se može planirati ako kapacitet zone još nije slobodan, ali će ga osloboditi prethodno spuštanje.
+
+Takva operacija mora biti označena:
+
+Ovisno o uspješnom završetku prethodne operacije
+
+11.2. Model podataka
+
+Potrebna je tablica:
+
+operation_dependencies
+
+
+Polja:
+
+id
+predecessor_reservation_id
+successor_reservation_id
+dependency_type
+minimum_gap_minutes
+status
+created_by
+created_at
+updated_at
+
+
+Vrste ovisnosti:
+
+capacity_release
+same_crane_sequence
+same_team_sequence
+manual_dependency
+
+
+Statusi:
+
+pending
+satisfied
+at_risk
+broken
+cancelled
+
+11.3. Reakcija na promjene
+
+Ako prethodna operacija kasni:
+
+ovisna operacija dobiva operational_health = warning ili delayed
+ovisnost dobiva status at_risk
+
+
+Ako je prethodna operacija otkazana:
+
+ovisnost dobiva status broken
+ovisna operacija dobiva operational_health = blocked
+
+
+Sustav ne smije automatski i nevidljivo premjestiti ovisnu operaciju.
+
+12. Tvrda pravila
+
+Operacija se može potvrditi samo ako:
+
+dizalica ima dovoljnu nosivost;
+dizalica je tehnički dopuštena za odabranu zonu;
+dizalica je operativna;
+dizalica je slobodna u cijelom intervalu;
+nema preklapanja s održavanjem;
+tim postoji i aktivan je;
+tim ima dovoljan broj raspoloživih članova;
+tim je slobodan u cijelom intervalu;
+trajanje je višekratnik osnovnog slota;
+termin je unutar radnog vremena;
+datum nije blokiran praznikom ili posebnim pravilom;
+tehnički podaci plovila zadovoljavaju ograničenja dizalice;
+kod podizanja postoji slobodan ili uvjetno osiguran kapacitet zone;
+nema druge blokirajuće ovisnosti;
+nema konflikta koji ugrožava sigurnost ili fizičku izvedivost.
+
+Dispečer ne može zaobići tvrdo pravilo standardnim overrideom.
+
+13. Meka pravila
+
+Kod više izvedivih kombinacija sustav rangira opcije prema:
+
+afinitetu dizalice prema zoni;
+broju dodatnih slotova;
+kontinuitetu rasporeda;
+zadržavanju dovoljne vremenske rezerve;
+opterećenju dizalica;
+opterećenju timova;
+željenom vremenskom prozoru korisnika;
+prioritetu na Listi čekanja;
+drugim konfiguriranim preferencijama.
+
+Dispečer može odabrati bilo koju tehnički dopuštenu kombinaciju.
+
+Odabir slabije rangirane kombinacije može zahtijevati napomenu, ali se ne blokira.
+
+14. Vremenski model
+14.1. Osnovna pravila
+Osnovni slot: 30 minuta
+Zadano radno vrijeme: 08:00–16:00
+Operacija može trajati jedan ili više slotova
+Planiranje je moguće neograničen broj dana unaprijed
+
+
+Vrijednosti se ne smiju tvrdo kodirati u komponentama.
+
+14.2. Hijerarhija radnog vremena
+
+Za određeni datum vrijedi sljedeći prioritet:
+
+posebna iznimka za datum;
+praznik ili neradni dan;
+aktivna sezona;
+zadano sistemsko radno vrijeme.
+14.3. Vremenska zona
+
+Svi dnevni izračuni koriste:
+
+Europe/Zagreb
+
+
+U bazi se apsolutni trenuci spremaju kao timestamptz.
+
+15. Izračun kapaciteta zone
+15.1. Početno stanje
+
+Za početak odabranog dana izračunava se:
+
+ukupni kapacitet
+- aktivne fizičke zauzetosti
+- ručna korekcija, ako postoji
+= početni slobodni kapacitet
+
+15.2. Kronološka projekcija
+
+Sve operacije sortiraju se po trenutku završetka, jer se fizička promjena kapaciteta događa završetkom operacije.
+
+Spuštanje završeno  → slobodni kapacitet +1
+Podizanje završeno  → slobodni kapacitet -1
+
+
+Za svaki događaj izračunava se novo stanje.
+
+15.3. Izvedivost
+
+Završna dnevna bilanca nije dovoljna.
+
+Potrebno je izračunati:
+
+opening_free_capacity
+closing_projected_capacity
+minimum_free_capacity
+first_deficit_at
+
+
+Operacija podizanja nije bezuvjetno izvediva ako prije njezina završetka nema potrebnog kapaciteta.
+
+15.4. Uvjetni kapacitet
+
+Ako kapacitet osigurava prethodno spuštanje:
+
+kapacitet je uvjetno raspoloživ
+
+
+Mora postojati zapisana ovisnost između operacija.
+
+16. Korisničko sučelje
+16.1. Glavni modul
+
+Naziv:
+
+Kopno & Suhi vez
+
+
+Ruta:
+
+/admin/land-hub
+
+
+Glavni tabovi:
+
+Dispečer
+Zone
+Lista čekanja
+Timovi
+Afiniteti i ograničenja
+
+
+URL parametri:
+
+/admin/land-hub?tab=dispatch
+/admin/land-hub?tab=zones
+/admin/land-hub?tab=waiting
+/admin/land-hub?tab=teams
+/admin/land-hub?tab=affinities
+
+
+Nepoznata vrijednost taba preusmjerava na dispatch.
+
+Stare rute ostaju funkcionalne kao preusmjerenja:
+
+/admin/land-zones   → /admin/land-hub?tab=zones
+/admin/land-waiting → /admin/land-hub?tab=waiting
+
+17. Tab Dispečer
+17.1. Zaglavlje
+
+Prikazuje:
+
+odabrani datum;
+radno vrijeme;
+trajanje slota;
+dnevni ili tjedni pogled;
+filter dizalice;
+filter tima;
+filter zone;
+filter statusa;
+opciju prikaza samo problema.
+
+Akcije:
+
+Nova operacija
+Automatski prijedlog
+Provjeri dan
+Osvježi
+
+
+Automatski prijedlog ne sprema promjene bez potvrde dispečera.
+
+17.2. Operativni sažetak
+
+Prikazuje:
+
+ukupan broj operacija
+neplanirane operacije
+zahtjevi na Listi čekanja
+blokirajući konflikti
+upozorenja
+raspoložive dizalice
+raspoloživi timovi
+uvjetne operacije
+
+
+Klik na pokazatelj filtrira prikaz.
+
+17.3. Lijevi panel
+
+Grupe:
+
+Neplanirane
+Djelomično planirane
+Lista čekanja
+Problematične
+
+
+Svaka kartica prikazuje:
+
+vrstu operacije;
+plovilo;
+korisnika;
+željeni datum;
+zonu;
+trajanje;
+razlog zbog kojeg operacija nije raspoređena;
+akciju Pronađi kombinaciju.
+17.4. Glavni raspored
+
+Mora podržati tri prikaza:
+
+Operacije
+Dizalice
+Timovi
+
+Operacije
+
+Tablični popis operacija sortiran po vremenu.
+
+Dizalice
+
+Vremenska mreža s redovima dizalica i stupcima od 30 minuta.
+
+Timovi
+
+Vremenska mreža s redovima timova i stupcima od 30 minuta.
+
+Blok operacije prikazuje:
+
+vrijeme;
+vrstu operacije;
+plovilo;
+zonu;
+dodijeljeni tim ili dizalicu;
+status;
+operativno stanje;
+indikator ovisnosti.
+17.5. Drag and drop
+
+Operacija se može povući na termin.
+
+Nakon ispuštanja sustav mora:
+
+provjeriti termin;
+pronaći moguće kombinacije dizalice i tima;
+prikazati dopuštene i odbijene opcije;
+zatražiti konačan odabir;
+tek nakon potvrde spremiti plan.
+18. Panel detalja operacije
+
+Klik na operaciju otvara desni bočni panel.
+
+Panel prikazuje:
+
+Osnovni podaci
+korisnik
+plovilo
+registracija
+masa i tehnički podaci
+vrsta operacije
+zona
+planirani datum
+planirano vrijeme
+trajanje
+
+Planirani resursi
+dizalica
+tim
+članovi tima u tom trenutku
+
+Provjera pravila
+
+Primjer:
+
+✓ Nosivost zadovoljena
+✓ Dizalica raspoloživa
+✓ Tim raspoloživ
+✓ Tim ima dovoljan broj članova
+✓ Termin unutar radnog vremena
+✓ Zona tehnički dostupna
+⚠ Kapacitet ovisi o prethodnom spuštanju
+✓ Afinitet prema zoni: 100
+
+Ovisnosti
+
+Prikazuje prethodnu ili sljedeću povezanu operaciju.
+
+Audit i povijest
+
+Prikazuje:
+
+promjene termina;
+promjene dizalice;
+promjene tima;
+promjene zone;
+kreiranje i uklanjanje ovisnosti;
+korisnika koji je napravio promjenu.
+19. Pronalaženje kombinacije resursa
+
+Akcija Pronađi kombinaciju vraća sve kandidate.
+
+Preporučena kombinacija
+
+Prikazuje:
+
+dizalica
+tim
+ocjena
+razlozi preporuke
+upozorenja
+
+Ostale dopuštene kombinacije
+
+Prikazuju se rangirano.
+
+Odbijene opcije
+
+Za svaku se prikazuje konkretan razlog:
+
+Mala dizalica: nedovoljna nosivost
+Srednja dizalica: zauzeta
+Tim A: zauzet
+Tim C: nema dovoljno aktivnih članova
+Zona B: tehnički nedostupna odabranoj dizalici
+
+
+Dispečer može odabrati drugu dopuštenu kombinaciju, ali ne i odbijenu.
+
+20. Tab Zone
+
+Za svaku zonu prikazuje se:
+
+ukupni kapacitet
+stvarna zauzetost
+trenutačno slobodno
+broj današnjih podizanja
+broj današnjih spuštanja
+projicirana završna zauzetost
+najniža dnevna rezerva
+broj uvjetnih operacija
+broj konflikata
+
+
+Klik na zonu otvara kronološku projekciju:
+
+08:00 početno stanje
+08:30 završetak spuštanja, kapacitet +1
+09:00 završetak podizanja, kapacitet -1
+10:30 završetak podizanja, kapacitet -1
+
+
+Mora biti jasno označeno:
+
+stvarno slobodan kapacitet;
+planirani kapacitet;
+uvjetno raspoloživ kapacitet;
+prekoračenje kapaciteta.
+21. Tab Lista čekanja
+21.1. Glavni prikaz
+
+Stupci:
+
+redni prioritet;
+korisnik;
+plovilo;
+datum ulaska;
+željeno razdoblje;
+preferirana zona;
+alternativne zone;
+status;
+broj prethodnih ponuda;
+prva izvediva mogućnost;
+akcije.
+21.2. Filtri
+status
+zona
+datum ili razdoblje
+prioritet
+korisnik
+plovilo
+razlog čekanja
+
+21.3. Akcije
+Pronađi mogućnost
+Ponudi termin
+Rasporedi
+Planiraj uvjetno
+Promijeni prioritet
+Evidentiraj odbijanje
+Otkaži zahtjev
+
+21.4. Prva izvediva mogućnost
+
+Sustav prikazuje:
+
+datum i vrijeme
+zona
+dizalica
+tim
+ovisnost
+razina pouzdanosti
+upozorenja
+
+
+Ako mogućnost ne postoji, prikazuju se konkretni razlozi.
+
+21.5. Ponuda termina
+
+Ponuda i raspoređivanje nisu ista akcija.
+
+Ponuda čuva:
+
+offered_at
+offer_expires_at
+offered_start
+offered_end
+offered_crane_id
+offered_team_id
+offered_zone_id
+
+
+Nakon prihvaćanja stvara se planirana operacija.
+
+21.6. Dodjela iz rasporeda
+
+Slobodan termin u dispečerskom rasporedu ima akciju:
+
+Dodijeli s Liste čekanja
+
+
+Sustav prikazuje samo prikladne kandidate i objašnjava zašto ostali nisu prikladni.
+
+22. Tab Timovi
+
+Prikazuje:
+
+naziv tima
+broj aktivnih članova
+minimalno potreban broj
+trenutačni status
+današnje opterećenje
+sljedeća operacija
+blokade raspoloživosti
+
+
+Klik na tim prikazuje:
+
+članove u odabranom trenutku;
+vremensku valjanost članstva;
+dnevne operacije;
+blokade;
+povijest promjena članstva.
+
+Prazan tim ostaje vidljiv, ali ima status:
+
+Nije operativno raspoloživ
+
+23. Tab Afiniteti i ograničenja
+
+Matrica prikazuje dizalice u redovima i zone u stupcima.
+
+Svaka ćelija prikazuje:
+
+tehničku dopuštenost
+afinitet
+dodatne slotove
+napomenu
+
+
+Primjer:
+
+Dopušteno · Afinitet 100
+Dopušteno · Afinitet 60 · +1 slot
+Nije tehnički dopušteno
+
+
+Uređivanje:
+
+Tehnički dopušteno: Da/Ne
+Afinitet: 0–100
+Dodatni slotovi: 0 ili više
+Napomena
+Razdoblje valjanosti
+
+24. Početak i završetak operacije
+24.1. Početak
+
+Prije početka sustav ponovno provjerava:
+
+dizalicu;
+tim;
+broj članova;
+prethodne ovisnosti;
+kapacitet zone;
+održavanje i blokade.
+
+Ako tvrdi uvjet nije zadovoljen, operacija se ne može započeti.
+
+24.2. Završetak
+
+Dijalog završetka evidentira:
+
+stvarni početak
+stvarni završetak
+stvarna dizalica
+stvarni tim
+stvarna zona
+napomena
+problem tijekom izvođenja
+
+
+Tek potvrđeni završetak mijenja stvarnu zauzetost zone.
+
+24.3. Otkazivanje
+
+Kod otkazivanja operacije nastale iz Liste čekanja sustav pita:
+
+Vrati zahtjev na Listu čekanja
+Otkaži i operaciju i zahtjev
+Zadrži za ručnu obradu
+
+25. Konflikti i upozorenja
+25.1. Blokirajući konflikti
+
+Primjeri:
+
+nedovoljna nosivost;
+zauzeta dizalica;
+zauzet tim;
+nedovoljan broj članova;
+tehnički nedopuštena zona;
+nema kapaciteta;
+termin izvan radnog vremena;
+dizalica u kvaru ili održavanju;
+prekinuta obvezna ovisnost.
+
+Operacija se ne može potvrditi ili započeti.
+
+25.2. Upozorenja
+
+Primjeri:
+
+nizak afinitet;
+mala vremenska rezerva;
+ovisnost o prethodnoj operaciji;
+odabrana slabije rangirana kombinacija;
+dodatni operativni slot;
+bliska promjena sastava tima.
+
+Operacija se može potvrditi.
+
+25.3. Prikaz
+
+Ne koristi se trajno pulsiranje.
+
+Koriste se:
+
+statičan crveni ili žuti obrub;
+ikona;
+tekstualni razlog;
+centralni panel problema;
+filter Prikaži samo probleme.
+26. Backend arhitektura
+
+Poslovnu logiku ne treba smještati izravno u server/db.ts.
+
+Preporučena struktura:
+
+server/
+└── landDispatch/
+    ├── landDispatch.router.ts
+    ├── landDispatch.service.ts
+    ├── landDispatch.repository.ts
+    ├── capacityProjection.ts
+    ├── resourceMatching.ts
+    ├── conflictDetection.ts
+    ├── affinityScoring.ts
+    ├── dependencyService.ts
+    ├── waitingListService.ts
+    └── types.ts
+
+
+Odgovornosti:
+
+repository
+  pristup PostgreSQL bazi i Drizzle upiti
+
+service
+  poslovna pravila, transakcije i koordinacija
+
+router
+  autorizacija, Zod validacija i tRPC procedure
+
+pure functions
+  projekcija kapaciteta, bodovanje i detekcija konflikata
+
+27. Potrebne tRPC procedure
+Dnevni plan
+landDispatch.getDailyPlan
+landDispatch.getWeeklySummary
+landDispatch.validateDay
+
+Resursi
+landDispatch.findResourceCombinations
+landDispatch.assignResources
+landDispatch.changeAssignment
+
+Životni ciklus operacije
+landDispatch.planOperation
+landDispatch.confirmOperation
+landDispatch.startOperation
+landDispatch.completeOperation
+landDispatch.cancelOperation
+
+Kapacitet
+landDispatch.getZoneCapacityTimeline
+landDispatch.getAllZoneCapacitySummary
+
+Ovisnosti
+landDispatch.createDependency
+landDispatch.removeDependency
+landDispatch.getDependencies
+
+Lista čekanja
+landDispatch.getWaitingList
+landDispatch.findFirstFeasibleSlot
+landDispatch.offerWaitingListSlot
+landDispatch.acceptOffer
+landDispatch.declineOffer
+landDispatch.assignFromWaitingList
+landDispatch.returnToWaitingList
+landDispatch.changeWaitingPriority
+
+Timovi
+teams.list
+teams.create
+teams.update
+teams.addMember
+teams.endMembership
+teams.getAvailability
+teams.addAvailabilityBlock
+teams.removeAvailabilityBlock
+
+Afiniteti
+craneZoneCapabilities.list
+craneZoneCapabilities.upsert
+
+28. Podatkovni model
+28.1. Nove tablice
+teams
+team_memberships
+team_availability_blocks
+crane_zone_capabilities
+operation_dependencies
+
+28.2. Proširenje rezervacija
+
+Potrebno je podržati:
+
+assigned_team_id
+requested_zone_id
+assigned_zone_id
+requested_start
+requested_duration_minutes
+actual_start
+actual_end
+actual_crane_id
+actual_team_id
+actual_zone_id
+operational_health
+
+
+Točan opseg migracije mora se uskladiti s postojećim stupcima kako bi se izbjeglo dupliciranje ekvivalentnih podataka.
+
+28.3. Indeksi i zaštite
+
+Potrebni su:
+
+indeks članstva po timu i razdoblju;
+indeks članstva po radniku i razdoblju;
+indeks operacija po dizalici i vremenu;
+indeks operacija po timu i vremenu;
+indeks aktivnih zauzetosti po zoni;
+indeks ovisnosti po prethodnoj i sljedećoj operaciji;
+indeks aktivne Liste čekanja po statusu i prioritetu;
+zabrana vremenskog preklapanja iste dizalice;
+zabrana vremenskog preklapanja istog tima.
+
+Dodjela resursa mora se provoditi transakcijski.
+
+29. Autorizacija
+Administrator
+
+Može:
+
+upravljati timovima;
+mijenjati članstva;
+uređivati tehnička ograničenja;
+uređivati afinitete;
+mijenjati sistemske postavke;
+mijenjati prioritet uz razlog;
+pregledavati audit.
+Operater ili dispečer
+
+Može:
+
+pregledavati dnevni plan;
+planirati operacije;
+birati dopuštene kombinacije;
+nuditi termine;
+raspoređivati s Liste čekanja;
+započinjati i završavati operacije;
+evidentirati upozorenja i probleme.
+
+Ne može:
+
+zaobići tvrda tehnička pravila;
+mijenjati sigurnosna ograničenja;
+mijenjati povijest završenih operacija bez posebne ovlasti.
+Član
+
+Može vidjeti samo vlastite zahtjeve i operacije, u opsegu definiranom postojećim korisničkim modulom.
+
+30. Audit
+
+Obvezno se evidentiraju:
+
+kreiranje i promjena operacije;
+dodjela dizalice;
+dodjela tima;
+promjena termina;
+promjena zone;
+potvrda operacije;
+početak i završetak;
+stvarno korišteni resursi;
+kreiranje i uklanjanje ovisnosti;
+promjena prioriteta Liste čekanja;
+ponuda i odbijanje termina;
+promjene članstva u timu;
+promjene afiniteta i tehničke dopuštenosti;
+odabir slabije rangirane kombinacije;
+administratorske korekcije.
+
+Audit zapis čuva:
+
+actor_id
+action
+entity_type
+entity_id
+old_values
+new_values
+reason
+created_at
+
+31. Testiranje
+31.1. Kapacitet zona
+
+Obvezni testovi:
+
+podizanje troši jedno mjesto;
+spuštanje oslobađa jedno mjesto;
+završna bilanca je pozitivna, ali je privremeno stanje negativno;
+prethodno spuštanje omogućuje buduće podizanje;
+otkazivanje spuštanja prekida ovisnost;
+kašnjenje spuštanja označava ovisno podizanje kao ugroženo;
+završetak operacije mijenja stvarnu zauzetost;
+planiranje mijenja samo projekciju.
+31.2. Dizalice
+nedovoljna nosivost;
+vremensko preklapanje;
+održavanje;
+tehnički nedopuštena zona;
+nizak afinitet kao upozorenje, ne zabrana;
+isti termin s različitim dopuštenim dizalicama.
+31.3. Timovi
+prazan tim nije dostupan;
+nedovoljan broj članova;
+promjena članstva u budućnosti;
+povijesna operacija zadržava tadašnji tim;
+tim je zauzet drugom operacijom;
+blokada raspoloživosti;
+radnik ne smije imati preklapajuća aktivna članstva ako to nije izričito dopušteno.
+31.4. Lista čekanja
+redoslijed prema datumu ulaska;
+ručna promjena prioriteta zahtijeva razlog;
+ponuda termina;
+prihvaćanje ponude;
+odbijanje ponude;
+istek ponude;
+dodjela s Liste čekanja;
+povratak na Listu čekanja nakon otkazivanja;
+uvjetno planiranje;
+očuvanje veze s nastalom rezervacijom.
+31.5. Autorizacija
+član ne može pristupiti dispečerskom modulu;
+operater može planirati;
+operater ne može mijenjati tehnička ograničenja ako je to administratorska ovlast;
+administrator može upravljati konfiguracijom;
+svaki osjetljivi postupak završava audit zapisom.
+31.6. Vremenska zona
+
+Dnevni upiti i radna vremena moraju biti testirani u vremenskoj zoni:
+
+Europe/Zagreb
+
+
+Posebno testirati prijelaz na ljetno i zimsko računanje vremena.
+
+32. Faze implementacije
+Faza 1: podatkovni model
+dodati timove;
+dodati vremenski određena članstva;
+dodati blokade timova;
+dodati mogućnosti dizalica po zonama;
+dodati ovisnosti operacija;
+proširiti rezervacije;
+dodati constraintove i indekse;
+izraditi verzionirane migracije.
+Faza 2: čista poslovna logika
+projekcija kapaciteta;
+validacija dizalica;
+validacija timova;
+detekcija konflikata;
+rangiranje kombinacija;
+obrada ovisnosti;
+logika Liste čekanja;
+jedinični testovi.
+Faza 3: read-only dispečer
+dnevni pregled;
+vremenska mreža;
+kapacitet zona;
+konflikti;
+Lista čekanja;
+pregled preporuka bez upisa.
+
+Time se poslovna pravila mogu potvrditi s operaterima prije uključivanja mutacija.
+
+Faza 4: operativne akcije
+planiranje operacije;
+dodjela resursa;
+ponuda termina;
+raspoređivanje s Liste čekanja;
+potvrda;
+početak i završetak;
+otkazivanje;
+ovisnosti;
+audit.
+Faza 5: administracija
+upravljanje timovima;
+članstva;
+blokade raspoloživosti;
+afiniteti;
+tehnička dopuštenost;
+radno vrijeme.
+Faza 6: optimizacija
+automatski prijedlog cijelog dana;
+tjedni pregled;
+napredno rangiranje;
+drag and drop;
+mobilni izvršni prikaz;
+automatske obavijesti;
+izvještaji o iskorištenosti dizalica i timova.
+33. Minimalni opseg prve produkcijske verzije
+
+Prva verzija mora sadržavati:
+
+dnevni raspored u slotovima od 30 minuta;
+jednu dizalicu i jedan tim po operaciji;
+tablice timova i vremenskih članstava;
+provjeru nosivosti;
+provjeru zauzetosti dizalice;
+provjeru zauzetosti i veličine tima;
+tehničku dopuštenost zone;
+afinitet kao rangiranje;
+vremensku projekciju kapaciteta;
+Listu čekanja;
+dodjelu s Liste čekanja;
+ovisnost podizanja o prethodnom spuštanju;
+transparentan prikaz dopuštenih i odbijenih kombinacija;
+ručni izbor dispečera među dopuštenim kombinacijama;
+odvojeni status procesa i operativno stanje;
+početak i završetak operacije;
+promjenu stvarnog kapaciteta tek nakon završetka;
+audit.
+
+U prvu verziju ne moraju ući:
+
+automatska optimizacija cijelog tjedna;
+automatsko pomicanje lanca operacija;
+individualno planiranje svakog radnika;
+pojedinačna označena mjesta u zoni;
+odvojeno transportno vrijeme;
+složeno mobilno planiranje;
+predikcija kašnjenja.
+34. Kriteriji prihvaćanja
+
+Rješenje se smatra funkcionalno prihvatljivim kada dispečer može:
+
+vidjeti sve zahtjeve za odabrani dan;
+vidjeti aktivnu Listu čekanja;
+pregledati trenutačni i projicirani kapacitet svih zona;
+odabrati operaciju i dobiti sve izvedive kombinacije dizalice i tima;
+razumjeti zašto je određena opcija preporučena ili odbijena;
+odabrati bilo koju dopuštenu kombinaciju;
+planirati podizanje koje ovisi o prethodnom spuštanju;
+vidjeti posljedice kašnjenja ili otkazivanja prethodne operacije;
+rasporediti zahtjev iz Liste čekanja;
+ponuditi korisniku budući termin;
+evidentirati odbijanje ponude;
+pokrenuti i završiti operaciju;
+automatski ažurirati stvarnu zauzetost zone završetkom operacije;
+zadržati potpunu povijest promjena;
+spriječiti potvrdu tehnički neizvedive kombinacije.
+35. Konačne arhitektonske odluke
+
+Konačni model počiva na sljedećim pravilima:
+
+1. Rezervira se operacija, ne dizalica.
+
+2. Operacija koristi jednu dizalicu i jedan tim.
+
+3. Radnik je vremenski određeni član tima, a ne samostalan
+   resurs za dispečersku dodjelu.
+
+4. Kopnene zone imaju zbirni kapacitet. Pojedinačna mjesta
+   nisu potrebna za ovu fazu sustava.
+
+5. Podizanje troši kapacitet tek završetkom operacije.
+
+6. Spuštanje oslobađa kapacitet tek završetkom operacije.
+
+7. Buduća operacija može ovisiti o prethodnom oslobađanju
+   kapaciteta.
+
+8. Lista čekanja zaseban je workflow i izvor kandidata za
+   dispečersko planiranje.
+
+9. Tvrda pravila određuju izvedivost.
+
+10. Afiniteti određuju operativnu poželjnost.
+
+11. Dispečer donosi konačnu odluku među tehnički dopuštenim
+    kombinacijama.
+
+12. Sustav mora objasniti svaku preporuku, zabranu i konflikt.
+
+13. Planirano i stvarno izvršenje moraju ostati odvojeni.
+
+14. Status procesa i operativno stanje dvije su različite
+    dimenzije.
+
+15. Sve ključne promjene moraju biti evidentirane u auditu.
+
+Sažetak poboljšanja
+
+Specifikacija je pojednostavljena u odnosu na ranije koncepte pojedinačnih kopnenih mjesta i „hot swap” veza. Novi model odgovara stvarnoj organizaciji u kojoj zone imaju zbirni kapacitet, a operacija u jednom vremenskom slotu uključuje cijeli proces.
+
+Najvažnije poboljšanje je jasno razdvajanje:
+
+zahtjeva i Liste čekanja;
+plana i stvarnog izvršenja;
+dizalice i tima kao resursa;
+stvarnog i projiciranog kapaciteta;
+tehničke dopuštenosti i afiniteta;
+statusa procesa i operativnog problema.
+
+Time se dobiva dovoljno jednostavan model za održavanje, ali i dovoljno precizan model za pouzdano buduće planiranje.

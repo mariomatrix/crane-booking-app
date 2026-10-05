@@ -28,7 +28,10 @@ export const reservationStatusEnum = pgEnum("reservation_status", [
     "cancelled",
     "completed",
     "waitlisted",
+    "not_performed",
 ]);
+export const workStoppageScopeEnum = pgEnum("work_stoppage_scope", ["all_cranes", "single_crane", "single_zone"]);
+export const waitingOfferStatusEnum = pgEnum("waiting_offer_status", ["pending", "accepted", "declined", "expired", "cancelled"]);
 export const craneStatusEnum = pgEnum("crane_status", ["active", "inactive", "maintenance"]);
 export const craneTypeEnum = pgEnum("crane_type", ["travelift", "portalna", "mobilna", "ostalo"]);
 export const vesselTypeEnum = pgEnum("vessel_type", ["jedrilica", "motorni", "katamaran", "ostalo"]);
@@ -218,6 +221,11 @@ export const reservations = pgTable("reservations", {
 
     // Land zone (Kopno) — zona na kopnu za operacije Dizanje/Spuštanje
     landZoneId: uuid("land_zone_id"),  // forward-ref resolved at runtime
+    requestedZoneId: uuid("requested_zone_id"),
+    spaceUnits: integer("space_units").default(1).notNull(),
+    teamOverride: boolean("team_override").default(false).notNull(),
+    teamOverrideReason: text("team_override_reason"),
+    notPerformedReason: text("not_performed_reason"),
 
     // Admin actions
     approvedBy: uuid("approved_by").references(() => users.id),
@@ -568,8 +576,12 @@ export const craneZoneAffinities = pgTable("crane_zone_affinities", {
     zoneId: uuid("zone_id").notNull().references(() => landZones.id, { onDelete: "cascade" }),
     affinityScore: integer("affinity_score").default(50).notNull(),
     extraTransportMinutes: integer("extra_transport_minutes").default(0).notNull(),
+    penaltySlots: integer("penalty_slots").default(0).notNull(),
+    priority: integer("priority").default(1).notNull(),
     isPrimary: boolean("is_primary").default(false).notNull(),
+    isAllowed: boolean("is_allowed").default(true).notNull(),
     isBlocked: boolean("is_blocked").default(false).notNull(),
+    isActive: boolean("is_active").default(true).notNull(),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -618,6 +630,73 @@ export const landWaitingList = pgTable("land_waiting_list", {
         statusIdx: index("land_wl_status_idx").on(table.status),
         positionIdx: index("land_wl_position_idx").on(table.position),
         zoneStatusIdx: index("land_wl_zone_status_idx").on(table.preferredZoneId, table.status),
+    };
+});
+
+// ─── Ponude termina sa zadržavanjem mjesta (Waiting Offers / Hold) ───
+export const waitingOffers = pgTable("waiting_offers", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    waitingListId: uuid("waiting_list_id").notNull().references(() => landWaitingList.id, { onDelete: "cascade" }),
+    vesselId: uuid("vessel_id").notNull().references(() => vessels.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").notNull().references(() => landZones.id, { onDelete: "restrict" }),
+    craneId: uuid("crane_id").notNull().references(() => cranes.id, { onDelete: "restrict" }),
+    offeredStart: timestamp("offered_start", { withTimezone: true }).notNull(),
+    offeredEnd: timestamp("offered_end", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    status: waitingOfferStatusEnum("status").default("pending").notNull(),
+    declineReason: text("decline_reason"),
+    reservationId: uuid("reservation_id").references(() => reservations.id, { onDelete: "set null" }),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+    return {
+        waitingListIdx: index("waiting_offers_wl_idx").on(table.waitingListId),
+        statusIdx: index("waiting_offers_status_idx").on(table.status),
+        expiresAtIdx: index("waiting_offers_expires_at_idx").on(table.expiresAt),
+        zoneTimeIdx: index("waiting_offers_zone_time_idx").on(table.zoneId, table.offeredStart, table.offeredEnd),
+    };
+});
+
+// ─── Ovisnosti operacija (Rotacija isti dan / capacity_release) ──────
+export const operationDependencies = pgTable("operation_dependencies", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    predecessorReservationId: uuid("predecessor_reservation_id").notNull().references(() => reservations.id, { onDelete: "cascade" }),
+    successorReservationId: uuid("successor_reservation_id").notNull().references(() => reservations.id, { onDelete: "cascade" }),
+    dependencyType: varchar("dependency_type", { length: 50 }).default("capacity_release").notNull(),
+    minimumGapMinutes: integer("minimum_gap_minutes").default(0).notNull(),
+    status: varchar("status", { length: 20 }).default("active").notNull(), // 'active', 'fulfilled', 'broken'
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+    return {
+        predecessorIdx: index("op_dep_predecessor_idx").on(table.predecessorReservationId),
+        successorIdx: index("op_dep_successor_idx").on(table.successorReservationId),
+        statusIdx: index("op_dep_status_idx").on(table.status),
+    };
+});
+
+// ─── Izvanredne obustave rada (Vjetar, bura, kvar, radovi) ───────────
+export const workStoppages = pgTable("work_stoppages", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    scope: workStoppageScopeEnum("scope").default("all_cranes").notNull(),
+    craneId: uuid("crane_id").references(() => cranes.id, { onDelete: "cascade" }),
+    zoneId: uuid("zone_id").references(() => landZones.id, { onDelete: "cascade" }),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }), // null = do daljnjega
+    reason: varchar("reason", { length: 100 }).notNull(), // 'wind', 'maintenance', 'high_tide', 'other'
+    note: text("note"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    isActive: boolean("is_active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => {
+    return {
+        startsAtIdx: index("work_stoppages_starts_at_idx").on(table.startsAt),
+        craneIdIdx: index("work_stoppages_crane_id_idx").on(table.craneId),
+        zoneIdIdx: index("work_stoppages_zone_id_idx").on(table.zoneId),
+        isActiveIdx: index("work_stoppages_is_active_idx").on(table.isActive),
     };
 });
 
@@ -1141,5 +1220,18 @@ export type LandTurnaroundLink = SelectLandTurnaroundLink;
 export type InsertCraneZoneAffinity = typeof craneZoneAffinities.$inferInsert;
 export type SelectCraneZoneAffinity = typeof craneZoneAffinities.$inferSelect;
 export type CraneZoneAffinity = SelectCraneZoneAffinity;
+
+export type InsertOperationDependency = typeof operationDependencies.$inferInsert;
+export type SelectOperationDependency = typeof operationDependencies.$inferSelect;
+export type OperationDependency = SelectOperationDependency;
+
+export type InsertWorkStoppage = typeof workStoppages.$inferInsert;
+export type SelectWorkStoppage = typeof workStoppages.$inferSelect;
+export type WorkStoppage = SelectWorkStoppage;
+
+export type InsertWaitingOffer = typeof waitingOffers.$inferInsert;
+export type SelectWaitingOffer = typeof waitingOffers.$inferSelect;
+export type WaitingOffer = SelectWaitingOffer;
+
 
 

@@ -29,6 +29,7 @@ import { berthsRouter } from "./berths.router";
 import { invoicesRouter } from "./invoices.router";
 import { resourcesRouter } from "./resources.router";
 import { landFlowRouter } from "./landFlow.router";
+import { landDispatchRouter } from "./landDispatch/landDispatch.router";
 import {
   listCranes,
   getCraneById,
@@ -5849,6 +5850,7 @@ export const appRouter = router({
 
   // ─── Land Flow & Dispatcher Matrix ─────────────────────────────────────
   landFlow: landFlowRouter,
+  landDispatch: landDispatchRouter,
 });
 
 export type AppRouter = typeof appRouter;
