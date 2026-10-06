@@ -1,4 +1,5 @@
-import { eq, and, sql, or, isNull, inArray } from "drizzle-orm";
+import { eq, and, sql, or, isNull, inArray, gte, lte } from "drizzle-orm";
+import { toZagreb, fromZagreb } from "@shared/timezone";
 import { getDb } from "../db";
 import {
   cranes,
@@ -156,9 +157,10 @@ export class LandDispatchService {
       currentOccupiedMap.set(row.zoneId, row.count);
     }
 
-    // 4. Fetch all reservations for this date
-    const dayStartIso = `${dateStr}T00:00:00.000Z`;
-    const dayEndIso = `${dateStr}T23:59:59.999Z`;
+    // 4. Fetch all reservations for this date + all pending / waitlisted
+    const targetDateStr = dateStr || toZagreb(new Date()).dateStr;
+    const dayStartUtc = fromZagreb(targetDateStr, "00:00");
+    const dayEndUtc = fromZagreb(targetDateStr, "23:59:59");
 
     const allReservationsRaw = await db
       .select({
@@ -167,8 +169,10 @@ export class LandDispatchService {
         userId: reservations.userId,
         userName: users.name,
         userPhone: users.phone,
+        userEmail: users.email,
         vesselId: reservations.vesselId,
         vesselName: reservations.vesselName,
+        vesselRegistration: vessels.registration,
         vesselType: reservations.vesselType,
         vesselWeightTons: reservations.vesselWeightTons,
         vesselBeamM: reservations.vesselBeamM,
@@ -184,11 +188,13 @@ export class LandDispatchService {
         scheduledEnd: reservations.scheduledEnd,
         requestedDate: reservations.requestedDate,
         requestedTimeSlot: reservations.requestedTimeSlot,
+        durationMin: reservations.durationMin,
         status: reservations.status,
         teamOverride: reservations.teamOverride,
         teamOverrideReason: reservations.teamOverrideReason,
         notPerformedReason: reservations.notPerformedReason,
         userNote: reservations.userNote,
+        adminNote: reservations.adminNote,
       })
       .from(reservations)
       .leftJoin(users, eq(reservations.userId, users.id))
@@ -198,12 +204,13 @@ export class LandDispatchService {
       .where(
         or(
           and(
-            sql`${reservations.scheduledStart} >= ${dayStartIso}`,
-            sql`${reservations.scheduledStart} <= ${dayEndIso}`
+            gte(reservations.scheduledStart, dayStartUtc),
+            lte(reservations.scheduledStart, dayEndUtc)
           ),
+          inArray(reservations.status, ["pending", "waitlisted"]),
           and(
-            eq(reservations.status, "pending"),
-            sql`${reservations.requestedDate} = ${dateStr}`
+            eq(reservations.status, "approved"),
+            isNull(reservations.scheduledStart)
           )
         )
       );
@@ -212,11 +219,13 @@ export class LandDispatchService {
       ...r,
       userName: r.userName || "Korisnik",
       vesselName: r.vesselName || "Plovilo",
+      vesselRegistration: r.vesselRegistration || null,
       vesselWeightTons: r.vesselWeightTons ? Number(r.vesselWeightTons) : null,
       vesselBeamM: r.vesselBeamM ? Number(r.vesselBeamM) : null,
       vesselLengthM: r.vesselLengthM ? Number(r.vesselLengthM) : null,
       serviceTypeName: r.serviceTypeName || "Usluga",
       operationCategory: (r.operationCategory as OperationCategory) || "other",
+      durationMin: Number(r.durationMin) || 30,
     }));
 
     // 5. Active stoppages
@@ -238,7 +247,14 @@ export class LandDispatchService {
       zones: dbZones,
       currentOccupiedMap,
       scheduledReservations: allReservations
-        .filter((r) => r.scheduledStart != null && r.status !== "pending")
+        .filter(
+          (r) =>
+            r.scheduledStart != null &&
+            r.status !== "pending" &&
+            r.status !== "waitlisted" &&
+            r.status !== "cancelled" &&
+            r.status !== "not_performed"
+        )
         .map((r) => ({
           id: r.id,
           landZoneId: r.landZoneId,
@@ -253,7 +269,7 @@ export class LandDispatchService {
         expiresAt: o.expiresAt,
       })),
       timeSlots,
-      dateStr,
+      dateStr: targetDateStr,
     });
 
     // 8. Operation dependencies for today's reservations
@@ -281,7 +297,14 @@ export class LandDispatchService {
 
     // Format scheduled operations
     const scheduledOperations: DispatchReservationItem[] = allReservations
-      .filter((r) => r.scheduledStart != null && r.status !== "pending")
+      .filter(
+        (r) =>
+          r.scheduledStart != null &&
+          r.status !== "pending" &&
+          r.status !== "waitlisted" &&
+          r.status !== "cancelled" &&
+          r.status !== "not_performed"
+      )
       .map((r) => {
         const zone = r.landZoneId ? zoneMap.get(r.landZoneId) : undefined;
         const deps = dbDependencies.filter(
@@ -325,10 +348,12 @@ export class LandDispatchService {
         };
       });
 
-    // Format unassigned requests
+    // Format unassigned requests from reservations
+    const existingResIds = new Set<string>();
     const unassignedRequests: UnassignedRequestItem[] = allReservations
-      .filter((r) => r.status === "pending")
+      .filter((r) => r.status === "pending" || r.status === "waitlisted" || (!r.scheduledStart && r.status === "approved"))
       .map((r) => {
+        existingResIds.add(r.id);
         const reqZone = r.requestedZoneId ? zoneMap.get(r.requestedZoneId) : undefined;
         const vesselWeight = r.vesselWeightTons || 0;
         const vesselBeam = r.vesselBeamM || 0;
@@ -348,13 +373,15 @@ export class LandDispatchService {
         return {
           id: r.id,
           reservationNumber: r.reservationNumber,
-          requestedDate: r.requestedDate ? String(r.requestedDate) : dateStr,
+          requestedDate: r.requestedDate ? String(r.requestedDate) : targetDateStr,
           requestedTimeSlot: r.requestedTimeSlot,
           userId: r.userId,
           userName: r.userName,
           userPhone: r.userPhone,
+          userEmail: r.userEmail,
           vesselId: r.vesselId,
           vesselName: r.vesselName,
+          vesselRegistration: r.vesselRegistration,
           vesselType: r.vesselType,
           vesselWeightTons: r.vesselWeightTons,
           vesselBeamM: r.vesselBeamM,
@@ -362,9 +389,15 @@ export class LandDispatchService {
           serviceTypeId: r.serviceTypeId,
           serviceTypeName: r.serviceTypeName,
           operationCategory: r.operationCategory,
+          craneId: r.craneId,
+          craneName: r.craneName,
           requestedZoneId: r.requestedZoneId,
           requestedZoneCode: reqZone?.code || null,
           userNote: r.userNote,
+          adminNote: r.adminNote,
+          status: r.status,
+          durationMin: r.durationMin,
+          scheduledStart: r.scheduledStart ? new Date(r.scheduledStart).toISOString() : null,
           quickChecks: {
             hasAllowedCrane,
             hasFreeSlot: timeSlots.length > 0,
@@ -372,6 +405,88 @@ export class LandDispatchService {
           },
         };
       });
+
+    // Also fetch waitlist items from landWaitingList that may not have reservations yet
+    const dbWaitlistItems = await db
+      .select({
+        id: landWaitingList.id,
+        userId: landWaitingList.userId,
+        userName: users.name,
+        userPhone: users.phone,
+        userEmail: users.email,
+        vesselId: landWaitingList.vesselId,
+        vesselName: vessels.name,
+        vesselRegistration: vessels.registration,
+        vesselType: vessels.type,
+        vesselLengthM: vessels.lengthM,
+        vesselBeamM: vessels.beamM,
+        vesselWeightTons: vessels.weightTons,
+        preferredZoneId: landWaitingList.preferredZoneId,
+        craneId: landWaitingList.craneId,
+        craneName: cranes.name,
+        note: landWaitingList.note,
+        adminNote: landWaitingList.adminNote,
+        reservationId: landWaitingList.reservationId,
+        status: landWaitingList.status,
+        createdAt: landWaitingList.createdAt,
+      })
+      .from(landWaitingList)
+      .leftJoin(users, eq(landWaitingList.userId, users.id))
+      .leftJoin(vessels, eq(landWaitingList.vesselId, vessels.id))
+      .leftJoin(cranes, eq(landWaitingList.craneId, cranes.id))
+      .where(inArray(landWaitingList.status, ["waiting", "offered"]));
+
+    for (const wl of dbWaitlistItems) {
+      if (wl.reservationId && existingResIds.has(wl.reservationId)) {
+        continue; // Already included from reservations
+      }
+      const reqZone = wl.preferredZoneId ? zoneMap.get(wl.preferredZoneId) : undefined;
+      const vesselWeight = wl.vesselWeightTons ? Number(wl.vesselWeightTons) : 0;
+      const vesselBeam = wl.vesselBeamM ? Number(wl.vesselBeamM) : 0;
+      const hasAllowedCrane = dbCranes.some((c) => {
+        const weightKN = vesselWeight * 9.80665;
+        const fitsWeight = c.maxCapacityKN >= weightKN;
+        const fitsBeam = !c.maxPoolWidth || vesselBeam <= c.maxPoolWidth;
+        return fitsWeight && fitsBeam;
+      });
+      const targetZoneSnapshot = reqZone ? zoneSnapshots.find((z) => z.zoneId === reqZone.id) : undefined;
+      const hasZoneCapacity = targetZoneSnapshot ? targetZoneSnapshot.currentFree > 0 : true;
+
+      unassignedRequests.push({
+        id: wl.reservationId || wl.id,
+        reservationNumber: null,
+        requestedDate: targetDateStr,
+        requestedTimeSlot: "po_dogovoru",
+        userId: wl.userId,
+        userName: wl.userName || "Korisnik",
+        userPhone: wl.userPhone || null,
+        userEmail: wl.userEmail || null,
+        vesselId: wl.vesselId,
+        vesselName: wl.vesselName || "Plovilo",
+        vesselRegistration: wl.vesselRegistration || null,
+        vesselType: wl.vesselType || null,
+        vesselWeightTons: wl.vesselWeightTons ? Number(wl.vesselWeightTons) : null,
+        vesselBeamM: wl.vesselBeamM ? Number(wl.vesselBeamM) : null,
+        vesselLengthM: wl.vesselLengthM ? Number(wl.vesselLengthM) : null,
+        serviceTypeId: null,
+        serviceTypeName: "Čeka suhi vez",
+        operationCategory: "lift_from_sea",
+        craneId: wl.craneId || null,
+        craneName: wl.craneName || null,
+        requestedZoneId: wl.preferredZoneId,
+        requestedZoneCode: reqZone?.code || null,
+        userNote: wl.note,
+        adminNote: wl.adminNote,
+        status: "waitlisted",
+        durationMin: 30,
+        scheduledStart: null,
+        quickChecks: {
+          hasAllowedCrane,
+          hasFreeSlot: timeSlots.length > 0,
+          hasZoneCapacity,
+        },
+      });
+    }
 
     // KPI calculation
     const maxTeams = 2; // Black box teams

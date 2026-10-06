@@ -67,8 +67,10 @@ export interface UnassignedRequestItem {
   userId: string;
   userName: string;
   userPhone: string | null;
+  userEmail: string | null;
   vesselId: string | null;
   vesselName: string;
+  vesselRegistration: string | null;
   vesselType: string | null;
   vesselWeightTons: number | null;
   vesselBeamM: number | null;
@@ -76,9 +78,15 @@ export interface UnassignedRequestItem {
   serviceTypeId: string | null;
   serviceTypeName: string;
   operationCategory: OperationCategory;
+  craneId: string | null;
+  craneName: string | null;
   requestedZoneId: string | null;
   requestedZoneCode: string | null;
   userNote: string | null;
+  adminNote: string | null;
+  status: string;
+  durationMin: number;
+  scheduledStart: string | null;
   quickChecks: {
     hasAllowedCrane: boolean;
     hasFreeSlot: boolean;

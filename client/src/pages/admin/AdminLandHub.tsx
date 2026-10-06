@@ -21,6 +21,7 @@ import { AffinitySettingsTab } from "@/components/landDispatch/AffinitySettingsT
 import { WaitingOffersTab } from "@/components/landDispatch/WaitingOffersTab";
 import { ZoneSpotsGridTab } from "@/components/land/ZoneSpotsGridTab";
 import AdminLandZones from "./AdminLandZones";
+import AdminLandWaiting from "./AdminLandWaiting";
 
 export default function AdminLandHub() {
   const { lang } = useLang();
@@ -39,6 +40,9 @@ export default function AdminLandHub() {
 
   // Sub-view inside zones tab: "manage" (vessels list & zone crud) vs "spots" (visual grid)
   const [zoneSubView, setZoneSubView] = useState<"manage" | "spots">("manage");
+
+  // Sub-view inside waiting tab: "list" (full waitlist table) vs "offers" (time offers with hold)
+  const [waitingSubView, setWaitingSubView] = useState<"list" | "offers">("list");
 
   // Keep URL query in sync when active tab changes
   const handleTabChange = (val: string) => {
@@ -171,13 +175,43 @@ export default function AdminLandHub() {
           )}
         </TabsContent>
 
-        {/* Tab 3: Waiting List with Holds */}
-        <TabsContent value="waiting" className="m-0 focus-visible:outline-none">
-          <WaitingOffersTab
-            dateStr={selectedDate}
-            zones={zones}
-            cranes={cranes}
-          />
+        {/* Tab 3: Waiting List & Scheduling */}
+        <TabsContent value="waiting" className="m-0 focus-visible:outline-none space-y-4">
+          <div className="flex items-center justify-between bg-muted/30 p-2 rounded-xl border">
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant={waitingSubView === "list" ? "default" : "outline"}
+                onClick={() => setWaitingSubView("list")}
+                className="h-7 text-xs gap-1.5"
+              >
+                <ListOrdered className="w-3 h-3" />
+                <span>Lista čekanja za suhi vez</span>
+              </Button>
+              <Button
+                size="sm"
+                variant={waitingSubView === "offers" ? "default" : "outline"}
+                onClick={() => setWaitingSubView("offers")}
+                className="h-7 text-xs gap-1.5"
+              >
+                <Layers className="w-3 h-3" />
+                <span>Ponude termina & Hold (24h rok)</span>
+              </Button>
+            </div>
+            <span className="text-[11px] text-muted-foreground hidden sm:inline">
+              Uređivanje dizalice/zone, promjena prioriteta i raspoređivanje na vez
+            </span>
+          </div>
+
+          {waitingSubView === "list" ? (
+            <AdminLandWaiting />
+          ) : (
+            <WaitingOffersTab
+              dateStr={selectedDate}
+              zones={zones}
+              cranes={cranes}
+            />
+          )}
         </TabsContent>
 
         {/* Tab 4: Settings (Affinities & Teams) */}
