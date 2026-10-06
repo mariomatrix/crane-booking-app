@@ -224,6 +224,11 @@ describe("crane.create", () => {
     });
     expect(result).toHaveProperty("id");
     expect(typeof result.id).toBe("string");
+    // Clean up created test crane immediately so DB is not polluted
+    const db = await getDb();
+    if (db) {
+      await db.delete(cranes).where(eq(cranes.id, result.id));
+    }
   });
 });
 
@@ -389,16 +394,10 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     const db = await getDb();
     if (!db) return;
 
-    // Seed 3 active cranes if needed
-    const crane1Id = "11111111-1111-4111-8111-111111111111";
-    const crane2Id = "22222222-2222-4222-8222-222222222222";
-    const crane3Id = "33333333-3333-4333-8333-333333333333";
-
-    await db.insert(cranes).values([
-      { id: crane1Id, name: "Dizalica 1", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-      { id: crane2Id, name: "Dizalica 2", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-      { id: crane3Id, name: "Dizalica 3", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-    ]).onConflictDoNothing();
+    // Use the 3 active marina cranes
+    const crane1Id = "7ad0d658-71a1-49cf-a96d-e38e914fbaa1";
+    const crane2Id = "e487c8cc-b5a5-4c21-a201-68b79212d3ba";
+    const crane3Id = "ee85e94d-8490-4d61-9c42-a4375f6382e6";
 
     const start = new Date("2026-11-10T09:00:00Z");
     const end = new Date("2026-11-10T09:30:00Z");
@@ -451,15 +450,10 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     const db = await getDb();
     if (!db) return;
 
-    const crane1Id = "11111111-1111-4111-8111-111111111111";
-    const crane2Id = "22222222-2222-4222-8222-222222222222";
-    const crane3Id = "33333333-3333-4333-8333-333333333333";
-
-    await db.insert(cranes).values([
-      { id: crane1Id, name: "Dizalica 1", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-      { id: crane2Id, name: "Dizalica 2", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-      { id: crane3Id, name: "Dizalica 3", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-    ]).onConflictDoNothing();
+    // Use the 3 active marina cranes
+    const crane1Id = "7ad0d658-71a1-49cf-a96d-e38e914fbaa1";
+    const crane2Id = "e487c8cc-b5a5-4c21-a201-68b79212d3ba";
+    const crane3Id = "ee85e94d-8490-4d61-9c42-a4375f6382e6";
 
     const start = new Date("2026-11-10T09:00:00Z");
     const end = new Date("2026-11-10T09:30:00Z");
@@ -518,15 +512,10 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     const db = await getDb();
     if (!db) return;
 
-    const crane1Id = "11111111-1111-4111-8111-111111111111";
-    const crane2Id = "22222222-2222-4222-8222-222222222222";
-    const crane3Id = "33333333-3333-4333-8333-333333333333";
-
-    await db.insert(cranes).values([
-      { id: crane1Id, name: "Dizalica 1", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-      { id: crane2Id, name: "Dizalica 2", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-      { id: crane3Id, name: "Dizalica 3", craneType: "portalna", maxCapacityKN: 50, craneStatus: "active" },
-    ]).onConflictDoNothing();
+    // Use the 3 active marina cranes
+    const crane1Id = "7ad0d658-71a1-49cf-a96d-e38e914fbaa1";
+    const crane2Id = "e487c8cc-b5a5-4c21-a201-68b79212d3ba";
+    const crane3Id = "ee85e94d-8490-4d61-9c42-a4375f6382e6";
 
     const start = new Date("2026-11-10T09:00:00Z");
     const end = new Date("2026-11-10T09:30:00Z");
