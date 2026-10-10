@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Home, ClipboardList, Plus, User } from "lucide-react";
+import { Home, ClipboardList, Plus, Ship, IdCard } from "lucide-react";
 import { useLang } from "@/contexts/LangContext";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,8 @@ export function BottomNav() {
     { icon: Home, label: lang === "hr" ? "Početna" : "Home", path: "/" },
     { icon: ClipboardList, label: t.nav.myReservations, path: "/my-reservations" },
     { icon: Plus, label: t.nav.newReservation, path: "/new-reservation", primary: true },
-    { icon: User, label: t.nav.profile, path: "/profile" },
+    { icon: Ship, label: t.nav.vessels, path: "/my-vessels" },
+    { icon: IdCard, label: lang === "hr" ? "Karton" : "Card", path: "/my-card" },
   ];
 
   return (

@@ -27,6 +27,8 @@ interface ReservationFormProps {
         date?: string;
         serviceTypeId?: string;
         requestedTimeSlot?: string;
+        vesselId?: string;
+        opCategory?: string;
     };
 }
 
@@ -46,7 +48,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
     const [contactPhone, setContactPhone] = useState(user?.phone || "");
 
     // Vessel state
-    const [vesselId, setVesselId] = useState("");
+    const [vesselId, setVesselId] = useState(initialData?.vesselId || "");
     const [vesselType, setVesselType] = useState("");
     const [vesselLength, setVesselLength] = useState("");
     const [vesselWidth, setVesselWidth] = useState("");
@@ -79,6 +81,12 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
     const selectedServiceType = (serviceTypes as any[]).find(st => st.id === serviceTypeId);
     const isLiftFromSea = selectedServiceType?.operationCategory === "lift_from_sea";
 
+    // Land capacity (Available-To-Promise)
+    const { data: landCapacities, isLoading: landCapacitiesLoading } = trpc.landZone.getAllCapacities.useQuery(
+        undefined,
+        { enabled: !!user && isLiftFromSea }
+    );
+
     useEffect(() => {
         if (isVesselOnLand && isLiftFromSea) {
             setServiceTypeId("");
@@ -93,6 +101,18 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         }
     }, [user?.phone, contactPhone]);
 
+    // Handle initialData.opCategory matching
+    useEffect(() => {
+        if (initialData?.opCategory && serviceTypes.length > 0 && !serviceTypeId) {
+            const matching = (serviceTypes as any[]).find(
+                st => st.operationCategory === initialData.opCategory
+            );
+            if (matching) {
+                setServiceTypeId(matching.id);
+            }
+        }
+    }, [initialData?.opCategory, serviceTypes, serviceTypeId]);
+
     // Update date if initialData changes (e.g. user clicks different day on calendar)
     useEffect(() => {
         if (initialData?.date) {
@@ -106,27 +126,42 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         }
     }, [initialData]);
 
-    // Auto-select first vessel
+    // Select vessel if initialData.vesselId provided or auto-select first vessel
     useEffect(() => {
-        if (!vesselsLoading && myVessels.length > 0 && !vesselId && !hasAttemptedVesselAutoFill) {
-            const first = myVessels[0] as any;
-            setVesselId(String(first.id));
-            setVesselType(first.type);
-            setVesselLength(first.lengthM ? String(first.lengthM) : "");
-            setVesselWidth(first.beamM ? String(first.beamM) : "");
-            setVesselWeight(first.weightTons ? String(first.weightTons) : "");
-            setVesselRegistration(first.registration || "");
-            setHasAttemptedVesselAutoFill(true);
+        if (!vesselsLoading && myVessels.length > 0 && !hasAttemptedVesselAutoFill) {
+            const targetId = initialData?.vesselId || (myVessels[0] as any)?.id;
+            const targetVessel = (myVessels as any[]).find(v => String(v.id) === String(targetId)) || (myVessels[0] as any);
+            if (targetVessel) {
+                setVesselId(String(targetVessel.id));
+                setVesselType(targetVessel.type);
+                setVesselLength(targetVessel.lengthM ? String(targetVessel.lengthM) : "");
+                setVesselWidth(targetVessel.beamM ? String(targetVessel.beamM) : "");
+                setVesselWeight(targetVessel.weightTons ? String(targetVessel.weightTons) : "");
+                setVesselRegistration(targetVessel.registration || "");
+                setHasAttemptedVesselAutoFill(true);
+            }
         }
-    }, [myVessels, vesselsLoading, vesselId, hasAttemptedVesselAutoFill]);
+    }, [myVessels, vesselsLoading, initialData?.vesselId, hasAttemptedVesselAutoFill]);
 
-    // ── Mutation ─────────────────────────────────────────────────────────
+    // ── Mutations ─────────────────────────────────────────────────────────
     const createMutation = trpc.reservation.create.useMutation({
         onSuccess: () => {
             toast.success(t.form.successMessage);
             onSuccess?.();
         },
         onError: (error: any) => toast.error(error.message),
+    });
+
+    const joinWaitlistMutation = trpc.landWaiting.join.useMutation({
+        onSuccess: () => {
+            toast.success(
+                lang === "hr"
+                    ? "Uspješno ste se prijavili na listu čekanja za suhi vez!"
+                    : "Successfully added to the dry berth waitlist!"
+            );
+            onSuccess?.();
+        },
+        onError: (error: any) => toast.error(error.message || "Greška pri prijavi na listu čekanja."),
     });
 
     // ── Handlers ─────────────────────────────────────────────────────────
@@ -208,6 +243,12 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                 : "Cannot schedule lift from sea because the vessel is already on dry berth.");
             return;
         }
+        if (isLiftFromSea && landCapacities?.isCompletelyFull) {
+            toast.error(lang === "hr"
+                ? "Suhi vez je trenutno popunjen. Molimo prijavite se na listu čekanja gumbom iznad."
+                : "Dry berth is full. Please join the waitlist using the button above.");
+            return;
+        }
         if (!serviceTypeId || !requestedDate || !vesselType) {
             toast.error(t.form.errors.required);
             return;
@@ -271,8 +312,8 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 <SelectTrigger>
                                     <SelectValue placeholder={
                                         serviceTypesLoading
-                                            ? "..."
-                                            : lang === "hr" ? "Odaberite tip operacije" : "Select service type"
+                                             ? "..."
+                                             : lang === "hr" ? "Odaberite tip operacije" : "Select service type"
                                     } />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -290,6 +331,61 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                                 </SelectContent>
                             </Select>
                         </div>
+
+                        {/* Land capacity check & Waitlist offer if full */}
+                        {isLiftFromSea && !isVesselOnLand && (
+                            <div className="space-y-2">
+                                {landCapacitiesLoading ? (
+                                    <div className="p-2.5 rounded-lg border bg-muted/40 text-xs text-muted-foreground animate-pulse">
+                                        {lang === "hr" ? "Provjera slobodnih mjesta na kopnu..." : "Checking dry berth capacity..."}
+                                    </div>
+                                ) : landCapacities?.isCompletelyFull ? (
+                                    <div className="p-3 bg-red-50 border border-red-300 rounded-lg text-red-900 text-xs space-y-2">
+                                        <div className="flex items-start gap-2">
+                                            <AlertTriangle className="h-4 w-4 text-red-600 mt-0.5 shrink-0" />
+                                            <div>
+                                                <p className="font-semibold">
+                                                    {lang === "hr"
+                                                        ? "Suhi vez je trenutno 100% popunjen!"
+                                                        : "Dry berth is currently fully occupied!"}
+                                                </p>
+                                                <p className="text-[11px] text-red-800 mt-0.5">
+                                                    {lang === "hr"
+                                                        ? "Nema slobodnih mjesta na kopnu za vađenje plovila. Možete se odmah prijaviti na službenu listu čekanja te ćete dobiti 24h ponudu čim se mjesto oslobodi."
+                                                        : "No spots available on land. You can join the official waitlist to receive a 24h offer as soon as a spot frees up."}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            className="w-full bg-red-100 hover:bg-red-200 text-red-900 font-medium text-xs border border-red-300"
+                                            disabled={joinWaitlistMutation.isPending}
+                                            onClick={() => {
+                                                joinWaitlistMutation.mutate({
+                                                    vesselId: vesselId && vesselId !== "new" ? vesselId : undefined,
+                                                    note: `Predbilježba putem obrasca za vađenje na kopno (${vesselRegistration || vesselType || "plovilo"})`,
+                                                });
+                                            }}
+                                        >
+                                            {joinWaitlistMutation.isPending
+                                                ? (lang === "hr" ? "Prijavljivanje..." : "Joining...")
+                                                : (lang === "hr" ? "Prijavi se na listu čekanja za suhi vez" : "Join Dry Berth Waitlist")}
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <div className="p-2.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-900 text-xs flex items-center justify-between">
+                                        <span className="font-medium">
+                                            {lang === "hr" ? "Status kapaciteta suhog veza:" : "Dry berth status:"}
+                                        </span>
+                                        <span className="font-semibold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
+                                            {landCapacities?.totalAvailable ?? 0} {lang === "hr" ? "slobodnih mjesta" : "spots available"}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     <div className="space-y-4">
@@ -505,7 +601,7 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
                 )}
                 <Button
                     type="submit"
-                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType || !!activeSeasonInfo?.isNonWorkingDay || !!activeSeasonInfo?.isOutsideSeason || (isLiftFromSea && isVesselOnLand)}
+                    disabled={createMutation.isPending || !serviceTypeId || !requestedDate || !vesselType || !!activeSeasonInfo?.isNonWorkingDay || !!activeSeasonInfo?.isOutsideSeason || (isLiftFromSea && isVesselOnLand) || (isLiftFromSea && !!landCapacities?.isCompletelyFull)}
                     className="min-w-[120px]"
                 >
                     {createMutation.isPending ? (

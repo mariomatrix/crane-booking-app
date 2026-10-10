@@ -4911,11 +4911,50 @@ export const appRouter = router({
 
   // ─── Land Zones (Kopnene zone) ────────────────────────────────────────
   landZone: router({
-    list: operatorProcedure.query(async () => {
+    list: protectedProcedure.query(async () => {
       return listLandZones();
     }),
 
-    checkCapacity: operatorProcedure
+    getAllCapacities: protectedProcedure.query(async () => {
+      const zones = await listLandZones();
+      const capacities = await Promise.all(
+        zones.map(async (zone) => {
+          try {
+            const cap = await getLandZoneCapacity(zone.id);
+            return {
+              ...cap,
+              id: zone.id,
+              name: zone.name,
+              code: zone.code,
+            };
+          } catch {
+            return {
+              id: zone.id,
+              name: zone.name,
+              code: zone.code,
+              totalSpots: zone.totalSpots,
+              availableSpots: zone.totalSpots,
+              registeredSpots: 0,
+              manualSpots: 0,
+              activeSpots: 0,
+              reservedSpots: 0,
+              percentFull: 0,
+              isFull: false,
+              isOver80: false,
+            };
+          }
+        })
+      );
+      const totalAvailable = capacities.reduce((acc, c) => acc + (c.availableSpots || 0), 0);
+      const isCompletelyFull = totalAvailable === 0;
+      return {
+        zones: capacities,
+        totalAvailable,
+        isCompletelyFull,
+      };
+    }),
+
+    checkCapacity: protectedProcedure
       .input(z.object({ zoneId: z.string().uuid() }))
       .query(async ({ input }) => {
         return getLandZoneCapacity(input.zoneId);
@@ -5132,6 +5171,30 @@ export const appRouter = router({
       if (entry.length === 0) return null;
       return entry[0];
     }),
+
+    join: protectedProcedure
+      .input(
+        z.object({
+          vesselId: z.string().uuid().optional(),
+          preferredZoneId: z.string().uuid().optional(),
+          note: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const id = await addLandWaitingListEntry({
+          userId: ctx.user.id,
+          vesselId: input.vesselId,
+          preferredZoneId: input.preferredZoneId,
+          note: input.note,
+        });
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "land_waiting_joined",
+          entityType: "land_waiting_list",
+          entityId: id,
+        });
+        return { id };
+      }),
 
     add: operatorProcedure
       .input(

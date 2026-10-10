@@ -31,10 +31,23 @@ export default function NewReservation() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ReservationForm
-              onSuccess={() => setLocation("/my-reservations")}
-              onCancel={() => setLocation("/")}
-            />
+            {(() => {
+              const searchParams = new URLSearchParams(window.location.search);
+              const initialData = {
+                vesselId: searchParams.get("vesselId") || undefined,
+                opCategory: searchParams.get("opCategory") || undefined,
+                date: searchParams.get("date") || undefined,
+                serviceTypeId: searchParams.get("serviceTypeId") || undefined,
+                requestedTimeSlot: searchParams.get("requestedTimeSlot") || undefined,
+              };
+              return (
+                <ReservationForm
+                  initialData={initialData}
+                  onSuccess={() => setLocation("/my-reservations")}
+                  onCancel={() => setLocation("/")}
+                />
+              );
+            })()}
           </CardContent>
         </Card>
       </div>

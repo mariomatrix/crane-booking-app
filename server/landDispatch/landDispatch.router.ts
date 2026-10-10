@@ -2,8 +2,18 @@ import { router, protectedProcedure, operatorProcedure } from "../_core/trpc";
 import { z } from "zod";
 import { landDispatchService } from "./landDispatch.service";
 import { getDb } from "../db";
-import { craneZoneAffinities, cranes, landZones } from "../../drizzle/schema";
-import { eq, and } from "drizzle-orm";
+import {
+  craneZoneAffinities,
+  cranes,
+  landZones,
+  waitingOffers,
+  landWaitingList,
+  vessels,
+  landOccupancies,
+} from "../../drizzle/schema";
+import { eq, and, sql, desc, isNull } from "drizzle-orm";
+import { toZagreb } from "@shared/timezone";
+import { fetchActiveStoppagesForDate } from "./stoppage";
 
 export const landDispatchRouter = router({
   getDailyOverview: protectedProcedure
@@ -126,7 +136,7 @@ export const landDispatchRouter = router({
       });
     }),
 
-  respondToWaitingOffer: operatorProcedure
+  respondToWaitingOffer: protectedProcedure
     .input(
       z.object({
         offerId: z.string().uuid(),
@@ -137,6 +147,78 @@ export const landDispatchRouter = router({
     .mutation(async ({ input }) => {
       return await landDispatchService.respondToWaitingOffer(input);
     }),
+
+  getMyActiveOffer: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return null;
+    const [row] = await db
+      .select({
+        id: waitingOffers.id,
+        waitingListId: waitingOffers.waitingListId,
+        vesselName: vessels.name,
+        vesselRegistration: vessels.registration,
+        zoneId: landZones.id,
+        zoneCode: landZones.code,
+        zoneName: landZones.name,
+        craneId: cranes.id,
+        craneName: cranes.name,
+        offeredStart: waitingOffers.offeredStart,
+        offeredEnd: waitingOffers.offeredEnd,
+        expiresAt: waitingOffers.expiresAt,
+        status: waitingOffers.status,
+      })
+      .from(waitingOffers)
+      .innerJoin(landWaitingList, eq(waitingOffers.waitingListId, landWaitingList.id))
+      .innerJoin(vessels, eq(waitingOffers.vesselId, vessels.id))
+      .innerJoin(landZones, eq(waitingOffers.zoneId, landZones.id))
+      .innerJoin(cranes, eq(waitingOffers.craneId, cranes.id))
+      .where(
+        and(
+          eq(landWaitingList.userId, ctx.user.id),
+          eq(waitingOffers.status, "pending"),
+          sql`${waitingOffers.expiresAt} > NOW()`
+        )
+      )
+      .orderBy(desc(waitingOffers.createdAt))
+      .limit(1);
+
+    return row || null;
+  }),
+
+  getActiveStoppagesToday: protectedProcedure.query(async () => {
+    const db = await getDb();
+    if (!db) return [];
+    const todayStr = toZagreb(new Date()).dateStr;
+    return await fetchActiveStoppagesForDate(db, todayStr);
+  }),
+
+  getMyVesselsOnLand: protectedProcedure.query(async ({ ctx }) => {
+    const db = await getDb();
+    if (!db) return [];
+    const rows = await db
+      .select({
+        id: landOccupancies.id,
+        vesselId: landOccupancies.vesselId,
+        vesselName: vessels.name,
+        vesselRegistration: vessels.registration,
+        vesselLengthM: vessels.lengthM,
+        zoneId: landZones.id,
+        zoneCode: landZones.code,
+        zoneName: landZones.name,
+        spotNumber: landOccupancies.spotNumber,
+        liftedAt: landOccupancies.liftedAt,
+      })
+      .from(landOccupancies)
+      .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+      .innerJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
+      .where(
+        and(
+          eq(landOccupancies.userId, ctx.user.id),
+          isNull(landOccupancies.returnedAt)
+        )
+      );
+    return rows;
+  }),
 
   getAffinitiesMatrix: protectedProcedure.query(async () => {
     const db = await getDb();
