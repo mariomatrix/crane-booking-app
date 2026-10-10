@@ -15,6 +15,7 @@ import {
     priceListItems,
     resources,
     workOrderResources,
+    workStoppages,
 } from "../../drizzle/schema";
 import { eq, and, inArray, gte, lte, isNull, desc, asc, count, sql, ne } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
@@ -810,6 +811,169 @@ router.post("/messages/send", requireMobileAuth, async (req: AuthenticatedReques
     }
 
     return res.json({ success: true, message: msg });
+});
+
+// 11. Comprehensive Land Zones Overview: GET /api/mobile/v1/zones/overview
+router.get("/zones/overview", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const zones = await db.select().from(landZones).where(eq(landZones.isActive, true)).orderBy(asc(landZones.name));
+    const activeOccs = await db.select({
+        id: landOccupancies.id,
+        vesselId: landOccupancies.vesselId,
+        vesselName: vessels.name,
+        vesselRegistration: vessels.registration,
+        vesselLengthM: vessels.lengthM,
+        zoneId: landOccupancies.zoneId,
+        spotNumber: landOccupancies.spotNumber,
+        liftedAt: landOccupancies.liftedAt,
+        note: landOccupancies.note,
+        ownerName: users.name,
+    })
+    .from(landOccupancies)
+    .innerJoin(vessels, eq(landOccupancies.vesselId, vessels.id))
+    .innerJoin(users, eq(landOccupancies.userId, users.id))
+    .where(isNull(landOccupancies.returnedAt))
+    .orderBy(asc(landOccupancies.spotNumber));
+
+    const result = zones.map(z => {
+        const vesselsInZone = activeOccs.filter(o => o.zoneId === z.id).map(o => {
+            const daysOnLand = o.liftedAt
+                ? Math.max(0, Math.floor((Date.now() - new Date(o.liftedAt).getTime()) / (1000 * 60 * 60 * 24)))
+                : 0;
+            return {
+                ...o,
+                daysOnLand,
+            };
+        });
+        const occupiedCount = vesselsInZone.length + (z.manualOccupiedSpots || 0);
+        return {
+            id: z.id,
+            name: z.name,
+            code: z.code,
+            totalSpots: z.totalSpots,
+            occupiedSpots: occupiedCount,
+            availableSpots: Math.max(0, z.totalSpots - occupiedCount),
+            vessels: vesselsInZone,
+        };
+    });
+
+    return res.json(result);
+});
+
+// 12. Report Weather Stoppage or Defect: POST /api/mobile/v1/incidents/report
+router.post("/incidents/report", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { scope = "all_cranes", craneId, reason = "wind", note } = req.body;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const [stoppage] = await db.insert(workStoppages).values({
+        scope: scope as any,
+        craneId: craneId || null,
+        reason,
+        note: note || (reason === "wind" ? "Obustava rada zbog jakog vjetra/bure s rive" : "Kvar na dizalici"),
+        startsAt: new Date(),
+        isActive: true,
+        createdBy: user.id,
+    }).returning();
+
+    await createAuditEntry({
+        actorId: user.id,
+        action: "mobile_incident_reported",
+        entityType: "work_stoppages",
+        entityId: stoppage.id,
+        payload: { scope, craneId, reason, note },
+    });
+
+    return res.json({ success: true, stoppage });
+});
+
+// 13. Get Active Incidents/Stoppages: GET /api/mobile/v1/incidents/active
+router.get("/incidents/active", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const stoppages = await db.select({
+        id: workStoppages.id,
+        scope: workStoppages.scope,
+        craneId: workStoppages.craneId,
+        craneName: cranes.name,
+        reason: workStoppages.reason,
+        note: workStoppages.note,
+        startsAt: workStoppages.startsAt,
+        endsAt: workStoppages.endsAt,
+        isActive: workStoppages.isActive,
+    })
+    .from(workStoppages)
+    .leftJoin(cranes, eq(workStoppages.craneId, cranes.id))
+    .where(eq(workStoppages.isActive, true))
+    .orderBy(desc(workStoppages.startsAt));
+
+    return res.json(stoppages);
+});
+
+// 14. Resolve Incident/Stoppage: POST /api/mobile/v1/incidents/:id/resolve
+router.post("/incidents/:id/resolve", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { id } = req.params;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    await db.update(workStoppages).set({
+        isActive: false,
+        endsAt: new Date(),
+        updatedAt: new Date(),
+    }).where(eq(workStoppages.id, id));
+
+    await createAuditEntry({
+        actorId: user.id,
+        action: "mobile_incident_resolved",
+        entityType: "work_stoppages",
+        entityId: id,
+    });
+
+    return res.json({ success: true });
+});
+
+// 15. Mark Reservation as No-Show / Cancelled: POST /api/mobile/v1/reservations/:id/no-show
+router.post("/reservations/:id/no-show", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { id } = req.params;
+    const { reason = "Korisnik se nije pojavio na rivi" } = req.body;
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "DB unavailable" });
+
+    const [curr] = await db.select().from(reservations).where(eq(reservations.id, id)).limit(1);
+    if (!curr) return res.status(404).json({ error: "Rezervacija nije pronađena" });
+
+    if (curr.status === "completed") {
+        return res.status(400).json({ error: "Nije moguće otkazati završenu operaciju." });
+    }
+
+    // Cancel active work order if any
+    await db.update(workOrders).set({
+        status: "cancelled",
+        operatorNotes: `Otkazano na terenu: ${reason}`,
+        updatedAt: new Date(),
+    }).where(and(eq(workOrders.reservationId, id), eq(workOrders.status, "in_progress")));
+
+    await db.update(reservations).set({
+        status: "cancelled",
+        adminNote: `Terenski operater: ${reason}`,
+        updatedAt: new Date(),
+    }).where(eq(reservations.id, id));
+
+    await createAuditEntry({
+        actorId: user.id,
+        action: "mobile_reservation_no_show",
+        entityType: "reservation",
+        entityId: id,
+        payload: { reason },
+    });
+
+    return res.json({ success: true, status: "cancelled" });
 });
 
 export default router;

@@ -68,6 +68,7 @@ function Router() {
       <Route path="/my-card" component={MyCard} />
       <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/mobile" component={MobileOperatorApp} />
+      <Route path="/mobile/riva" component={MobileOperatorApp} />
 
       {/* Admin routes */}
       <Route path="/admin">

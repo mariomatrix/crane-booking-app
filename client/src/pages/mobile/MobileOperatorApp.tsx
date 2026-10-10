@@ -21,6 +21,11 @@ import {
     Ship,
     Loader2,
     RefreshCw,
+    Wind,
+    Wrench,
+    XCircle,
+    AlertTriangle,
+    Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { toZagreb } from "@shared/timezone";
@@ -93,6 +98,35 @@ interface LandZone {
     availableSpots: number;
 }
 
+interface ZoneVessel {
+    id: string;
+    vesselId: string;
+    vesselName: string;
+    vesselRegistration: string;
+    vesselLengthM: string | null;
+    spotNumber: number | null;
+    liftedAt: string | null;
+    note: string | null;
+    ownerName: string | null;
+    daysOnLand: number;
+}
+
+interface LandZoneDetail extends LandZone {
+    vessels?: ZoneVessel[];
+}
+
+interface ActiveIncident {
+    id: string;
+    scope: "all_cranes" | "single_crane" | "single_zone";
+    craneId?: string | null;
+    craneName?: string | null;
+    reason: string;
+    note?: string | null;
+    startsAt: string;
+    endsAt?: string | null;
+    isActive: boolean;
+}
+
 interface ResourceItem {
     id: string;
     name: string;
@@ -123,8 +157,8 @@ export default function MobileOperatorApp() {
     const [pin, setPin] = useState("");
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    // Active Navigation Tab: "tasks" | "notifications" | "settings"
-    const [activeTab, setActiveTab] = useState<"tasks" | "notifications" | "settings">("tasks");
+    // Active Navigation Tab: "tasks" | "zones" | "incidents"
+    const [activeTab, setActiveTab] = useState<"tasks" | "zones" | "incidents">("tasks");
 
     // Tasks & Schedule State
     const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -132,6 +166,24 @@ export default function MobileOperatorApp() {
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedCraneId, setSelectedCraneId] = useState<string>("all");
     const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+
+    // Zones overview state (for field spot inspection)
+    const [zonesOverview, setZonesOverview] = useState<LandZoneDetail[]>([]);
+    const [isLoadingZones, setIsLoadingZones] = useState(false);
+
+    // Incidents & Weather Stoppage state
+    const [activeIncidents, setActiveIncidents] = useState<ActiveIncident[]>([]);
+    const [isLoadingIncidents, setIsLoadingIncidents] = useState(false);
+    const [incidentScope, setIncidentScope] = useState<"all_cranes" | "single_crane">("all_cranes");
+    const [incidentCraneId, setIncidentCraneId] = useState<string>("");
+    const [incidentReason, setIncidentReason] = useState<"wind" | "maintenance" | "other">("wind");
+    const [incidentNote, setIncidentNote] = useState<string>("");
+    const [isSubmittingIncident, setIsSubmittingIncident] = useState(false);
+
+    // No-Show Modal State
+    const [noShowTask, setNoShowTask] = useState<TaskItem | null>(null);
+    const [noShowReason, setNoShowReason] = useState<string>("Korisnik se nije pojavio u terminu na rivi");
+    const [isSubmittingNoShow, setIsSubmittingNoShow] = useState(false);
 
     // Available Resources for Operations
     const [availableResources, setAvailableResources] = useState<ResourceItem[]>([]);
@@ -185,6 +237,13 @@ export default function MobileOperatorApp() {
         if (!token || !messagingTask) return;
         fetchTaskMessages(messagingTask.id);
     }, [token, messagingTask]);
+
+    // Load tabs data when activeTab changes
+    useEffect(() => {
+        if (!token) return;
+        if (activeTab === "zones") fetchZonesOverview();
+        if (activeTab === "incidents") fetchActiveIncidents();
+    }, [token, activeTab]);
 
     // Auto-scroll chat to bottom
     useEffect(() => {
@@ -269,6 +328,111 @@ export default function MobileOperatorApp() {
             console.error("Failed to load messages", e);
         } finally {
             setIsLoadingMessages(false);
+        }
+    };
+
+    const fetchZonesOverview = async () => {
+        setIsLoadingZones(true);
+        try {
+            const res = await fetch("/api/mobile/v1/zones/overview", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setZonesOverview(data || []);
+            }
+        } catch (e) {
+            console.error("Failed to load zones overview", e);
+        } finally {
+            setIsLoadingZones(false);
+        }
+    };
+
+    const fetchActiveIncidents = async () => {
+        setIsLoadingIncidents(true);
+        try {
+            const res = await fetch("/api/mobile/v1/incidents/active", {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setActiveIncidents(data || []);
+            }
+        } catch (e) {
+            console.error("Failed to load active incidents", e);
+        } finally {
+            setIsLoadingIncidents(false);
+        }
+    };
+
+    const handleReportIncident = async () => {
+        setIsSubmittingIncident(true);
+        try {
+            const res = await fetch("/api/mobile/v1/incidents/report", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    scope: incidentScope,
+                    craneId: incidentScope === "single_crane" ? incidentCraneId : undefined,
+                    reason: incidentReason,
+                    note: incidentNote || (incidentReason === "wind" ? "Obustava rada zbog jakog vjetra / bure s rive" : "Kvar na dizalici"),
+                })
+            });
+            if (res.ok) {
+                toast.success(incidentReason === "wind" ? "Prijava bure aktivirana! Obustava je zabilježena u sustavu." : "Kvar na dizalici uspješno prijavljen.");
+                setIncidentNote("");
+                fetchActiveIncidents();
+            } else {
+                toast.error("Greška pri slanju prijave.");
+            }
+        } catch (e) {
+            toast.error("Greška pri mreži.");
+        } finally {
+            setIsSubmittingIncident(false);
+        }
+    };
+
+    const handleResolveIncident = async (id: string) => {
+        try {
+            const res = await fetch(`/api/mobile/v1/incidents/${id}/resolve`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (res.ok) {
+                toast.success("Zastoj označen kao riješen. Rad je nastavljen.");
+                fetchActiveIncidents();
+            }
+        } catch (e) {
+            toast.error("Greška pri rješavanju zastoja.");
+        }
+    };
+
+    const handleConfirmNoShow = async () => {
+        if (!noShowTask) return;
+        setIsSubmittingNoShow(true);
+        try {
+            const res = await fetch(`/api/mobile/v1/reservations/${noShowTask.id}/no-show`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({ reason: noShowReason })
+            });
+            if (res.ok) {
+                toast.info(`Termin za ${noShowTask.vessel?.name || "plovilo"} je označen kao 'Nije došlo' (otkazan).`);
+                setNoShowTask(null);
+                fetchSchedule();
+            } else {
+                toast.error("Greška pri otkazivanju termina.");
+            }
+        } catch (e) {
+            toast.error("Greška pri slanju zahtjeva.");
+        } finally {
+            setIsSubmittingNoShow(false);
         }
     };
 
@@ -877,10 +1041,11 @@ export default function MobileOperatorApp() {
                                                 {t.owner?.phone && (
                                                     <a
                                                         href={`tel:${t.owner.phone}`}
-                                                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-95 transition"
+                                                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-2.5 rounded-xl text-xs flex items-center justify-center gap-1 shadow-xs active:scale-95 transition shrink-0"
+                                                        title="Pozovi vlasnika plovila"
                                                     >
                                                         <Phone className="h-3.5 w-3.5" />
-                                                        <span>Pozovi</span>
+                                                        <span className="hidden sm:inline">Pozovi</span>
                                                     </a>
                                                 )}
                                                 {t.status === "pending" && (
@@ -915,9 +1080,29 @@ export default function MobileOperatorApp() {
                                                         onClick={() => handleOpenViewingModal(t)}
                                                         className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 border border-slate-300 active:scale-95 transition shadow-2xs"
                                                     >
-                                                        <span>📝 Pregled naloga / Napomena</span>
+                                                        <span>📝 Nalog / Napomena</span>
                                                     </button>
                                                 )}
+                                                {t.status !== "completed" && t.status !== "cancelled" && (
+                                                    <button
+                                                        onClick={() => {
+                                                            setNoShowTask(t);
+                                                            setNoShowReason("Korisnik se nije pojavio u terminu na rivi");
+                                                        }}
+                                                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold py-2 px-2.5 rounded-xl text-xs flex items-center justify-center gap-1 border border-rose-200 shadow-2xs active:scale-95 transition shrink-0"
+                                                        title="Zabilježi da korisnik nije došao"
+                                                    >
+                                                        <XCircle className="h-3.5 w-3.5" />
+                                                        <span className="hidden sm:inline">Nije došlo</span>
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => setMessagingTask(t)}
+                                                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold p-2 rounded-xl text-xs flex items-center justify-center border border-slate-200 shadow-2xs active:scale-95 transition shrink-0"
+                                                    title="Pošalji poruku vlasniku"
+                                                >
+                                                    <MessageSquare className="h-3.5 w-3.5" />
+                                                </button>
                                             </div>
                                         </div>
                                     );
@@ -927,68 +1112,264 @@ export default function MobileOperatorApp() {
                     </>
                 )}
 
-                {activeTab === "notifications" && (
+                {/* Tab 2: Pregled zona i suhog veza */}
+                {activeTab === "zones" && (
                     <div className="space-y-4">
-                        <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 shadow-sm space-y-3">
-                            <h2 className="font-bold text-base text-indigo-950 flex items-center gap-2">
-                                <MessageSquare className="h-5 w-5 text-indigo-600" />
-                                Poruke i Obavijesti korisnicima
-                            </h2>
-                            <p className="text-xs text-slate-500">
-                                Slanje izravnih obavijesti i dopisivanje s vlasnicima plovila u realnom vremenu (putem aplikacije, emaila i SMS-a).
-                            </p>
+                        <div className="bg-white border-2 border-indigo-100 rounded-3xl p-4 shadow-sm flex items-center justify-between">
+                            <div>
+                                <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                    <Layers className="h-5 w-5 text-indigo-600" />
+                                    Pregled zona na rivi
+                                </h2>
+                                <p className="text-xs text-slate-500">
+                                    Kapacitet i trenutno položena plovila na suhom vezu
+                                </p>
+                            </div>
+                            <button
+                                onClick={fetchZonesOverview}
+                                className="p-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl transition"
+                                title="Osvježi zone"
+                            >
+                                <RefreshCw className={`h-4 w-4 ${isLoadingZones ? "animate-spin" : ""}`} />
+                            </button>
                         </div>
 
-                        {/* Active Conversations from Schedule */}
-                        <div className="space-y-2">
-                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Odaberite korisnika za razgovor</span>
-                            {tasks.length === 0 ? (
-                                <p className="text-xs text-slate-400 italic">Nema aktivnih rezervacija na rasporedu.</p>
-                            ) : (
-                                tasks.map(t => (
-                                    <button
-                                        key={t.id}
-                                        onClick={() => setMessagingTask(t)}
-                                        className="w-full text-left bg-white border-2 border-indigo-100 hover:border-indigo-300 p-3 rounded-2xl text-xs font-semibold text-slate-900 shadow-2xs flex items-center justify-between transition"
-                                    >
-                                        <div className="flex items-center gap-2.5">
-                                            <div className="h-8 w-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
-                                                {t.owner?.name ? t.owner.name[0].toUpperCase() : "U"}
-                                            </div>
-                                            <div>
-                                                <div className="font-bold text-slate-900">{t.owner?.name || "Član"}</div>
-                                                <div className="text-[10px] text-slate-500 font-normal">
-                                                    [{t.vessel?.registration || "Plovilo"}] • {t.serviceType?.name || "Operacija"}
+                        {isLoadingZones ? (
+                            <div className="flex flex-col items-center justify-center p-12 text-slate-400 space-y-2">
+                                <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                                <span className="text-xs font-semibold">Učitavanje stanja zona...</span>
+                            </div>
+                        ) : zonesOverview.length === 0 ? (
+                            <div className="bg-white rounded-3xl p-8 text-center text-slate-400 border border-slate-200">
+                                Nema definiranih aktivnih zona.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {zonesOverview.map((zone) => {
+                                    const percent = zone.totalSpots > 0 ? Math.round((zone.occupiedSpots / zone.totalSpots) * 100) : 0;
+                                    const isFull = zone.availableSpots === 0;
+
+                                    return (
+                                        <div
+                                            key={zone.id}
+                                            className="bg-white rounded-3xl p-4 border-2 border-slate-200 shadow-sm space-y-3"
+                                        >
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <span className="text-xs font-extrabold uppercase px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-mono">
+                                                        {zone.code}
+                                                    </span>
+                                                    <h3 className="text-base font-bold text-slate-900 mt-1">{zone.name}</h3>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className={`text-xs font-black px-2.5 py-1 rounded-full ${
+                                                        isFull ? "bg-rose-100 text-rose-800 border border-rose-300" : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                                                    }`}>
+                                                        {zone.availableSpots} slobodno
+                                                    </span>
+                                                    <span className="text-[11px] text-slate-500 block mt-1">
+                                                        {zone.occupiedSpots}/{zone.totalSpots} popunjeno ({percent}%)
+                                                    </span>
                                                 </div>
                                             </div>
+
+                                            {/* Progress bar */}
+                                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full transition-all duration-300 ${
+                                                        percent >= 90 ? "bg-rose-500" : percent >= 70 ? "bg-amber-500" : "bg-emerald-500"
+                                                    }`}
+                                                    style={{ width: `${Math.min(100, percent)}%` }}
+                                                />
+                                            </div>
+
+                                            {/* Vessels in this zone */}
+                                            <div className="pt-2 border-t border-slate-100">
+                                                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block mb-1.5">
+                                                    Plovila u zoni ({zone.vessels?.length || 0}):
+                                                </span>
+                                                {zone.vessels && zone.vessels.length > 0 ? (
+                                                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                                                        {zone.vessels.map(v => (
+                                                            <div
+                                                                key={v.id}
+                                                                className="flex items-center justify-between text-xs p-2 rounded-xl bg-slate-50 border border-slate-100"
+                                                            >
+                                                                <div>
+                                                                    <div className="font-bold text-slate-900">
+                                                                        {v.vesselName} <span className="font-mono text-slate-500 font-normal">[{v.vesselRegistration}]</span>
+                                                                    </div>
+                                                                    <div className="text-[10px] text-slate-500">
+                                                                        {v.ownerName || "Vlasnik"} {v.spotNumber ? `• Mjesto #${v.spotNumber}` : ""}
+                                                                    </div>
+                                                                </div>
+                                                                <span className="text-[11px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                                                                    {v.daysOnLand} d.
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-xs text-slate-400 italic py-1">Trenutno nema plovila u ovoj zoni.</p>
+                                                )}
+                                            </div>
                                         </div>
-                                        <ChevronRight className="h-4 w-4 text-indigo-400" />
-                                    </button>
-                                ))
-                            )}
-                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
                 )}
 
-                {activeTab === "settings" && (
+                {/* Tab 3: Prijavi problem / Vjetar */}
+                {activeTab === "incidents" && (
                     <div className="space-y-4">
-                        <div className="bg-white border-4 border-indigo-100 rounded-[2rem] p-5 shadow-sm space-y-4">
-                            <div className="flex items-center gap-3 border-b pb-4">
-                                <div className="h-12 w-12 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-lg">
-                                    {operatorUser.name ? operatorUser.name[0].toUpperCase() : "O"}
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-slate-900">{operatorUser.name || "Operater dizalice"}</h3>
-                                    <p className="text-xs text-slate-500">{operatorUser.email}</p>
-                                </div>
+                        <div className="bg-white border-2 border-amber-200 rounded-3xl p-4 shadow-sm space-y-1">
+                            <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                <AlertTriangle className="h-5 w-5 text-amber-600" />
+                                Prijavi problem s rive
+                            </h2>
+                            <p className="text-xs text-slate-500">
+                                Izvanredne prijave odmah obavještavaju dispečera u uredu i aktiviraju obustave na rasporedu.
+                            </p>
+                        </div>
+
+                        {/* Fast Incident Report Cards */}
+                        <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
+                            <h3 className="font-bold text-xs uppercase tracking-wide text-slate-700">Nova prijava izvanrednog stanja</h3>
+                            
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIncidentReason("wind");
+                                        setIncidentScope("all_cranes");
+                                    }}
+                                    className={`p-3 rounded-2xl border-2 text-left transition flex flex-col gap-1 ${
+                                        incidentReason === "wind"
+                                            ? "border-amber-500 bg-amber-50 text-amber-950 font-bold ring-2 ring-amber-500/20"
+                                            : "border-slate-200 bg-slate-50 text-slate-700"
+                                    }`}
+                                >
+                                    <Wind className="h-6 w-6 text-amber-600 mb-1" />
+                                    <span className="text-sm font-bold leading-tight">Bura / Vjetar</span>
+                                    <span className="text-[10px] text-slate-500 font-normal">Obustava rada</span>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIncidentReason("maintenance");
+                                        setIncidentScope("single_crane");
+                                    }}
+                                    className={`p-3 rounded-2xl border-2 text-left transition flex flex-col gap-1 ${
+                                        incidentReason === "maintenance"
+                                            ? "border-rose-500 bg-rose-50 text-rose-950 font-bold ring-2 ring-rose-500/20"
+                                            : "border-slate-200 bg-slate-50 text-slate-700"
+                                    }`}
+                                >
+                                    <Wrench className="h-6 w-6 text-rose-600 mb-1" />
+                                    <span className="text-sm font-bold leading-tight">Kvar dizalice</span>
+                                    <span className="text-[10px] text-slate-500 font-normal">Tehnički problem</span>
+                                </button>
                             </div>
+
+                            {/* Scope / Crane selection */}
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 block">Opseg obustave:</label>
+                                <select
+                                    value={incidentScope}
+                                    onChange={(e) => setIncidentScope(e.target.value as any)}
+                                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none"
+                                >
+                                    <option value="all_cranes">Sve dizalice u lučici (opća obustava)</option>
+                                    <option value="single_crane">Pojedinačna dizalica</option>
+                                </select>
+                            </div>
+
+                            {incidentScope === "single_crane" && (
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-bold text-slate-700 block">Odaberite pogođenu dizalicu:</label>
+                                    <select
+                                        value={incidentCraneId}
+                                        onChange={(e) => setIncidentCraneId(e.target.value)}
+                                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none"
+                                    >
+                                        <option value="">— Odaberite dizalicu —</option>
+                                        {assignedCranes.map(c => (
+                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-bold text-slate-700 block">Opis / Razlog zastoja:</label>
+                                <input
+                                    type="text"
+                                    value={incidentNote}
+                                    onChange={(e) => setIncidentNote(e.target.value)}
+                                    placeholder={incidentReason === "wind" ? "Npr. udari bure > 30 čv na južnom gatu" : "Npr. puknuće sajle na Traveliftu"}
+                                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none"
+                                />
+                            </div>
+
                             <button
-                                onClick={handleLogout}
-                                className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold py-3 px-4 rounded-2xl text-xs flex items-center justify-center gap-2 border border-rose-200 transition active:scale-95"
+                                disabled={isSubmittingIncident}
+                                onClick={handleReportIncident}
+                                className={`w-full py-3 rounded-2xl text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95 ${
+                                    incidentReason === "wind" ? "bg-amber-600 hover:bg-amber-700" : "bg-rose-600 hover:bg-rose-700"
+                                }`}
                             >
-                                <LogOut className="h-4 w-4" />
-                                <span>Odjava s uređaja</span>
+                                {isSubmittingIncident ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertTriangle className="h-4 w-4" />}
+                                <span>{incidentReason === "wind" ? "Aktiviraj obustavu rada (Bura)" : "Prijavi kvar dizalice"}</span>
                             </button>
+                        </div>
+
+                        {/* Active Stoppages List */}
+                        <div className="space-y-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block">Trenutno aktivne obustave</span>
+                            {isLoadingIncidents ? (
+                                <div className="text-center py-4 text-xs text-slate-400">Provjera stanja...</div>
+                            ) : activeIncidents.length === 0 ? (
+                                <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                                    <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0" />
+                                    <span>Nema aktivnih zastoja. Sve dizalice rade po rasporedu.</span>
+                                </div>
+                            ) : (
+                                activeIncidents.map(inc => (
+                                    <div
+                                        key={inc.id}
+                                        className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3.5 shadow-sm space-y-2"
+                                    >
+                                        <div className="flex items-start justify-between">
+                                            <div className="space-y-0.5">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-xs font-black text-amber-900">
+                                                        {inc.reason === "wind" ? "🌪️ Vjetar / Bura" : "⚙️ Kvar dizalice"}
+                                                    </span>
+                                                    <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full uppercase">
+                                                        Aktivno
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-amber-800 font-medium">
+                                                    {inc.craneName ? `Pogođeno: ${inc.craneName}` : "Pogođene sve dizalice"}
+                                                </p>
+                                                {inc.note && (
+                                                    <p className="text-[11px] text-amber-900/80 italic">{inc.note}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => handleResolveIncident(inc.id)}
+                                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
+                                        >
+                                            <Check className="h-4 w-4" />
+                                            <span>Označi riješeno / Rad nastavljen</span>
+                                        </button>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
                 )}
@@ -1417,6 +1798,52 @@ export default function MobileOperatorApp() {
                 </div>
             )}
 
+            {/* No-Show / Otkazano modal dialog */}
+            {noShowTask && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-end sm:items-center justify-center p-4">
+                    <div className="bg-white border-4 border-rose-100 rounded-[2rem] p-5 w-full max-w-md space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200">
+                        <div className="flex items-center justify-between border-b pb-3">
+                            <h3 className="font-bold text-base text-rose-900 flex items-center gap-2">
+                                <XCircle className="h-5 w-5 text-rose-600" />
+                                Potvrda izostanka (Nije došlo)
+                            </h3>
+                            <button onClick={() => setNoShowTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-base px-2">✕</button>
+                        </div>
+                        <p className="text-xs text-slate-600">
+                            Označite ako se plovilo <strong>{noShowTask.vessel?.name}</strong> ({noShowTask.vessel?.registration || "bez reg."}) nije pojavilo u terminu.
+                        </p>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-slate-700 block">Razlog izostanka:</label>
+                            <select
+                                value={noShowReason}
+                                onChange={e => setNoShowReason(e.target.value)}
+                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none"
+                            >
+                                <option value="Korisnik se nije pojavio u terminu na rivi">Korisnik se nije pojavio u terminu na rivi</option>
+                                <option value="Odustao na licu mjesta">Odustao na licu mjesta</option>
+                                <option value="Kvar na motoru plovila">Kvar na motoru plovila</option>
+                                <option value="Vremenski uvjeti onemogućili manevar plovila">Vremenski uvjeti onemogućili manevar plovila</option>
+                            </select>
+                        </div>
+                        <div className="flex gap-2 pt-2">
+                            <button
+                                onClick={() => setNoShowTask(null)}
+                                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 p-2.5 rounded-xl text-xs font-bold transition"
+                            >
+                                Odustani
+                            </button>
+                            <button
+                                onClick={handleConfirmNoShow}
+                                disabled={isSubmittingNoShow}
+                                className="flex-1 bg-rose-600 hover:bg-rose-700 text-white p-2.5 rounded-xl text-xs font-bold shadow-md transition disabled:opacity-40"
+                            >
+                                {isSubmittingNoShow ? "Spremanje..." : "Potvrdi otkazivanje"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Bottom Navigation Bar */}
             <nav className="fixed bottom-0 left-0 right-0 bg-indigo-950 text-white border-t border-indigo-900 shadow-2xl z-40">
                 <div className="max-w-lg mx-auto flex items-center justify-around h-16 px-2">
@@ -1427,27 +1854,27 @@ export default function MobileOperatorApp() {
                         }`}
                     >
                         <Calendar className="h-5 w-5" />
-                        <span className="text-[11px]">Poslovi</span>
+                        <span className="text-[11px]">Zadaci danas</span>
                     </button>
 
                     <button
-                        onClick={() => setActiveTab("notifications")}
+                        onClick={() => setActiveTab("zones")}
                         className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-                            activeTab === "notifications" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
+                            activeTab === "zones" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
                         }`}
                     >
-                        <MessageSquare className="h-5 w-5" />
-                        <span className="text-[11px]">Poruke</span>
+                        <Layers className="h-5 w-5" />
+                        <span className="text-[11px]">Pregled zona</span>
                     </button>
 
                     <button
-                        onClick={() => setActiveTab("settings")}
+                        onClick={() => setActiveTab("incidents")}
                         className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
-                            activeTab === "settings" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
+                            activeTab === "incidents" ? "text-amber-400 font-bold" : "text-slate-400 hover:text-slate-200"
                         }`}
                     >
-                        <Settings className="h-5 w-5" />
-                        <span className="text-[11px]">Postavke</span>
+                        <AlertTriangle className="h-5 w-5" />
+                        <span className="text-[11px]">Prijavi problem</span>
                     </button>
                 </div>
             </nav>
