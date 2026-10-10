@@ -319,6 +319,7 @@ export class LandDispatchService {
           userPhone: r.userPhone,
           vesselId: r.vesselId,
           vesselName: r.vesselName,
+          vesselRegistration: r.vesselRegistration || null,
           vesselType: r.vesselType,
           vesselWeightTons: r.vesselWeightTons,
           vesselBeamM: r.vesselBeamM,

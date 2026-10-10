@@ -29,6 +29,7 @@ export interface DispatchReservationItem {
   userPhone: string | null;
   vesselId: string | null;
   vesselName: string;
+  vesselRegistration?: string | null;
   vesselType: string | null;
   vesselWeightTons: number | null;
   vesselBeamM: number | null;

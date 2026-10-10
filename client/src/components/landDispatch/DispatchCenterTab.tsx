@@ -805,7 +805,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                   <tr className="text-left text-muted-foreground border-b text-[11px]">
                     <th className="pb-1.5 font-medium">Termin</th>
                     <th className="pb-1.5 font-medium">Operacija</th>
-                    <th className="pb-1.5 font-medium">Plovilo</th>
+                    <th className="pb-1.5 font-medium">Registracija / Plovilo</th>
                     <th className="pb-1.5 font-medium">Vlasnik</th>
                     <th className="pb-1.5 font-medium">Dizalica</th>
                     <th className="pb-1.5 font-medium">Zona</th>
@@ -827,7 +827,25 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                           {op.operationCategory === "lift_from_sea" ? "↑ Vađenje" : "↓ Spuštanje"}
                         </Badge>
                       </td>
-                      <td className="py-2 font-medium text-foreground">{op.vesselName}</td>
+                      <td className="py-2 font-medium text-foreground">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {op.vesselRegistration ? (
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px] px-1.5 py-0 h-4 font-mono font-bold border border-foreground/20 bg-muted/80 text-foreground"
+                            >
+                              {op.vesselRegistration}
+                            </Badge>
+                          ) : null}
+                          {op.vesselName && op.vesselName !== "Plovilo" && op.vesselName !== op.vesselRegistration ? (
+                            <span className="text-[11px] text-muted-foreground truncate">
+                              {op.vesselName}
+                            </span>
+                          ) : !op.vesselRegistration ? (
+                            <span>{op.vesselName || "—"}</span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="py-2 text-muted-foreground">{op.userName}</td>
                       <td className="py-2 text-muted-foreground">{op.craneName}</td>
                       <td className="py-2 font-bold text-primary">Zona {op.landZoneCode || "—"}</td>

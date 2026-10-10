@@ -306,11 +306,11 @@ export function DispatchGanttTimeline({
                                 : "bg-emerald-500/15 border-emerald-500/50 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-500/25"
                             }`}
                           >
-                            {/* Gornji red: Smjer + Naziv plovila + Zona */}
+                            {/* Gornji red: Smjer + Registracija / Naziv plovila + Zona */}
                             <div className="flex items-center justify-between gap-1 overflow-hidden">
                               <div className="flex items-center gap-1 overflow-hidden">
                                 <span
-                                  className={`text-xs font-black ${
+                                  className={`text-xs font-black shrink-0 ${
                                     opInSlot.operationCategory === "lift_from_sea"
                                       ? "text-blue-600 dark:text-blue-400"
                                       : "text-emerald-600 dark:text-emerald-400"
@@ -318,8 +318,17 @@ export function DispatchGanttTimeline({
                                 >
                                   {opInSlot.operationCategory === "lift_from_sea" ? "↑" : "↓"}
                                 </span>
+                                {opInSlot.vesselRegistration ? (
+                                  <span className="font-mono font-bold text-[10px] px-1 py-0 rounded bg-background/80 border border-foreground/15 shrink-0">
+                                    {opInSlot.vesselRegistration}
+                                  </span>
+                                ) : null}
                                 <span className="font-bold text-[11px] truncate block leading-tight">
-                                  {opInSlot.vesselName}
+                                  {opInSlot.vesselName && opInSlot.vesselName !== "Plovilo"
+                                    ? opInSlot.vesselName
+                                    : !opInSlot.vesselRegistration
+                                    ? "Plovilo"
+                                    : ""}
                                   {!isStartSlot && " (nastavak)"}
                                 </span>
                               </div>
