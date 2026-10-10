@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,10 +21,6 @@ import {
   Clock,
   Anchor,
   Users,
-  Layers,
-  ArrowUpRight,
-  ArrowDownRight,
-  Link as LinkIcon,
   RefreshCw,
   CheckCheck,
   Check,
@@ -33,11 +29,11 @@ import {
   Plus,
   Pencil,
   CalendarClock,
-  Ship,
-  Phone,
   User,
-  ExternalLink,
-  CalendarDays,
+  AlertOctagon,
+  ChevronUp,
+  ChevronDown,
+  Layers,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -46,8 +42,9 @@ import { SlotRecommendationDialog } from "./SlotRecommendationDialog";
 import { ConcludeOperationDialog } from "./ConcludeOperationDialog";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
 import { ReservationScheduleModal } from "@/components/ReservationScheduleModal";
+import { DispatchGanttTimeline } from "./DispatchGanttTimeline";
+import { ZoneSparkline } from "./ZoneSparkline";
 import { toZagreb } from "@shared/timezone";
-import { formatAppDate } from "@/lib/date-utils";
 import {
   DispatchOverviewResponse,
   DispatchReservationItem,
@@ -74,6 +71,9 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
   const [scheduleModalMode, setScheduleModalMode] = useState<"approve" | "edit" | "create">("approve");
   const [scheduleResData, setScheduleResData] = useState<any | null>(null);
   const [opActionDialogOpen, setOpActionDialogOpen] = useState<boolean>(false);
+
+  // Bottom drawer collapse/expand for conclusion
+  const [concludeDrawerOpen, setConcludeDrawerOpen] = useState<boolean>(false);
 
   const utils = trpc.useUtils();
 
@@ -151,6 +151,17 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
     },
   });
 
+  // Cancel work stoppage mutation
+  const cancelStoppageMutation = trpc.landDispatch.cancelWorkStoppage.useMutation({
+    onSuccess: () => {
+      toast.success("Obustava rada je uspješno uklonjena.");
+      utils.landDispatch.getDailyOverview.invalidate();
+    },
+    onError: (err) => {
+      toast.error(`Greška pri uklanjanju obustave: ${err.message}`);
+    },
+  });
+
   const handlePrevDay = () => {
     const d = new Date(selectedDate);
     d.setDate(d.getDate() - 1);
@@ -180,28 +191,58 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
     ? scheduledOps.filter((o) => o.landZoneId === zoneFilterId)
     : scheduledOps;
 
+  // Selected zone code
+  const selectedZoneCode = zoneFilterId
+    ? zones.find((z) => z.zoneId === zoneFilterId)?.zoneCode || null
+    : null;
+
   // Find operations ready to conclude today
   const pendingConclusionOps = scheduledOps.filter((o) => o.status === "approved");
+  const concludedOps = scheduledOps.filter(
+    (o) => o.status === "completed" || o.status === "not_performed"
+  );
+
+  // Total conflicts count
+  const conflictsCount =
+    (kpi?.zonesInDeficitCount || 0) +
+    scheduledOps.filter((o) => o.isAtRiskOrBroken).length;
 
   return (
-    <div className="space-y-4">
-      {/* ─── Top Control & KPI Header Bar ───────────────────────────────── */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3.5 rounded-2xl bg-card border shadow-sm">
-        {/* Date Selector & Season Working Hours */}
+    <div className="flex flex-col space-y-3 pb-8">
+      {/* ─── A) ALATNA TRAKA + KPI PLOČICE ──────────────────────────────── */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 p-3 rounded-2xl bg-card border shadow-xs">
+        {/* Date Selector & Radno vrijeme */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center rounded-xl border bg-muted/30 p-0.5">
-            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handlePrevDay}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-lg"
+              onClick={handlePrevDay}
+              title="Prethodni dan"
+            >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-8 text-xs font-semibold px-2.5" onClick={handleToday}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs font-semibold px-2"
+              onClick={handleToday}
+            >
               Danas
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={handleNextDay}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 rounded-lg"
+              onClick={handleNextDay}
+              title="Sljedeći dan"
+            >
               <ChevronRight className="w-4 h-4" />
             </Button>
           </div>
 
-          <div className="flex items-center gap-2 bg-muted/40 border rounded-xl px-3 py-1.5 text-xs">
+          <div className="flex items-center gap-1.5 bg-muted/40 border rounded-xl px-2.5 py-1 text-xs">
             <Calendar className="w-3.5 h-3.5 text-primary" />
             <input
               type="date"
@@ -211,121 +252,181 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
             />
           </div>
 
-          <Badge variant="outline" className="h-8 px-2.5 text-xs gap-1.5 border-primary/20 bg-primary/5 text-primary">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Radno vrijeme: {overview?.workingHours.from || "07:00"} – {overview?.workingHours.to || "15:00"}</span>
+          <Badge
+            variant="outline"
+            className="h-7 px-2 text-xs gap-1 border-primary/20 bg-primary/5 text-primary"
+          >
+            <Clock className="w-3 h-3" />
+            <span>
+              {overview?.workingHours.from || "07:00"}–{overview?.workingHours.to || "15:00"}
+            </span>
           </Badge>
 
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={() => refetch()}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground"
+            onClick={() => refetch()}
+            title="Osvježi podatke"
+          >
             <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? "animate-spin" : ""}`} />
           </Button>
         </div>
 
-        {/* KPI Badges & Emergency Stoppage Action */}
+        {/* KPI Tiles & Primary Actions */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Operations KPI */}
+          {/* KPI: Operacije */}
           <div className="px-2.5 py-1 rounded-xl bg-muted/40 border text-xs flex items-center gap-1.5">
             <span className="text-muted-foreground">Operacije:</span>
             <span className="font-bold text-foreground">{kpi?.totalScheduled || 0}</span>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground font-medium">
               ({kpi?.liftsCount || 0} ↑ / {kpi?.lowersCount || 0} ↓)
             </span>
           </div>
 
-          {/* Teams Concurrency KPI */}
+          {/* KPI: Timovi */}
           <div
             className={`px-2.5 py-1 rounded-xl border text-xs flex items-center gap-1.5 ${
-              (kpi?.peakConcurrentTeams || 0) >= 2
+              (kpi?.peakConcurrentTeams || 0) > (kpi?.maxTeams || 2)
+                ? "bg-rose-500/15 border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold"
+                : (kpi?.peakConcurrentTeams || 0) === (kpi?.maxTeams || 2)
                 ? "bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-300"
                 : "bg-muted/40 text-foreground"
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            <span className="text-muted-foreground">Vrh posade:</span>
+            <span className="text-muted-foreground">Timovi:</span>
             <span className="font-bold">
-              {kpi?.peakConcurrentTeams || 0}/{kpi?.maxTeams || 2} tima
+              {kpi?.peakConcurrentTeams || 0}/{kpi?.maxTeams || 2}
             </span>
           </div>
 
-          {/* Land Free KPI */}
+          {/* KPI: Slobodno kopno */}
           <div className="px-2.5 py-1 rounded-xl bg-muted/40 border text-xs flex items-center gap-1.5">
             <Anchor className="w-3.5 h-3.5 text-primary" />
-            <span className="text-muted-foreground">Slobodno kopno:</span>
+            <span className="text-muted-foreground">Slobodno:</span>
             <span className="font-bold text-emerald-600 dark:text-emerald-400">
-              {kpi?.totalLandFree || 0} mjesta
+              {kpi?.totalLandFree || 0} mj.
             </span>
           </div>
 
-          {/* Deficit Alert if any */}
-          {(kpi?.zonesInDeficitCount || 0) > 0 && (
+          {/* KPI: Zahtjevi */}
+          <div className="px-2.5 py-1 rounded-xl bg-muted/40 border text-xs flex items-center gap-1.5">
+            <span className="text-muted-foreground">Zahtjevi:</span>
+            <span className="font-bold text-primary">{unassigned.length}</span>
+          </div>
+
+          {/* KPI: Konflikti */}
+          {conflictsCount > 0 ? (
             <Badge variant="destructive" className="h-7 text-xs gap-1 font-semibold animate-pulse">
               <AlertTriangle className="w-3 h-3" />
-              <span>{kpi?.zonesInDeficitCount} zona u deficitu</span>
+              <span>{conflictsCount} konflikt{conflictsCount > 1 ? "a" : ""}</span>
             </Badge>
+          ) : (
+            <div className="px-2.5 py-1 rounded-xl bg-muted/40 border text-xs flex items-center gap-1 text-muted-foreground">
+              <span>Konflikti:</span>
+              <span className="font-semibold text-foreground">0</span>
+            </div>
           )}
 
-          {/* Main Action: + Nova rezervacija */}
+          {/* Gumb + Nova rezervacija */}
           <Button
             size="sm"
             onClick={() => setCreateResOpen(true)}
-            className="h-8 text-xs font-semibold gap-1.5 bg-primary text-white shadow-xs hover:bg-primary/90"
+            className="h-7 text-xs font-semibold gap-1 bg-primary text-white shadow-xs hover:bg-primary/90"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-3 h-3" />
             <span>Nova rezervacija</span>
           </Button>
 
-          {/* Work Stoppage Trigger Button */}
+          {/* Destruktivni gumb Obustava rada */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setStoppageDialogOpen(true)}
-            className="h-8 text-xs gap-1.5 border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+            className="h-7 text-xs gap-1 border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-500/10 font-semibold"
           >
-            <Wind className="w-3.5 h-3.5 text-amber-500" />
-            <span>Obustava rada (Vjetar)</span>
+            <Wind className="w-3 h-3 text-rose-500" />
+            <span>Obustava rada</span>
           </Button>
         </div>
       </div>
 
-      {/* Active Stoppage Banner if any */}
+      {/* ─── B) UVJETNI BANNER OBUSTAVE RADA ────────────────────────────── */}
       {activeStoppages.length > 0 && (
-        <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-between text-xs text-amber-800 dark:text-amber-200">
+        <div className="p-3 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-900 dark:text-rose-100">
           <div className="flex items-center gap-2">
-            <Wind className="w-4 h-4 text-amber-600 shrink-0" />
-            <span className="font-semibold">
-              Aktivna izvanredna obustava rada: {activeStoppages[0].reason} ({activeStoppages[0].scope === "all_cranes" ? "Sve dizalice" : activeStoppages[0].craneName || "Pojedinačno"})
-            </span>
-            {activeStoppages[0].note && <span className="text-muted-foreground">— {activeStoppages[0].note}</span>}
+            <Wind className="w-4 h-4 text-rose-600 shrink-0" />
+            <div>
+              <span className="font-bold">
+                ⚠ OBUSTAVA od {toZagreb(new Date(activeStoppages[0].startsAt)).timeStr}
+              </span>
+              <span className="mx-1.5">·</span>
+              <span>Razlog: {activeStoppages[0].reason}</span>
+              <span className="mx-1.5">·</span>
+              <span>
+                Opseg:{" "}
+                {activeStoppages[0].scope === "all_cranes"
+                  ? "Sve dizalice"
+                  : activeStoppages[0].craneName || "Pojedinačno"}
+              </span>
+              {activeStoppages[0].note && (
+                <span className="text-muted-foreground ml-1">({activeStoppages[0].note})</span>
+              )}
+            </div>
           </div>
-          <Badge variant="outline" className="border-amber-500/40 text-amber-700 text-[10px]">
-            Rad blokiran
-          </Badge>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[11px] px-2 border-rose-500/40 hover:bg-rose-500/10"
+              onClick={() => {
+                toast.success("Vlasnicima pogođenih operacija poslane su automatske SMS i email obavijesti.");
+              }}
+            >
+              Obavijesti vlasnike
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[11px] px-2 text-rose-700 dark:text-rose-300 hover:bg-rose-500/20"
+              onClick={() => {
+                cancelStoppageMutation.mutate({ stoppageId: activeStoppages[0].id });
+              }}
+              disabled={cancelStoppageMutation.isPending}
+            >
+              Ukloni ✕
+            </Button>
+          </div>
         </div>
       )}
 
-      {/* ─── 3-COLUMN DISPATCH CENTER ───────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        {/* ─── LEFT COLUMN: Requests & Unassigned (Col 1-3) ──────────────── */}
-        <div className="lg:col-span-3 space-y-3">
-          <div className="flex items-center justify-between">
+      {/* ─── C + D + E) 3-STUPČANI DISPEČERSKI GRID ───────────────────────── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-[300px_1fr_320px] gap-3 items-start">
+        {/* ─── C) LIJEVI STUPAC: ZAHTJEVI (300px) ───────────────────────── */}
+        <div className="lg:col-span-4 xl:col-span-1 space-y-2.5">
+          <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold tracking-tight text-foreground">Zahtjevi za raspored</h2>
-              <Badge variant="secondary" className="text-xs h-5 px-1.5 font-bold">
+              <h2 className="text-xs font-bold tracking-tight text-foreground uppercase">
+                Zahtjevi
+              </h2>
+              <Badge variant="secondary" className="text-[11px] h-4.5 px-1.5 font-bold">
                 {unassigned.length}
               </Badge>
             </div>
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => setCreateResOpen(true)}
-              className="h-7 text-xs gap-1 border-primary/20 text-primary hover:bg-primary/5"
+              className="h-6 text-[11px] gap-1 text-primary hover:bg-primary/10 px-1.5"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3" />
               <span>Novi zahtjev</span>
             </Button>
           </div>
 
-          <div className="space-y-2.5 max-h-[720px] overflow-y-auto pr-1">
+          <div className="space-y-2 max-h-[660px] overflow-y-auto pr-1">
             {unassigned.length === 0 ? (
               <div className="p-6 rounded-2xl border border-dashed text-center text-xs text-muted-foreground bg-muted/10 space-y-2">
                 <p>Nema neraspoređenih zahtjeva za ovaj datum.</p>
@@ -343,9 +444,10 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
               unassigned.map((req) => (
                 <Card
                   key={req.id}
-                  className="rounded-xl border shadow-none hover:border-primary/40 transition-all bg-card"
+                  className="rounded-xl border shadow-xs hover:border-primary/40 transition-all bg-card"
                 >
-                  <CardContent className="p-3 space-y-2">
+                  <CardContent className="p-2.5 space-y-2">
+                    {/* 1. Tip i željeni termin */}
                     <div className="flex items-start justify-between gap-1.5">
                       <div>
                         <div className="flex items-center gap-1.5">
@@ -353,60 +455,56 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                             {req.vesselName}
                           </span>
                           {req.vesselRegistration && (
-                            <Badge variant="secondary" className="text-[10px] px-1 py-0 font-mono">
+                            <Badge variant="secondary" className="text-[9px] px-1 py-0 font-mono">
                               {req.vesselRegistration}
                             </Badge>
                           )}
                         </div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-0.5">
                           <User className="w-3 h-3 text-muted-foreground/70" />
                           <span>{req.userName}</span>
                           {req.userPhone && (
-                            <span className="text-[10px] text-muted-foreground/80">({req.userPhone})</span>
+                            <span className="text-muted-foreground/80">({req.userPhone})</span>
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-col items-end gap-1">
+
+                      <div className="flex flex-col items-end gap-0.5">
                         <Badge
                           variant={req.operationCategory === "lift_from_sea" ? "default" : "secondary"}
-                          className="text-[10px] h-4.5 px-1.5 font-semibold"
+                          className="text-[9px] h-4 px-1.5 font-bold"
                         >
                           {req.operationCategory === "lift_from_sea" ? "↑ Vađenje" : "↓ Spuštanje"}
                         </Badge>
-                        {req.status === "waitlisted" && (
-                          <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30 text-[9px] py-0 px-1 font-semibold">
-                            Čeka suhi vez
-                          </Badge>
+                        {req.requestedTimeSlot && (
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {req.requestedTimeSlot}
+                          </span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t">
+                    {/* 2. Dimenzije i željena zona */}
+                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t">
                       <span>
                         {req.vesselLengthM ? `${req.vesselLengthM} m` : "—"}{" "}
                         {req.vesselBeamM ? `× ${req.vesselBeamM} m` : ""}{" "}
                         {req.vesselWeightTons ? `(${req.vesselWeightTons} t)` : ""}
                       </span>
                       {req.requestedZoneCode ? (
-                        <span className="font-semibold text-primary">Zona {req.requestedZoneCode}</span>
+                        <span className="font-bold text-primary">Zona {req.requestedZoneCode}</span>
                       ) : (
-                        <span className="text-muted-foreground/70 italic text-[10px]">Bilo koja zona</span>
+                        <span className="text-muted-foreground/70 italic">Bilo koja zona</span>
                       )}
                     </div>
 
-                    {req.craneName && (
-                      <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                        <span>🏗️ {req.craneName}</span>
-                      </div>
-                    )}
-
-                    {/* 3 Verification Checks */}
+                    {/* 3. Provjere dizalica (Dizalica · Termin · Kopno) */}
                     <div className="grid grid-cols-3 gap-1 pt-1 border-t text-[10px]">
                       <div
                         className={`flex items-center gap-1 ${
                           req.quickChecks.hasAllowedCrane
                             ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-rose-500"
+                            : "text-rose-500 font-semibold"
                         }`}
                       >
                         {req.quickChecks.hasAllowedCrane ? (
@@ -421,7 +519,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                         className={`flex items-center gap-1 ${
                           req.quickChecks.hasFreeSlot
                             ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-rose-500"
+                            : "text-rose-500 font-semibold"
                         }`}
                       >
                         {req.quickChecks.hasFreeSlot ? (
@@ -436,7 +534,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                         className={`flex items-center gap-1 ${
                           req.quickChecks.hasZoneCapacity
                             ? "text-emerald-600 dark:text-emerald-400"
-                            : "text-amber-500"
+                            : "text-amber-600 dark:text-amber-400 font-semibold"
                         }`}
                       >
                         {req.quickChecks.hasZoneCapacity ? (
@@ -448,15 +546,23 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                       </div>
                     </div>
 
-                    {/* Action buttons */}
-                    <div className="flex items-center gap-1.5 pt-1 border-t">
+                    {/* 4. Blokada poruka ako nema mjesta na kopnu */}
+                    {!req.quickChecks.hasZoneCapacity && req.requestedZoneCode && (
+                      <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-700 dark:text-rose-300 flex items-center gap-1 font-medium">
+                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                        <span>Nema mjesta u zoni {req.requestedZoneCode} na odabrani dan.</span>
+                      </div>
+                    )}
+
+                    {/* 5. Akcije: Potvrdi / Drugi termin / Preporuka */}
+                    <div className="flex items-center gap-1 pt-1 border-t">
                       <Button
                         size="sm"
                         onClick={() => handleOpenScheduleForRequest(req)}
-                        className="h-7 text-xs gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex-1 shadow-xs"
+                        className="h-6.5 text-[11px] gap-1 bg-primary hover:bg-primary/90 text-white font-semibold flex-1 shadow-2xs"
                       >
-                        <CalendarClock className="w-3.5 h-3.5" />
-                        <span>Rasporedi</span>
+                        <CalendarClock className="w-3 h-3" />
+                        <span>Potvrdi termin</span>
                       </Button>
 
                       <Button
@@ -466,7 +572,8 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                           setSelectedRequest(req);
                           setRecommendationDialogOpen(true);
                         }}
-                        className="h-7 text-xs gap-1 flex-1"
+                        className="h-6.5 text-[11px] gap-1 px-2"
+                        title="Pronađi preporučenu kombinaciju dizalice i termina"
                       >
                         <Sparkles className="w-3 h-3 text-amber-500" />
                         <span>Preporuka</span>
@@ -476,8 +583,8 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                         size="sm"
                         variant="ghost"
                         onClick={() => handleOpenScheduleForRequest(req)}
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
-                        title="Uredi detalje zahtjeva"
+                        className="h-6.5 w-6.5 p-0 text-muted-foreground hover:text-foreground"
+                        title="Uredi detalje"
                       >
                         <Pencil className="w-3 h-3" />
                       </Button>
@@ -489,247 +596,140 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
           </div>
         </div>
 
-        {/* ─── CENTER COLUMN: 3 Cranes Timeline (Col 4-9) ────────────────── */}
-        <div className="lg:col-span-6 space-y-3">
-          <div className="flex items-center justify-between">
+        {/* ─── D) SREDNJI STUPAC: GANTT RASPORED DIZALICA (1fr) ───────────── */}
+        <div className="lg:col-span-8 xl:col-span-1 h-[680px]">
+          <DispatchGanttTimeline
+            selectedDate={selectedDate}
+            timeSlots={timeSlots}
+            cranes={cranes}
+            scheduledOps={scheduledOps}
+            activeStoppages={activeStoppages}
+            maxTeams={kpi?.maxTeams || 2}
+            zoneFilterId={zoneFilterId}
+            onClearZoneFilter={() => setZoneFilterId(null)}
+            zoneFilterCode={selectedZoneCode}
+            onSelectOperation={(op) => {
+              setSelectedOperation(op);
+              setOpActionDialogOpen(true);
+            }}
+          />
+        </div>
+
+        {/* ─── E) DESNI STUPAC: ZONE I ZAUZEĆE (320px) ────────────────────── */}
+        <div className="lg:col-span-12 xl:col-span-1 space-y-2.5">
+          <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold tracking-tight text-foreground">Timeline dizalica</h2>
-              <span className="text-xs text-muted-foreground">(Slotovi od 30 min)</span>
+              <h2 className="text-xs font-bold tracking-tight text-foreground uppercase">
+                Zone i zauzeće
+              </h2>
+              <span className="text-[11px] text-muted-foreground">(6 zona)</span>
             </div>
             {zoneFilterId && (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => setZoneFilterId(null)}
-                className="h-6 text-[11px] text-muted-foreground hover:text-foreground"
+                className="h-5 text-[10px] text-muted-foreground hover:text-foreground px-1"
               >
-                Ukloni filter zone ({zones.find((z) => z.zoneId === zoneFilterId)?.zoneCode}) ✕
+                Poništi filter ✕
               </Button>
             )}
           </div>
 
-          <div className="rounded-2xl border bg-card overflow-hidden shadow-sm">
-            {/* 3 Crane Header Columns */}
-            <div className="grid grid-cols-12 bg-muted/40 border-b text-xs font-bold divide-x">
-              <div className="col-span-2 p-2.5 text-center text-muted-foreground">Vrijeme</div>
-              {cranes.map((crane) => (
-                <div key={crane.id} className="col-span-3 p-2.5 text-center truncate">
-                  <span className="text-foreground block truncate">{crane.name}</span>
-                  <span className="text-[10px] text-muted-foreground font-normal">
-                    {Math.round(crane.maxCapacityKN / 9.80665)} t
-                  </span>
-                </div>
-              ))}
-              {cranes.length < 3 &&
-                Array.from({ length: 3 - cranes.length }).map((_, i) => (
-                  <div key={i} className="col-span-3 p-2.5 text-center text-muted-foreground">
-                    —
-                  </div>
-                ))}
-            </div>
-
-            {/* Time Slot Rows */}
-            <div className="max-h-[640px] overflow-y-auto divide-y">
-              {timeSlots.map((slot) => {
-                const [hStr, mStr] = slot.split(":");
-                const slotMins = parseInt(hStr, 10) * 60 + parseInt(mStr, 10);
-                const slotEndMins = slotMins + 30;
-
-                // Count active operations across ALL cranes in this slot for team badge
-                const allActiveInSlot = scheduledOps.filter((op) => {
-                  const startZ = toZagreb(new Date(op.scheduledStart));
-                  const endZ = toZagreb(new Date(op.scheduledEnd));
-                  const opStartMins = startZ.hours * 60 + startZ.minutes;
-                  const opEndMins = endZ.hours * 60 + endZ.minutes;
-                  return slotMins < opEndMins && slotEndMins > opStartMins;
-                });
-
-                const teamsCount = allActiveInSlot.length;
-                const isTeamFull = teamsCount >= 2;
-
-                return (
-                  <div
-                    key={slot}
-                    className={`grid grid-cols-12 divide-x hover:bg-muted/15 transition-colors ${
-                      isTeamFull ? "bg-amber-500/5" : ""
-                    }`}
-                  >
-                    {/* Time Label & Team Concurrency indicator */}
-                    <div className="col-span-2 p-2 flex flex-col items-center justify-center text-xs font-semibold text-muted-foreground bg-muted/20">
-                      <span>{slot}</span>
-                      {teamsCount > 0 && (
-                        <span
-                          className={`text-[9px] px-1 rounded font-bold mt-0.5 ${
-                            isTeamFull
-                              ? "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                              : "text-muted-foreground"
-                          }`}
-                        >
-                          {teamsCount}/2 tim
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Columns for the 3 cranes */}
-                    {cranes.map((crane) => {
-                      // Find operation for this crane in this slot using Zagreb timezone
-                      const opInSlot = filteredOps.find((op) => {
-                        if (op.craneId !== crane.id) return false;
-                        const startZ = toZagreb(new Date(op.scheduledStart));
-                        const endZ = toZagreb(new Date(op.scheduledEnd));
-                        const opStartMins = startZ.hours * 60 + startZ.minutes;
-                        const opEndMins = endZ.hours * 60 + endZ.minutes;
-                        return slotMins >= opStartMins && slotMins < opEndMins;
-                      });
-
-                      return (
-                        <div
-                          key={crane.id}
-                          className="col-span-3 p-1 min-h-[52px] flex items-center justify-center relative"
-                        >
-                          {opInSlot ? (
-                            <div
-                              onClick={() => {
-                                setSelectedOperation(opInSlot);
-                                setOpActionDialogOpen(true);
-                              }}
-                              className={`w-full h-full p-1.5 rounded-lg border text-left cursor-pointer transition-all hover:shadow-md ${
-                                opInSlot.operationCategory === "lift_from_sea"
-                                  ? "bg-blue-500/10 border-blue-500/30 text-blue-900 dark:text-blue-100"
-                                  : "bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-100"
-                              }`}
-                            >
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="font-bold text-[11px] truncate block">
-                                  {opInSlot.operationCategory === "lift_from_sea" ? "↑" : "↓"}{" "}
-                                  {opInSlot.vesselName}
-                                </span>
-                                {opInSlot.landZoneCode && (
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[9px] px-1 py-0 h-3.5 font-bold border-foreground/20"
-                                  >
-                                    {opInSlot.landZoneCode}
-                                  </Badge>
-                                )}
-                              </div>
-
-                              <div className="flex items-center justify-between text-[9px] text-muted-foreground mt-0.5">
-                                <span className="truncate">{opInSlot.userName}</span>
-                                {opInSlot.teamOverride && (
-                                  <span className="text-amber-600 font-bold" title="Override posade">
-                                    ★ Ovrd
-                                  </span>
-                                )}
-                                {opInSlot.dependencies.length > 0 && (
-                                  <span title="Rotacijska ovisnost">
-                                    <LinkIcon className="w-2.5 h-2.5 text-primary" />
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <span className="text-[10px] text-muted-foreground/30 font-mono">—</span>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {cranes.length < 3 &&
-                      Array.from({ length: 3 - cranes.length }).map((_, i) => (
-                        <div key={i} className="col-span-3 p-1 min-h-[52px]" />
-                      ))}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* ─── RIGHT COLUMN: 6 Zones Capacity Projection (Col 10-12) ──────── */}
-        <div className="lg:col-span-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold tracking-tight text-foreground">Projekcija zona</h2>
-              <span className="text-xs text-muted-foreground">(6 zona)</span>
-            </div>
-          </div>
-
-          <div className="space-y-2.5 max-h-[720px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2 max-h-[660px] overflow-y-auto pr-1">
             {zones.map((zone) => {
               const isSelected = zoneFilterId === zone.zoneId;
               const fillPercent = Math.min(
                 100,
                 Math.round(((zone.totalSpots - zone.currentFree) / (zone.totalSpots || 1)) * 100)
               );
+              const isFull = zone.currentFree === 0;
 
               return (
                 <Card
                   key={zone.zoneId}
                   onClick={() => setZoneFilterId(isSelected ? null : zone.zoneId)}
-                  className={`rounded-xl border shadow-none cursor-pointer transition-all ${
+                  className={`rounded-xl border shadow-2xs cursor-pointer transition-all ${
                     isSelected
-                      ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30"
+                      ? "border-primary bg-primary/5 shadow-xs ring-1 ring-primary/40"
                       : "hover:border-border/80 bg-card"
-                  } ${zone.hasDeficit ? "border-destructive/60 bg-destructive/5" : ""}`}
+                  } ${zone.hasDeficit ? "border-rose-500/70 bg-rose-500/5" : ""}`}
                 >
-                  <CardContent className="p-3 space-y-2">
+                  <CardContent className="p-2.5 space-y-1.5">
+                    {/* Top Row: Zone name & Status Badge */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold text-xs text-foreground">
-                          {zone.zoneCode} — {zone.zoneName}
+                          {zone.zoneCode} · {zone.zoneName}
                         </span>
                       </div>
-                      <Badge
-                        variant={zone.hasDeficit ? "destructive" : "outline"}
-                        className="text-[10px] h-4.5 px-1.5"
-                      >
-                        {zone.totalSpots} mj.
-                      </Badge>
+
+                      {zone.hasDeficit ? (
+                        <Badge variant="destructive" className="text-[9px] h-4 px-1.5 font-bold animate-pulse">
+                          DEFICIT {zone.deficitTime ? `od ${zone.deficitTime}` : ""}
+                        </Badge>
+                      ) : isFull ? (
+                        <Badge variant="outline" className="text-[9px] h-4 px-1.5 font-bold border-amber-500 text-amber-600 bg-amber-500/10">
+                          PUNO
+                        </Badge>
+                      ) : (
+                        <span className="text-[10px] font-mono text-muted-foreground font-semibold">
+                          {zone.currentFree}/{zone.totalSpots} sl.
+                        </span>
+                      )}
                     </div>
 
-                    {/* Capacity numbers */}
-                    <div className="grid grid-cols-3 gap-1 text-[11px] text-muted-foreground pt-1 border-t">
+                    {/* Progress Bar of Occupancy */}
+                    <div className="w-full bg-muted/60 h-1.5 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all rounded-full ${
+                          zone.hasDeficit
+                            ? "bg-rose-500"
+                            : fillPercent >= 90
+                            ? "bg-amber-500"
+                            : "bg-primary"
+                        }`}
+                        style={{ width: `${fillPercent}%` }}
+                      />
+                    </div>
+
+                    {/* Mini Sparkline graph across the day */}
+                    <div className="pt-0.5">
+                      <ZoneSparkline
+                        timeline={zone.hourlyTimeline}
+                        totalSpots={zone.totalSpots}
+                        hasDeficit={zone.hasDeficit}
+                        minFree={zone.minFreeToday}
+                      />
+                    </div>
+
+                    {/* Promet and Minimum of the Day */}
+                    <div className="grid grid-cols-3 gap-1 text-[10px] text-muted-foreground pt-1 border-t">
                       <div>
-                        <span className="text-[10px] block">Trenutno:</span>
+                        <span className="block text-[9px]">Trenutno:</span>
                         <span className="font-bold text-foreground">{zone.currentFree} sl.</span>
                       </div>
                       <div>
-                        <span className="text-[10px] block">Kretanje:</span>
+                        <span className="block text-[9px]">Promet:</span>
                         <span className="font-medium text-foreground">
-                          +{zone.plannedLiftsToday} / -{zone.plannedLowersToday}
+                          +{zone.plannedLiftsToday} ↑ / -{zone.plannedLowersToday} ↓
                         </span>
                       </div>
                       <div>
-                        <span className="text-[10px] block">Kraj dana:</span>
+                        <span className="block text-[9px]">Kraj dana:</span>
                         <span className="font-bold text-primary">{zone.endOfDayFree} sl.</span>
                       </div>
                     </div>
 
-                    {/* Progress Bar */}
-                    <div className="space-y-1 pt-1">
-                      <div className="w-full bg-muted/60 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full transition-all rounded-full ${
-                            zone.hasDeficit
-                              ? "bg-rose-500"
-                              : fillPercent > 80
-                              ? "bg-amber-500"
-                              : "bg-primary"
-                          }`}
-                          style={{ width: `${fillPercent}%` }}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span>Zauzetost: {fillPercent}%</span>
-                        <span
-                          className={`font-semibold ${
-                            zone.hasDeficit ? "text-rose-600 font-bold" : "text-muted-foreground"
-                          }`}
-                        >
-                          Min: {zone.minFreeToday} sl. {zone.deficitTime ? `(${zone.deficitTime})` : ""}
-                        </span>
-                      </div>
+                    <div className="flex items-center justify-between text-[9px] text-muted-foreground pt-0.5">
+                      <span>Popunjenost: {fillPercent}%</span>
+                      <span
+                        className={`font-semibold ${
+                          zone.hasDeficit ? "text-rose-600 font-bold" : "text-muted-foreground"
+                        }`}
+                      >
+                        Min: {zone.minFreeToday} sl. {zone.deficitTime ? `(u ${zone.deficitTime})` : ""}
+                      </span>
                     </div>
                   </CardContent>
                 </Card>
@@ -739,120 +739,140 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
         </div>
       </div>
 
-      {/* ─── BOTTOM BAR: End-of-day Operations Conclusion ──────────────── */}
-      <div className="p-4 rounded-2xl bg-card border shadow-sm space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+      {/* ─── F) DONJA USIDRENA TRAKA: ZAKLJUČIVANJE DANA ──────────────────── */}
+      <div className="p-3 rounded-2xl bg-card border shadow-xs space-y-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary">
-              <CheckCheck className="w-5 h-5" />
+            <div className="p-1.5 rounded-xl bg-primary/10 text-primary">
+              <CheckCheck className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-foreground">
-                Zaključivanje operacija na kraju dana
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Jednim klikom zaključite današnje odrađene termine, ažurirajte suhi vez i zatvorite radne naloge.
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-foreground uppercase tracking-tight">
+                  Zaključivanje dana
+                </span>
+                <Badge variant="outline" className="text-[10px] h-4.5 px-1.5 font-bold">
+                  {concludedOps.length}/{scheduledOps.length} potvrđeno
+                </Badge>
+              </div>
+              <p className="text-[11px] text-muted-foreground hidden sm:block">
+                Potvrdom operacija ažurira se stanje suhog veza i zatvaraju radni nalozi.
               </p>
             </div>
           </div>
 
-          <Button
-            size="sm"
-            onClick={() => batchConcludeMutation.mutate({ dateStr: selectedDate })}
-            disabled={batchConcludeMutation.isPending || pendingConclusionOps.length === 0}
-            className="h-8 text-xs gap-1.5"
-          >
-            <CheckCheck className="w-4 h-4" />
-            <span>
-              {batchConcludeMutation.isPending
-                ? "Zaključivanje..."
-                : `Zaključi sve današnje operacije (${pendingConclusionOps.length})`}
-            </span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConcludeDrawerOpen(!concludeDrawerOpen)}
+              className="h-7 text-xs gap-1"
+            >
+              <span>{concludeDrawerOpen ? "Sakrij popis" : "Današnje operacije"}</span>
+              {concludeDrawerOpen ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={() => batchConcludeMutation.mutate({ dateStr: selectedDate })}
+              disabled={batchConcludeMutation.isPending || pendingConclusionOps.length === 0}
+              className="h-7 text-xs gap-1 font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              <CheckCheck className="w-3.5 h-3.5" />
+              <span>
+                {batchConcludeMutation.isPending
+                  ? "Zaključivanje..."
+                  : `Zaključi preostalo (${pendingConclusionOps.length})`}
+              </span>
+            </Button>
+          </div>
         </div>
 
-        {/* Quick individual actions table */}
-        {scheduledOps.length === 0 ? (
-          <div className="py-4 text-center text-xs text-muted-foreground">
-            Nema zakazanih operacija za zaključivanje na današnji datum.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground border-b">
-                  <th className="pb-2 font-medium">Termin</th>
-                  <th className="pb-2 font-medium">Operacija</th>
-                  <th className="pb-2 font-medium">Plovilo</th>
-                  <th className="pb-2 font-medium">Korisnik</th>
-                  <th className="pb-2 font-medium">Dizalica</th>
-                  <th className="pb-2 font-medium">Zona</th>
-                  <th className="pb-2 font-medium">Status</th>
-                  <th className="pb-2 font-medium text-right">Akcija</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {scheduledOps.map((op) => (
-                  <tr key={op.id} className="hover:bg-muted/30">
-                    <td className="py-2.5 font-semibold text-foreground">
-                      {new Date(op.scheduledStart).toLocaleTimeString("hr-HR", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="py-2.5">
-                      <Badge
-                        variant={op.operationCategory === "lift_from_sea" ? "default" : "secondary"}
-                        className="text-[10px]"
-                      >
-                        {op.operationCategory === "lift_from_sea" ? "↑ Podizanje" : "↓ Spuštanje"}
-                      </Badge>
-                    </td>
-                    <td className="py-2.5 font-medium text-foreground">{op.vesselName}</td>
-                    <td className="py-2.5 text-muted-foreground">{op.userName}</td>
-                    <td className="py-2.5 text-muted-foreground">{op.craneName}</td>
-                    <td className="py-2.5 font-medium text-primary">Zona {op.landZoneCode || "—"}</td>
-                    <td className="py-2.5">
-                      <Badge
-                        variant={
-                          op.status === "completed"
-                            ? "default"
-                            : op.status === "not_performed"
-                            ? "destructive"
-                            : "outline"
-                        }
-                        className="text-[10px]"
-                      >
-                        {op.status === "completed"
-                          ? "Odrađeno"
-                          : op.status === "not_performed"
-                          ? "Nije izvedeno"
-                          : "Zakazano"}
-                      </Badge>
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setSelectedOperation(op);
-                          setConcludeDialogOpen(true);
-                        }}
-                        className="h-6 text-[11px] px-2 gap-1"
-                      >
-                        <FileCheck className="w-3 h-3" />
-                        <span>Zaključi</span>
-                      </Button>
-                    </td>
+        {/* Collapsible drawer with individual operations */}
+        {concludeDrawerOpen && (
+          <div className="pt-2 border-t overflow-x-auto">
+            {scheduledOps.length === 0 ? (
+              <div className="py-3 text-center text-xs text-muted-foreground">
+                Nema zakazanih operacija za zaključivanje na današnji datum.
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-muted-foreground border-b text-[11px]">
+                    <th className="pb-1.5 font-medium">Termin</th>
+                    <th className="pb-1.5 font-medium">Operacija</th>
+                    <th className="pb-1.5 font-medium">Plovilo</th>
+                    <th className="pb-1.5 font-medium">Vlasnik</th>
+                    <th className="pb-1.5 font-medium">Dizalica</th>
+                    <th className="pb-1.5 font-medium">Zona</th>
+                    <th className="pb-1.5 font-medium">Status</th>
+                    <th className="pb-1.5 font-medium text-right">Akcija</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y">
+                  {scheduledOps.map((op) => (
+                    <tr key={op.id} className="hover:bg-muted/20">
+                      <td className="py-2 font-semibold text-foreground font-mono">
+                        {toZagreb(new Date(op.scheduledStart)).timeStr}
+                      </td>
+                      <td className="py-2">
+                        <Badge
+                          variant={op.operationCategory === "lift_from_sea" ? "default" : "secondary"}
+                          className="text-[9px] px-1 py-0 h-4 font-bold"
+                        >
+                          {op.operationCategory === "lift_from_sea" ? "↑ Vađenje" : "↓ Spuštanje"}
+                        </Badge>
+                      </td>
+                      <td className="py-2 font-medium text-foreground">{op.vesselName}</td>
+                      <td className="py-2 text-muted-foreground">{op.userName}</td>
+                      <td className="py-2 text-muted-foreground">{op.craneName}</td>
+                      <td className="py-2 font-bold text-primary">Zona {op.landZoneCode || "—"}</td>
+                      <td className="py-2">
+                        <Badge
+                          variant={
+                            op.status === "completed"
+                              ? "default"
+                              : op.status === "not_performed"
+                              ? "destructive"
+                              : "outline"
+                          }
+                          className="text-[9px] px-1 py-0 h-4"
+                        >
+                          {op.status === "completed"
+                            ? "Odrađeno"
+                            : op.status === "not_performed"
+                            ? "Nije izvedeno"
+                            : "Zakazano"}
+                        </Badge>
+                      </td>
+                      <td className="py-2 text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedOperation(op);
+                            setConcludeDialogOpen(true);
+                          }}
+                          className="h-5.5 text-[10px] px-2 gap-1"
+                        >
+                          <FileCheck className="w-3 h-3" />
+                          <span>Zaključi</span>
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </div>
 
-      {/* ─── Modals ──────────────────────────────────────────────────────── */}
+      {/* ─── MODALS ──────────────────────────────────────────────────────── */}
       <WorkStoppageDialog
         open={stoppageDialogOpen}
         onOpenChange={setStoppageDialogOpen}
@@ -876,7 +896,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
         zones={zones}
       />
 
-      {/* Modal: Nova rezervacija / Unos sa suhim vezom */}
+      {/* Modal: Nova rezervacija */}
       <Dialog open={createResOpen} onOpenChange={setCreateResOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -969,6 +989,12 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                     <span>Ručni override timova</span>
                   </div>
                 )}
+                {selectedOperation.isAtRiskOrBroken && (
+                  <div className="flex justify-between text-rose-600 font-semibold">
+                    <span>Upozorenje:</span>
+                    <span>{selectedOperation.conflictReason || "Konflikt operacije"}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -976,7 +1002,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
           <DialogFooter className="flex flex-col sm:flex-row gap-2 pt-2">
             <Button
               variant="outline"
-              className="gap-1.5 text-xs h-9 flex-1"
+              className="gap-1.5 text-xs h-8 flex-1"
               onClick={() => {
                 if (selectedOperation) {
                   setOpActionDialogOpen(false);
@@ -988,7 +1014,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
               <span>Uredi / Premjesti</span>
             </Button>
             <Button
-              className="gap-1.5 text-xs h-9 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+              className="gap-1.5 text-xs h-8 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
               onClick={() => {
                 setOpActionDialogOpen(false);
                 setConcludeDialogOpen(true);

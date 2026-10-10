@@ -69,66 +69,87 @@ export default function AdminLandHub() {
   const zones = overview?.zones || [];
   const cranes = overview?.cranes || [];
 
+  // Query waiting list count for Tab 3 badge
+  const { data: waitingList = [] } = trpc.landWaiting.listAll.useQuery(undefined, {
+    staleTime: 30000,
+  });
+  const waitingCount = waitingList.length;
+
   return (
-    <div className="space-y-4 pb-12">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-3">
+    <div className="space-y-3 pb-8">
+      {/* Top Header according to Dispecher_UI_specifikacija.md Section 2 */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2.5">
         <div className="flex items-center gap-2.5">
           <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
             <Anchor className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
-              {isHr ? "Kopno & Suhi vez — Dispečerski centar" : "Land & Dry Berth Hub"}
+            <h1 className="text-lg md:text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
+              <span>KOPNO I SUHI VEZ</span>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                Dispečerski centar
+              </span>
             </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-[11px] text-muted-foreground mt-0.5">
               {isHr
-                ? "Dnevni raspored dizalica, Available-to-Promise kapacitet zona, 2 tima i lista čekanja"
-                : "Daily crane timeline, Available-to-Promise zone capacity, 2-team dispatch and waiting list"}
+                ? "Dnevni operativni centar dizalica, Available-to-Promise zone, timovi i lista čekanja"
+                : "Daily crane dispatch, Available-to-Promise zones, teams and waiting list"}
             </p>
           </div>
         </div>
       </div>
 
       {/* Master 4 Tabs */}
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-        <TabsList className="bg-muted/60 p-1 rounded-xl border flex flex-wrap h-auto gap-1">
-          {/* Tab 1: Dispečer */}
-          <TabsTrigger
-            value="dispatch"
-            className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
-          >
-            <Cpu className="w-3.5 h-3.5 text-primary" />
-            <span>{isHr ? "Tab 1: Dispečer" : "Tab 1: Dispatch"}</span>
-          </TabsTrigger>
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-3">
+        <div className="flex items-center justify-between border-b pb-1">
+          <TabsList className="bg-muted/50 p-1 rounded-xl border flex flex-wrap h-auto gap-1">
+            {/* Tab 1: Dispečer */}
+            <TabsTrigger
+              value="dispatch"
+              className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
+            >
+              <Cpu className="w-3.5 h-3.5 text-primary" />
+              <span>{isHr ? "Dispečer" : "Dispatch"}</span>
+            </TabsTrigger>
 
-          {/* Tab 2: Zone i zauzeće */}
-          <TabsTrigger
-            value="zones"
-            className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
-          >
-            <LayoutGrid className="w-3.5 h-3.5 text-primary" />
-            <span>{isHr ? "Tab 2: Zone & Suhi vez" : "Tab 2: Zones & Berth"}</span>
-          </TabsTrigger>
+            {/* Tab 2: Zone i zauzeće */}
+            <TabsTrigger
+              value="zones"
+              className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 text-primary" />
+              <span>{isHr ? "Zone i zauzeće" : "Zones & Berth"}</span>
+            </TabsTrigger>
 
-          {/* Tab 3: Lista čekanja */}
-          <TabsTrigger
-            value="waiting"
-            className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
-          >
-            <ListOrdered className="w-3.5 h-3.5 text-primary" />
-            <span>{isHr ? "Tab 3: Lista čekanja" : "Tab 3: Waiting List"}</span>
-          </TabsTrigger>
+            {/* Tab 3: Lista čekanja */}
+            <TabsTrigger
+              value="waiting"
+              className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
+            >
+              <ListOrdered className="w-3.5 h-3.5 text-primary" />
+              <span>{isHr ? "Lista čekanja" : "Waiting List"}</span>
+              {waitingCount > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="ml-1 text-[10px] h-4 px-1.5 font-bold rounded-full"
+                >
+                  {waitingCount}
+                </Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
 
-          {/* Tab 4: Postavke */}
-          <TabsTrigger
-            value="settings"
-            className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
-          >
-            <Sliders className="w-3.5 h-3.5 text-primary" />
-            <span>{isHr ? "Postavke ⚙" : "Settings ⚙"}</span>
-          </TabsTrigger>
-        </TabsList>
+          {/* Tab 4: Postavke (placed on the right) */}
+          <TabsList className="bg-muted/50 p-1 rounded-xl border h-auto">
+            <TabsTrigger
+              value="settings"
+              className="text-xs font-semibold gap-1.5 py-1.5 px-3 data-[state=active]:bg-background data-[state=active]:shadow-xs"
+            >
+              <Sliders className="w-3.5 h-3.5 text-primary" />
+              <span>{isHr ? "⚙ Postavke" : "⚙ Settings"}</span>
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Tab 1: Dispatch Center */}
         <TabsContent value="dispatch" className="m-0 focus-visible:outline-none">
