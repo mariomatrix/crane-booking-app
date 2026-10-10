@@ -1201,43 +1201,58 @@ async function runMigration() {
     }
 
     // ─── Seed: Crane Zone Affinities ─────────────────────────────────
-    const existingAffinities = await db.select().from(craneZoneAffinities);
-    const activeCranes = await db.select().from(cranes);
-    if (existingAffinities.length === 0 && activeCranes.length > 0 && seededZones.length > 0) {
-        console.log("Seeding crane zone affinities...");
-        const zoneMap = new Map(seededZones.map(z => [z.code, z.id]));
-        const affinitiesToInsert: any[] = [];
+    try {
+        const existingAffinities = await db.select().from(craneZoneAffinities);
+        const activeCranes = await db.select().from(cranes);
+        if (existingAffinities.length === 0 && activeCranes.length > 0 && seededZones.length > 0) {
+            console.log("Seeding crane zone affinities...");
+            const zoneMap = new Map(seededZones.map(z => [z.code, z.id]));
+            const affinitiesToInsert: any[] = [];
+            const primaryZonesSet = new Set<string>();
 
-        for (const crane of activeCranes) {
-            const cName = crane.name.toLowerCase();
-            if (cName.includes("travelift")) {
-                if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: true, isBlocked: false });
-                if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: true, isBlocked: false });
-                if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 70, extraTransportMinutes: 8, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 60, extraTransportMinutes: 10, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 50, extraTransportMinutes: 15, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Fizički neprohodno za Travelift" });
-            } else if (cName.includes("stacionarna")) {
-                if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: true, isBlocked: false });
-                if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: true, isBlocked: false });
-                if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 60, extraTransportMinutes: 10, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 40, extraTransportMinutes: 15, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 30, extraTransportMinutes: 20, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Prevelika udaljenost od platoa" });
-            } else {
-                if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: true, isBlocked: false });
-                if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: true, isBlocked: false });
-                if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 80, extraTransportMinutes: 8, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 50, extraTransportMinutes: 15, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 70, extraTransportMinutes: 10, isPrimary: false, isBlocked: false });
-                if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Izvan dohvata male dizalice" });
+            const getIsPrimary = (zoneCode: string, preferred: boolean) => {
+                const zId = zoneMap.get(zoneCode);
+                if (!zId || !preferred) return false;
+                if (primaryZonesSet.has(zId)) return false;
+                primaryZonesSet.add(zId);
+                return true;
+            };
+
+            for (const crane of activeCranes) {
+                const cName = crane.name.toLowerCase();
+                if (cName.includes("travelift")) {
+                    if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: getIsPrimary("LB", true), isBlocked: false, penaltySlots: 0, priority: 1, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: getIsPrimary("A3", true), isBlocked: false, penaltySlots: 0, priority: 1, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 70, extraTransportMinutes: 8, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 2, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 60, extraTransportMinutes: 10, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 2, isAllowed: true, isActive: true });
+                    if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 50, extraTransportMinutes: 15, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 3, isAllowed: true, isActive: true });
+                    if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Fizički neprohodno za Travelift", penaltySlots: 0, priority: 4, isAllowed: false, isActive: true });
+                } else if (cName.includes("stacionarna")) {
+                    if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: getIsPrimary("SZ", true), isBlocked: false, penaltySlots: 0, priority: 1, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: getIsPrimary("A1", true), isBlocked: false, penaltySlots: 0, priority: 1, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 60, extraTransportMinutes: 10, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 2, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 40, extraTransportMinutes: 15, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 3, isAllowed: true, isActive: true });
+                    if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 30, extraTransportMinutes: 20, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 3, isAllowed: true, isActive: true });
+                    if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Prevelika udaljenost od platoa", penaltySlots: 0, priority: 4, isAllowed: false, isActive: true });
+                } else {
+                    if (zoneMap.has("ZO")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("ZO"), affinityScore: 100, extraTransportMinutes: 0, isPrimary: getIsPrimary("ZO", true), isBlocked: false, penaltySlots: 0, priority: 1, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A2")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A2"), affinityScore: 100, extraTransportMinutes: 5, isPrimary: getIsPrimary("A2", true), isBlocked: false, penaltySlots: 0, priority: 1, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A1")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A1"), affinityScore: 80, extraTransportMinutes: 8, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 2, isAllowed: true, isActive: true });
+                    if (zoneMap.has("A3")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("A3"), affinityScore: 50, extraTransportMinutes: 15, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 3, isAllowed: true, isActive: true });
+                    if (zoneMap.has("SZ")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("SZ"), affinityScore: 70, extraTransportMinutes: 10, isPrimary: false, isBlocked: false, penaltySlots: 0, priority: 2, isAllowed: true, isActive: true });
+                    if (zoneMap.has("LB")) affinitiesToInsert.push({ craneId: crane.id, zoneId: zoneMap.get("LB"), affinityScore: 0, extraTransportMinutes: 0, isPrimary: false, isBlocked: true, notes: "Izvan dohvata male dizalice", penaltySlots: 0, priority: 4, isAllowed: false, isActive: true });
+                }
+            }
+
+            if (affinitiesToInsert.length > 0) {
+                for (const aff of affinitiesToInsert) {
+                    await db.insert(craneZoneAffinities).values(aff).onConflictDoNothing();
+                }
+                console.log(`Seeded ${affinitiesToInsert.length} crane zone affinities.`);
             }
         }
-
-        if (affinitiesToInsert.length > 0) {
-            await db.insert(craneZoneAffinities).values(affinitiesToInsert);
-            console.log(`Seeded ${affinitiesToInsert.length} crane zone affinities.`);
-        }
+    } catch (e: any) {
+        console.warn("Crane zone affinities seed warning:", e?.message || e);
     }
 
     // ─── Seed: Admin Users ───────────────────────────────────────────
