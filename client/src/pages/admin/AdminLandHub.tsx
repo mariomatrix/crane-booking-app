@@ -85,15 +85,15 @@ export default function AdminLandHub() {
           </div>
           <div>
             <h1 className="text-lg md:text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-              <span>KOPNO I SUHI VEZ</span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
-                Dispečerski centar
+              <span>DISPEČERSKI CENTAR</span>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                Riva & Kopno
               </span>
             </h1>
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {isHr
-                ? "Dnevni operativni centar dizalica, Available-to-Promise zone, timovi i lista čekanja"
-                : "Daily crane dispatch, Available-to-Promise zones, teams and waiting list"}
+                ? "Središnji dnevni operativni centar dizalica, zone suhog veza (SZ, A1-A3, ZO, LB), operativni raspored i lista čekanja"
+                : "Central daily crane dispatch board, dry berth zones (SZ, A1-A3, ZO, LB), operational schedule and waitlist"}
             </p>
           </div>
         </div>

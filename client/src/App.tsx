@@ -72,6 +72,12 @@ function Router() {
 
       {/* Admin routes */}
       <Route path="/admin">
+        <RedirectTo to="/admin/land-hub" />
+      </Route>
+      <Route path="/admin/dispatch">
+        <RedirectTo to="/admin/land-hub" />
+      </Route>
+      <Route path="/admin/dashboard">
         <AdminLayout><AdminDashboard /></AdminLayout>
       </Route>
       <Route path="/admin/reservations">

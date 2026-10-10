@@ -172,14 +172,14 @@ function DashboardLayoutContent({
   ].filter(item => !(isOperator && (item as any).adminOnly));
 
   const mainMenuItems = [
+    { icon: Anchor, label: lang === "hr" ? "Dispečerski centar" : "Dispatch Center", path: "/admin/land-hub" },
     { icon: CalendarDays, label: t.nav.calendar, path: "/admin/calendar" },
     { icon: CalendarCheck, label: lang === "hr" ? "Dnevne operacije" : "Daily Operations", path: "/admin/daily-operations" },
     { icon: Compass, label: lang === "hr" ? "Akvatorij i vezovi" : "Berths & Basin", path: "/admin/akvatorij" },
-    { icon: Home, label: t.admin.dashboard, path: "/admin" },
     { icon: ClipboardList, label: t.admin.reservations, path: "/admin/reservations" },
     { icon: FileText, label: lang === "hr" ? "Radni nalozi" : "Work Orders", path: "/admin/work-orders" },
     { icon: Receipt, label: lang === "hr" ? "Računi & e-Računi" : "Invoices & e-Billing", path: "/admin/invoices" },
-    { icon: Anchor, label: lang === "hr" ? "Kopno & Suhi vez" : "Land & Dry Berths", path: "/admin/land-hub" },
+    { icon: Home, label: t.admin.dashboard, path: "/admin/dashboard" },
     { icon: History, label: lang === "hr" ? "Rad dizalica" : "Crane Logs", path: "/admin/crane-ops" },
     { icon: Users, label: lang === "hr" ? "Korisnici i plovila" : "Clients & Vessels", path: "/admin/users", adminOnly: true },
     { icon: BarChart3, label: t.admin.analytics, path: "/admin/analytics" },
@@ -203,7 +203,9 @@ function DashboardLayoutContent({
   const isCollapsed = state === "collapsed";
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const activeMenuItem = [...mainMenuItems, ...programSubItems].find((item) => item.path === location);
+  const activeMenuItem = [...mainMenuItems, ...programSubItems].find(
+    (item) => item.path === location || (item.path === "/admin/land-hub" && (location === "/admin" || location === "/admin/dispatch" || location.startsWith("/admin/land-hub")))
+  );
   const isMobile = useIsMobile();
 
   // Unread messages polling (30s)
@@ -304,7 +306,9 @@ function DashboardLayoutContent({
                   (item.path === "/admin/land-hub" &&
                     (location.startsWith("/admin/land-hub") ||
                       location.startsWith("/admin/land-zones") ||
-                      location.startsWith("/admin/land-waiting")));
+                      location.startsWith("/admin/land-waiting") ||
+                      location === "/admin" ||
+                      location === "/admin/dispatch"));
                 return (
                   <SidebarMenuItem key={item.path}>
                     <SidebarMenuButton
