@@ -234,6 +234,10 @@ async function runMigration() {
             ON "crane_zone_affinities" ("zone_id") 
             WHERE is_primary = true
         `;
+        await migrationClient`ALTER TABLE "crane_zone_affinities" ADD COLUMN IF NOT EXISTS "penalty_slots" integer DEFAULT 0 NOT NULL`;
+        await migrationClient`ALTER TABLE "crane_zone_affinities" ADD COLUMN IF NOT EXISTS "priority" integer DEFAULT 1 NOT NULL`;
+        await migrationClient`ALTER TABLE "crane_zone_affinities" ADD COLUMN IF NOT EXISTS "is_allowed" boolean DEFAULT true NOT NULL`;
+        await migrationClient`ALTER TABLE "crane_zone_affinities" ADD COLUMN IF NOT EXISTS "is_active" boolean DEFAULT true NOT NULL`;
 
         console.log("Land spots, allocations, turnarounds & affinities verified.");
     } catch (e: any) {
@@ -274,6 +278,105 @@ async function runMigration() {
         console.log("land_waiting_list table verified.");
     } catch (e: any) {
         console.warn("land_waiting_list table verification warning:", e?.message || e);
+    }
+
+    // ─── Dispatch v3.2 Extensions: Enums, Reservations, Offers, Stoppages, Dependencies ───
+    try {
+        await migrationClient`
+            DO $$ BEGIN
+                ALTER TYPE reservation_status ADD VALUE IF NOT EXISTS 'not_performed';
+            EXCEPTION WHEN duplicate_object THEN null;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'work_stoppage_scope') THEN
+                    CREATE TYPE work_stoppage_scope AS ENUM ('all_cranes', 'single_crane', 'single_zone');
+                END IF;
+            END $$;
+        `;
+        await migrationClient`
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'waiting_offer_status') THEN
+                    CREATE TYPE waiting_offer_status AS ENUM ('pending', 'accepted', 'declined', 'expired', 'cancelled');
+                END IF;
+            END $$;
+        `;
+
+        await migrationClient`ALTER TABLE "reservations" ADD COLUMN IF NOT EXISTS "requested_zone_id" uuid REFERENCES "land_zones"("id")`;
+        await migrationClient`ALTER TABLE "reservations" ADD COLUMN IF NOT EXISTS "space_units" integer DEFAULT 1 NOT NULL`;
+        await migrationClient`ALTER TABLE "reservations" ADD COLUMN IF NOT EXISTS "team_override" boolean DEFAULT false NOT NULL`;
+        await migrationClient`ALTER TABLE "reservations" ADD COLUMN IF NOT EXISTS "team_override_reason" text`;
+        await migrationClient`ALTER TABLE "reservations" ADD COLUMN IF NOT EXISTS "not_performed_reason" text`;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "waiting_offers" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "waiting_list_id" uuid NOT NULL REFERENCES "land_waiting_list"("id") ON DELETE CASCADE,
+                "vessel_id" uuid NOT NULL REFERENCES "vessels"("id") ON DELETE CASCADE,
+                "zone_id" uuid NOT NULL REFERENCES "land_zones"("id") ON DELETE RESTRICT,
+                "crane_id" uuid NOT NULL REFERENCES "cranes"("id") ON DELETE RESTRICT,
+                "offered_start" timestamp with time zone NOT NULL,
+                "offered_end" timestamp with time zone NOT NULL,
+                "expires_at" timestamp with time zone NOT NULL,
+                "status" "public"."waiting_offer_status" DEFAULT 'pending' NOT NULL,
+                "decline_reason" text,
+                "reservation_id" uuid REFERENCES "reservations"("id") ON DELETE SET NULL,
+                "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "waiting_offers_wl_idx" ON "waiting_offers"("waiting_list_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "waiting_offers_status_idx" ON "waiting_offers"("status")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "waiting_offers_expires_at_idx" ON "waiting_offers"("expires_at")`;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "operation_dependencies" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "predecessor_reservation_id" uuid NOT NULL REFERENCES "reservations"("id") ON DELETE CASCADE,
+                "successor_reservation_id" uuid NOT NULL REFERENCES "reservations"("id") ON DELETE CASCADE,
+                "dependency_type" varchar(50) DEFAULT 'capacity_release' NOT NULL,
+                "minimum_gap_minutes" integer DEFAULT 0 NOT NULL,
+                "status" varchar(20) DEFAULT 'active' NOT NULL,
+                "note" text,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`ALTER TABLE "operation_dependencies" ADD COLUMN IF NOT EXISTS "dependency_type" varchar(50) DEFAULT 'capacity_release' NOT NULL`;
+        await migrationClient`ALTER TABLE "operation_dependencies" ADD COLUMN IF NOT EXISTS "minimum_gap_minutes" integer DEFAULT 0 NOT NULL`;
+        await migrationClient`ALTER TABLE "operation_dependencies" ADD COLUMN IF NOT EXISTS "status" varchar(20) DEFAULT 'active' NOT NULL`;
+        await migrationClient`ALTER TABLE "operation_dependencies" ADD COLUMN IF NOT EXISTS "note" text`;
+        await migrationClient`ALTER TABLE "operation_dependencies" ADD COLUMN IF NOT EXISTS "updated_at" timestamp with time zone DEFAULT now() NOT NULL`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "op_dep_predecessor_idx" ON "operation_dependencies"("predecessor_reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "op_dep_successor_idx" ON "operation_dependencies"("successor_reservation_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "op_dep_status_idx" ON "operation_dependencies"("status")`;
+
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "work_stoppages" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "scope" "public"."work_stoppage_scope" DEFAULT 'all_cranes' NOT NULL,
+                "crane_id" uuid REFERENCES "cranes"("id") ON DELETE CASCADE,
+                "zone_id" uuid REFERENCES "land_zones"("id") ON DELETE CASCADE,
+                "starts_at" timestamp with time zone NOT NULL,
+                "ends_at" timestamp with time zone,
+                "reason" varchar(100) NOT NULL,
+                "note" text,
+                "created_by" uuid REFERENCES "users"("id") ON DELETE SET NULL,
+                "is_active" boolean DEFAULT true NOT NULL,
+                "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+                "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_stoppages_starts_at_idx" ON "work_stoppages"("starts_at")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_stoppages_crane_id_idx" ON "work_stoppages"("crane_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_stoppages_zone_id_idx" ON "work_stoppages"("zone_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "work_stoppages_is_active_idx" ON "work_stoppages"("is_active")`;
+
+        console.log("Dispatch v3.2 extensions verified (offers, stoppages, affinities, dependencies).");
+    } catch (e: any) {
+        console.warn("Dispatch v3.2 extensions warning:", e?.message || e);
     }
 
     try {
