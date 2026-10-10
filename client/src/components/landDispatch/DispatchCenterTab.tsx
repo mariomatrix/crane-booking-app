@@ -403,9 +403,9 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
       )}
 
       {/* ─── C + D + E) 3-STUPČANI DISPEČERSKI GRID ───────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-[300px_1fr_320px] gap-3 items-start">
-        {/* ─── C) LIJEVI STUPAC: ZAHTJEVI (300px) ───────────────────────── */}
-        <div className="lg:col-span-4 xl:col-span-1 space-y-2.5">
+      <div className="grid grid-cols-1 lg:grid-cols-[290px_1fr_300px] xl:grid-cols-[300px_1fr_320px] gap-3 items-start">
+        {/* ─── C) LIJEVI STUPAC: ZAHTJEVI (290-300px) ────────────────────── */}
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold tracking-tight text-foreground uppercase">
@@ -596,8 +596,8 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
           </div>
         </div>
 
-        {/* ─── D) SREDNJI STUPAC: GANTT RASPORED DIZALICA (1fr) ───────────── */}
-        <div className="lg:col-span-8 xl:col-span-1 h-[680px]">
+        {/* ─── D) SREDNJI STUPAC: RASPORED DIZALICA (1fr) ───────────────── */}
+        <div className="h-[680px]">
           <DispatchGanttTimeline
             selectedDate={selectedDate}
             timeSlots={timeSlots}
@@ -615,8 +615,8 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
           />
         </div>
 
-        {/* ─── E) DESNI STUPAC: ZONE I ZAUZEĆE (320px) ────────────────────── */}
-        <div className="lg:col-span-12 xl:col-span-1 space-y-2.5">
+        {/* ─── E) DESNI STUPAC: ZONE I ZAUZEĆE (300-320px) ────────────────── */}
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <h2 className="text-xs font-bold tracking-tight text-foreground uppercase">
