@@ -180,15 +180,18 @@ export class LandDispatchService {
         serviceTypeId: reservations.serviceTypeId,
         serviceTypeName: serviceTypes.name,
         operationCategory: serviceTypes.operationCategory,
+        defaultDurationMin: serviceTypes.defaultDurationMin,
+        durationMin: reservations.durationMin,
         craneId: reservations.craneId,
         craneName: cranes.name,
         landZoneId: reservations.landZoneId,
         requestedZoneId: reservations.requestedZoneId,
+
         scheduledStart: reservations.scheduledStart,
         scheduledEnd: reservations.scheduledEnd,
         requestedDate: reservations.requestedDate,
         requestedTimeSlot: reservations.requestedTimeSlot,
-        durationMin: reservations.durationMin,
+
         status: reservations.status,
         teamOverride: reservations.teamOverride,
         teamOverrideReason: reservations.teamOverrideReason,
@@ -226,6 +229,11 @@ export class LandDispatchService {
       serviceTypeName: r.serviceTypeName || "Usluga",
       operationCategory: (r.operationCategory as OperationCategory) || "other",
       durationMin: Number(r.durationMin) || 30,
+      scheduledEnd: r.scheduledStart
+        ? (r.scheduledEnd && new Date(r.scheduledEnd).getTime() >= new Date(r.scheduledStart).getTime() + (Number(r.durationMin) || 30) * 60000
+            ? r.scheduledEnd
+            : new Date(new Date(r.scheduledStart).getTime() + (Number(r.durationMin) || 30) * 60000))
+        : r.scheduledEnd,
     }));
 
     // 5. Active stoppages
@@ -334,6 +342,8 @@ export class LandDispatchService {
           landZoneName: zone?.name || null,
           scheduledStart: new Date(r.scheduledStart!).toISOString(),
           scheduledEnd: new Date(r.scheduledEnd!).toISOString(),
+          durationMin: r.durationMin,
+          adminNote: r.adminNote,
           status: r.status,
           teamOverride: r.teamOverride,
           teamOverrideReason: r.teamOverrideReason,
@@ -501,8 +511,8 @@ export class LandDispatchService {
       const activeInSlot = scheduledOperations.filter((op) => {
         const start = new Date(op.scheduledStart);
         const end = new Date(op.scheduledEnd);
-        const opStartMins = start.getHours() * 60 + start.getMinutes();
-        const opEndMins = end.getHours() * 60 + end.getMinutes();
+        const opStartMins = toZagreb(start).hours * 60 + toZagreb(start).minutes;
+        const opEndMins = toZagreb(end).hours * 60 + toZagreb(end).minutes;
         return slotMins < opEndMins && slotEndMins > opStartMins;
       });
 
@@ -565,7 +575,10 @@ export class LandDispatchService {
         vesselBeamM: reservations.vesselBeamM,
         vesselLengthM: reservations.vesselLengthM,
         operationCategory: serviceTypes.operationCategory,
+        defaultDurationMin: serviceTypes.defaultDurationMin,
+        durationMin: reservations.durationMin,
         requestedZoneId: reservations.requestedZoneId,
+
       })
       .from(reservations)
       .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
@@ -594,11 +607,12 @@ export class LandDispatchService {
 
       for (const slot of overview.timeSlots) {
         const [hStr, mStr] = slot.split(":");
-        const slotStart = new Date(`${params.dateStr}T${hStr}:${mStr}:00Z`);
-        const slotEnd = new Date(slotStart.getTime() + 30 * 60 * 1000);
+        const slotStart = fromZagreb(params.dateStr, slot);
+        const reqDurMin = Number(res.durationMin) || Number(res.defaultDurationMin) || 30;
+        const slotEnd = new Date(slotStart.getTime() + reqDurMin * 60 * 1000);
         const endHourStr = slotEnd.getUTCHours().toString().padStart(2, "0");
         const endMinStr = slotEnd.getUTCMinutes().toString().padStart(2, "0");
-        const endSlotStr = `${endHourStr}:${endMinStr}`;
+        const endSlotStr = toZagreb(slotEnd).timeStr;
 
         const zoneTimelineItem = targetZone.hourlyTimeline.find((t) => t.time === slot);
         const freeAtSlot = zoneTimelineItem ? zoneTimelineItem.free : targetZone.currentFree;
@@ -788,9 +802,11 @@ export class LandDispatchService {
         craneId: reservations.craneId,
         landZoneId: reservations.landZoneId,
         operationCategory: serviceTypes.operationCategory,
+        defaultDurationMin: serviceTypes.defaultDurationMin,
+        durationMin: reservations.durationMin,
         scheduledStart: reservations.scheduledStart,
         scheduledEnd: reservations.scheduledEnd,
-        durationMin: reservations.durationMin,
+
       })
       .from(reservations)
       .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))

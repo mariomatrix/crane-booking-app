@@ -3,15 +3,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Users,
-  Anchor,
   Clock,
   Link as LinkIcon,
-  AlertTriangle,
   AlertOctagon,
-  Wind,
   CheckCircle2,
-  Sparkles,
-  Ship,
 } from "lucide-react";
 import { toZagreb } from "@shared/timezone";
 import {
@@ -41,6 +36,17 @@ interface DispatchGanttTimelineProps {
   onSelectOperation: (op: DispatchReservationItem) => void;
 }
 
+const SLOT_HEIGHT_PX = 60;
+
+const STATUS_COLORS: Record<string, string> = {
+  pending: "#f59e0b",     // Amber (Na čekanju)
+  approved: "#059669",    // Emerald 600 (Odobreno)
+  in_progress: "#8b5cf6", // Violet 500 (U tijeku)
+  completed: "#2563eb",   // Blue 600 (Završeno)
+  rejected: "#dc2626",    // Red 600 (Odbijeno)
+  cancelled: "#64748b",   // Slate 500 (Otkazano)
+};
+
 function parseSlotMinutes(slotStr: string): number {
   if (!slotStr) return 0;
   const [h, m] = slotStr.split(":").map(Number);
@@ -54,6 +60,35 @@ function getOpMinutes(iso: string): number {
   } catch {
     return 0;
   }
+}
+
+function getOpBounds(op: DispatchReservationItem): {
+  startMins: number;
+  endMins: number;
+  durationMins: number;
+  startTimeStr: string;
+  endTimeStr: string;
+} {
+  const startDate = new Date(op.scheduledStart);
+  const startZ = toZagreb(startDate);
+  const startMins = startZ.hours * 60 + startZ.minutes;
+
+  const rawEndMins = op.scheduledEnd ? getOpMinutes(op.scheduledEnd) : 0;
+  const explicitDur = op.durationMin && op.durationMin > 0 ? op.durationMin : 0;
+  const computedDur = rawEndMins > startMins ? rawEndMins - startMins : 30;
+  const durationMins = Math.max(30, explicitDur, computedDur);
+  const endMins = startMins + durationMins;
+
+  const endDate = new Date(startDate.getTime() + durationMins * 60000);
+  const endZ = toZagreb(endDate);
+
+  return {
+    startMins,
+    endMins,
+    durationMins,
+    startTimeStr: startZ.timeStr,
+    endTimeStr: endZ.timeStr,
+  };
 }
 
 export function DispatchGanttTimeline({
@@ -110,6 +145,17 @@ export function DispatchGanttTimeline({
     });
   };
 
+  const activeOps = useMemo(
+    () =>
+      scheduledOps.filter(
+        (op) =>
+          op.status !== "cancelled" &&
+          op.status !== "not_performed" &&
+          op.status !== "rejected"
+      ),
+    [scheduledOps]
+  );
+
   return (
     <div className="rounded-2xl border bg-card flex flex-col overflow-hidden shadow-xs h-full">
       {/* ─── Header: Naslov + Filter zone ─────────────────────────────── */}
@@ -147,7 +193,7 @@ export function DispatchGanttTimeline({
         <div className="w-full text-xs">
           {/* ─── Table Header: Dizalice kao kolone ──────────────────────── */}
           <div
-            className="grid border-b bg-muted/30 sticky top-0 z-20 shadow-2xs divide-x"
+            className="grid border-b bg-muted/30 sticky top-0 z-30 shadow-2xs divide-x"
             style={{
               gridTemplateColumns: `95px repeat(${cranes.length || 3}, 1fr)`,
             }}
@@ -156,7 +202,7 @@ export function DispatchGanttTimeline({
             <div className="p-2.5 text-center font-bold text-muted-foreground flex flex-col items-center justify-center bg-muted/40">
               <span className="text-[11px] uppercase tracking-wider block">Vrijeme</span>
               <span className="text-[9px] text-muted-foreground font-normal flex items-center gap-0.5 mt-0.5">
-                <Users className="w-2.5 h-2.5" /> Timovi (2 max)
+                <Users className="w-2.5 h-2.5" /> Timovi ({maxTeams} max)
               </span>
             </div>
 
@@ -185,17 +231,15 @@ export function DispatchGanttTimeline({
           </div>
 
           {/* ─── Table Body: Redovi po vremenskim slotovima (07:00–15:00) ─── */}
-          <div className="divide-y relative">
+          <div className="relative">
             {slots.map((slot, slotIdx) => {
               const slotMins = parseSlotMinutes(slot);
               const slotEndMins = slotMins + 30;
 
               // Prebroj operacije koje se odvijaju u ovom slotu preko svih dizalica (kapacitet timova)
-              const allActiveInSlot = scheduledOps.filter((op) => {
-                if (op.status === "cancelled" || op.status === "not_performed") return false;
-                const opStart = getOpMinutes(op.scheduledStart);
-                const opEnd = getOpMinutes(op.scheduledEnd);
-                return slotMins < opEnd && slotEndMins > opStart;
+              const allActiveInSlot = activeOps.filter((op) => {
+                const { startMins, endMins } = getOpBounds(op);
+                return slotMins < endMins && slotEndMins > startMins;
               });
 
               const teamsUsed = allActiveInSlot.length;
@@ -206,7 +250,7 @@ export function DispatchGanttTimeline({
               return (
                 <div
                   key={slot}
-                  className={`grid divide-x transition-colors relative min-h-[58px] ${
+                  className={`grid divide-x transition-colors relative ${
                     isOverTeams
                       ? "bg-rose-500/5 hover:bg-rose-500/10"
                       : isPeakTeams
@@ -214,11 +258,16 @@ export function DispatchGanttTimeline({
                       : "hover:bg-muted/15"
                   }`}
                   style={{
+                    height: `${SLOT_HEIGHT_PX}px`,
                     gridTemplateColumns: `95px repeat(${cranes.length || 3}, 1fr)`,
                   }}
                 >
                   {/* Kolona 1: Vrijeme & Broj timova */}
-                  <div className="p-1.5 flex flex-col items-center justify-center bg-muted/20 text-center select-none">
+                  <div
+                    className={`p-1.5 flex flex-col items-center justify-center bg-muted/20 text-center select-none border-b ${
+                      isCurrentHour ? "ring-1 ring-inset ring-primary/40 bg-primary/5" : ""
+                    }`}
+                  >
                     <span
                       className={`font-mono text-xs ${
                         slot.endsWith(":00")
@@ -256,28 +305,84 @@ export function DispatchGanttTimeline({
                     const stoppage = isStoppageInSlot(crane.id, slot);
 
                     // Pronađi operaciju koja pokriva ovaj slot na ovoj dizalici
-                    const opInSlot = scheduledOps.find((op) => {
+                    const opInSlot = activeOps.find((op) => {
                       if (op.craneId !== crane.id) return false;
-                      if (op.status === "cancelled" || op.status === "not_performed") return false;
-                      const opStart = getOpMinutes(op.scheduledStart);
-                      const opEnd = getOpMinutes(op.scheduledEnd);
-                      return slotMins >= opStart && slotMins < opEnd;
+                      const { startMins, endMins } = getOpBounds(op);
+                      return slotMins < endMins && slotEndMins > startMins;
                     });
 
-                    // Je li ovo početni slot operacije?
-                    const isStartSlot =
-                      opInSlot &&
-                      slotMins === getOpMinutes(opInSlot.scheduledStart);
+                    let isStartSlot = false;
+                    let spanSlots = 1;
+                    let continuesIntoNextSlot = false;
+                    let opBounds: ReturnType<typeof getOpBounds> | null = null;
+
+                    if (opInSlot) {
+                      opBounds = getOpBounds(opInSlot);
+                      const firstOverlappingSlotIdx = slots.findIndex((s) => {
+                        const sMins = parseSlotMinutes(s);
+                        return opBounds!.startMins < sMins + 30 && opBounds!.endMins > sMins;
+                      });
+                      isStartSlot = slotIdx === firstOverlappingSlotIdx;
+
+                      if (isStartSlot) {
+                        const coveredCount = slots.filter((s, idx) => {
+                          if (idx < firstOverlappingSlotIdx) return false;
+                          const sMins = parseSlotMinutes(s);
+                          return opBounds!.startMins < sMins + 30 && opBounds!.endMins > sMins;
+                        }).length;
+                        spanSlots = Math.max(1, coveredCount);
+                      }
+
+                      const nextSlotStr = slots[slotIdx + 1];
+                      if (nextSlotStr) {
+                        const nextSlotMins = parseSlotMinutes(nextSlotStr);
+                        continuesIntoNextSlot = opBounds.endMins > nextSlotMins;
+                      }
+                    }
 
                     const isDimmed =
                       zoneFilterId !== null &&
                       opInSlot &&
                       opInSlot.landZoneId !== zoneFilterId;
 
+                    const isMaintenance = opInSlot?.operationCategory === "maintenance";
+                    const statusColor = opInSlot
+                      ? isMaintenance
+                        ? "#f97316"
+                        : STATUS_COLORS[opInSlot.status] ?? "#059669"
+                      : "#059669";
+
+                    // Formatiranje registracije i smjera zone kao u ekranu Kalendar (AdminCalendar.tsx)
+                    const reg =
+                      opInSlot?.vesselRegistration ||
+                      (opInSlot?.vesselName && opInSlot.vesselName !== "Plovilo"
+                        ? opInSlot.vesselName
+                        : "Plovilo");
+                    let zoneDirection = "";
+                    if (opInSlot?.landZoneCode) {
+                      if (opInSlot.operationCategory === "lift_from_sea") {
+                        zoneDirection = `➡️ ${opInSlot.landZoneCode}`;
+                      } else if (opInSlot.operationCategory === "lower_to_sea") {
+                        zoneDirection = `⬅️ ${opInSlot.landZoneCode}`;
+                      } else {
+                        zoneDirection = opInSlot.landZoneCode;
+                      }
+                    }
+                    const details = [
+                      reg,
+                      zoneDirection,
+                      opInSlot?.vesselWeightTons ? `${opInSlot.vesselWeightTons} t` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" • ");
+
                     return (
                       <div
                         key={crane.id}
-                        className="p-1 relative flex items-center justify-center min-h-[58px]"
+                        className={`p-1 relative flex items-center justify-center ${
+                          continuesIntoNextSlot ? "" : "border-b"
+                        }`}
+                        style={{ height: `${SLOT_HEIGHT_PX}px` }}
                       >
                         {/* Ako je obustava rada na ovoj dizalici */}
                         {stoppage ? (
@@ -290,88 +395,99 @@ export function DispatchGanttTimeline({
                           >
                             <span>⛔ Obustava ({stoppage.reason})</span>
                           </div>
-                        ) : opInSlot ? (
-                          /* Kartica operacije */
+                        ) : opInSlot && isStartSlot && opBounds ? (
+                          /* Jedinstvena kartica operacije koja se proteže kroz sve svoje 30-min slotove (kao u ekranu Kalendar) */
                           <div
                             onClick={() => onSelectOperation(opInSlot)}
-                            className={`w-full h-full p-1.5 rounded-lg border text-left cursor-pointer transition-all hover:shadow-md flex flex-col justify-between ${
-                              isDimmed
-                                ? "opacity-20 grayscale-[50%]"
-                                : opInSlot.isAtRiskOrBroken
-                                ? "bg-rose-500/20 border-rose-500 text-rose-950 dark:text-rose-100 ring-1 ring-rose-500"
-                                : opInSlot.operationCategory === "lift_from_sea"
-                                ? "bg-blue-500/15 border-blue-500/50 text-blue-950 dark:text-blue-100 hover:bg-blue-500/25"
-                                : opInSlot.operationCategory === "maintenance"
-                                ? "bg-zinc-500/20 border-zinc-500/50 text-zinc-900 dark:text-zinc-200 border-dashed"
-                                : "bg-emerald-500/15 border-emerald-500/50 text-emerald-950 dark:text-emerald-100 hover:bg-emerald-500/25"
+                            style={{
+                              backgroundColor: statusColor,
+                              top: "3px",
+                              left: "4px",
+                              right: "4px",
+                              height: `${spanSlots * SLOT_HEIGHT_PX - 6}px`,
+                            }}
+                            className={`absolute z-10 hover:z-20 py-1 px-2 rounded-md text-white text-left cursor-pointer transition-all shadow-sm hover:shadow-md hover:scale-[1.01] flex flex-col justify-between overflow-hidden leading-tight ${
+                              isDimmed ? "opacity-25 grayscale-[50%]" : ""
+                            } ${
+                              opInSlot.isAtRiskOrBroken
+                                ? "ring-2 ring-rose-500 ring-offset-1"
+                                : ""
                             }`}
                           >
-                            {/* Gornji red: Smjer + Registracija / Naziv plovila + Zona */}
-                            <div className="flex items-center justify-between gap-1 overflow-hidden">
-                              <div className="flex items-center gap-1 overflow-hidden">
-                                <span
-                                  className={`text-xs font-black shrink-0 ${
-                                    opInSlot.operationCategory === "lift_from_sea"
-                                      ? "text-blue-600 dark:text-blue-400"
-                                      : "text-emerald-600 dark:text-emerald-400"
-                                  }`}
-                                >
-                                  {opInSlot.operationCategory === "lift_from_sea" ? "↑" : "↓"}
-                                </span>
-                                {opInSlot.vesselRegistration ? (
-                                  <span className="font-mono font-bold text-[10px] px-1 py-0 rounded bg-background/80 border border-foreground/15 shrink-0">
-                                    {opInSlot.vesselRegistration}
+                            <div className="space-y-0.5 overflow-hidden">
+                              {/* 1. Red: Korisnik + Vrijeme/Status (identično AdminCalendar + indikatori) */}
+                              <div className="flex items-center justify-between gap-1 font-bold text-[11px] truncate">
+                                <span className="truncate">{opInSlot.userName}</span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <span className="text-[9.5px] font-mono font-semibold bg-black/20 px-1 py-0.2 rounded">
+                                    {opBounds.startTimeStr}–{opBounds.endTimeStr}
                                   </span>
-                                ) : null}
-                                <span className="font-bold text-[11px] truncate block leading-tight">
-                                  {opInSlot.vesselName && opInSlot.vesselName !== "Plovilo"
-                                    ? opInSlot.vesselName
-                                    : !opInSlot.vesselRegistration
-                                    ? "Plovilo"
-                                    : ""}
-                                  {!isStartSlot && " (nastavak)"}
-                                </span>
+                                  {opInSlot.status === "pending" && (
+                                    <Clock className="h-3 w-3 animate-pulse shrink-0" />
+                                  )}
+                                  {opInSlot.status === "completed" && (
+                                    <CheckCircle2 className="h-3 w-3 shrink-0 text-white/95" />
+                                  )}
+                                </div>
                               </div>
 
-                              {opInSlot.landZoneCode && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] px-1 py-0 h-4 font-mono font-bold shrink-0 border-current bg-background/60"
-                                >
-                                  {opInSlot.landZoneCode}
-                                </Badge>
+                              {/* 2. Red: Vrsta usluge */}
+                              {opInSlot.serviceTypeName && (
+                                <div className="text-[10px] font-semibold opacity-95 truncate">
+                                  {opInSlot.serviceTypeName}
+                                </div>
+                              )}
+
+                              {/* 3. Red: Registracija • Smjer i zona • Tonaža */}
+                              {details && (
+                                <div className="text-[10px] font-medium opacity-90 truncate">
+                                  {details}
+                                </div>
+                              )}
+
+                              {/* 4. Red: Napomena (ako postoji i ima prostora) */}
+                              {opInSlot.adminNote && (
+                                <div className="text-[9.5px] italic opacity-85 truncate">
+                                  📝 {opInSlot.adminNote}
+                                </div>
                               )}
                             </div>
 
-                            {/* Donji red: Vlasnik / dimenzije + Ikone ovisnosti */}
-                            <div className="flex items-center justify-between text-[9px] text-muted-foreground mt-0.5 leading-none">
-                              <span className="truncate max-w-[120px] block">
-                                {opInSlot.userName}
-                                {opInSlot.vesselLengthM ? ` (${opInSlot.vesselLengthM}m)` : ""}
-                              </span>
-
-                              <div className="flex items-center gap-1 shrink-0">
+                            {/* Donji red: Indikatori dispečerskog centra (override, ovisnosti, konflikt) */}
+                            {(opInSlot.teamOverride ||
+                              opInSlot.dependencies.length > 0 ||
+                              opInSlot.isAtRiskOrBroken) && (
+                              <div className="flex items-center justify-end gap-1 pt-0.5 border-t border-white/20 text-[9px] shrink-0">
                                 {opInSlot.teamOverride && (
                                   <span
-                                    className="text-amber-600 dark:text-amber-400 font-bold"
+                                    className="bg-amber-300 text-amber-950 px-1 rounded font-bold"
                                     title="Ručni override posade"
                                   >
                                     ★ Ovrd
                                   </span>
                                 )}
                                 {opInSlot.dependencies.length > 0 && (
-                                  <span title="Rotacijska ovisnost (oslobađanje mjesta)">
-                                    <LinkIcon className="w-2.5 h-2.5 text-primary" />
+                                  <span
+                                    className="bg-white/20 p-0.5 rounded"
+                                    title="Rotacijska ovisnost (oslobađanje mjesta)"
+                                  >
+                                    <LinkIcon className="w-2.5 h-2.5 text-white" />
                                   </span>
                                 )}
                                 {opInSlot.isAtRiskOrBroken && (
-                                  <span title={opInSlot.conflictReason || "Konflikt operacije"}>
-                                    <AlertOctagon className="w-2.5 h-2.5 text-rose-600" />
+                                  <span
+                                    className="bg-rose-600 p-0.5 rounded"
+                                    title={opInSlot.conflictReason || "Konflikt operacije"}
+                                  >
+                                    <AlertOctagon className="w-2.5 h-2.5 text-white" />
                                   </span>
                                 )}
                               </div>
-                            </div>
+                            )}
                           </div>
+                        ) : opInSlot ? (
+                          /* Nastavak višesatne/60-min operacije — pokriveno jedinstvenom karticom iz početnog slota */
+                          null
                         ) : (
                           /* Prazan slot */
                           <span className="text-[10px] text-muted-foreground/25 font-mono select-none">

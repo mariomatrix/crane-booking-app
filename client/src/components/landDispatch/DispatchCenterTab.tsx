@@ -124,8 +124,11 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
       landZoneId: op.landZoneId,
       scheduledStart: new Date(op.scheduledStart),
       scheduledEnd: new Date(op.scheduledEnd),
+      vesselRegistration: op.vesselRegistration,
+      adminNote: op.adminNote,
+      serviceType: { id: op.serviceTypeId, name: op.serviceTypeName, operationCategory: op.operationCategory },
       durationMin: Math.max(
-        30,
+        op.durationMin || 30,
         Math.round((new Date(op.scheduledEnd).getTime() - new Date(op.scheduledStart).getTime()) / 60000)
       ),
       status: op.status,
@@ -817,7 +820,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                   {scheduledOps.map((op) => (
                     <tr key={op.id} className="hover:bg-muted/20">
                       <td className="py-2 font-semibold text-foreground font-mono">
-                        {toZagreb(new Date(op.scheduledStart)).timeStr}
+                        {toZagreb(new Date(op.scheduledStart)).timeStr}–{toZagreb(new Date(op.scheduledEnd)).timeStr}
                       </td>
                       <td className="py-2">
                         <Badge

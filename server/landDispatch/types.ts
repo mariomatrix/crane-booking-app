@@ -44,6 +44,8 @@ export interface DispatchReservationItem {
   landZoneName: string | null;
   scheduledStart: string; // ISO
   scheduledEnd: string;   // ISO
+  durationMin?: number;
+  adminNote?: string | null;
   status: string;
   teamOverride: boolean;
   teamOverrideReason: string | null;
