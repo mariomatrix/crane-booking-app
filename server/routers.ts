@@ -2067,6 +2067,19 @@ export const appRouter = router({
               });
             }
           }
+
+          if (
+            (serviceType?.operationCategory === "lower_to_sea" ||
+              serviceType?.name?.toLowerCase().includes("spušt") ||
+              serviceType?.name?.toLowerCase().includes("spust")) &&
+            input.status === "waitlisted"
+          ) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message:
+                "Nije moguće staviti klijenta na listu čekanja za suhi vez kod operacije spuštanja u more jer je plovilo već na kopnu.",
+            });
+          }
         }
 
         // 3. Build vessel snapshot

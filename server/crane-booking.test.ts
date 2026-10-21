@@ -705,6 +705,19 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
           })
         ).rejects.toThrow("Plovilo se već nalazi na kopnu");
 
+        // Attempting waitlist on lower_to_sea must fail
+        await expect(
+          caller.reservation.create({
+            serviceTypeId: lowerService.id,
+            requestedDate: "2026-11-15",
+            requestedTimeSlot: "jutro",
+            vesselId: vessel.id,
+            vesselRegistration: reg,
+            vesselType: "jedrilica",
+            status: "waitlisted",
+          })
+        ).rejects.toThrow("Nije moguće staviti klijenta na listu čekanja za suhi vez kod operacije spuštanja u more");
+
         // lower_to_sea should succeed
         const lowerRes = await caller.reservation.create({
           serviceTypeId: lowerService.id,

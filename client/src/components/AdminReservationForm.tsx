@@ -109,7 +109,9 @@ export function AdminReservationForm({
 
     const selectedServiceType = (serviceTypes as any[]).find(st => st.id === serviceTypeId);
     const isLiftFromSea = selectedServiceType?.operationCategory === "lift_from_sea";
-    const isLowerToSea = selectedServiceType?.operationCategory === "lower_to_sea";
+    const isLowerToSea = selectedServiceType?.operationCategory === "lower_to_sea" ||
+        selectedServiceType?.name?.toLowerCase().includes("spušt") ||
+        selectedServiceType?.name?.toLowerCase().includes("spust");
 
     const { data: landZones = [] } = trpc.landZone.list.useQuery();
     const { data: availableResources = [] } = trpc.resources.list.useQuery({ activeOnly: true });
@@ -142,6 +144,13 @@ export function AdminReservationForm({
             setServiceTypeId("");
         }
     }, [isVesselOnLand, isLiftFromSea]);
+
+    // If lower_to_sea is selected, waitlist for dry berth is forbidden because vessel is already on land
+    useEffect(() => {
+        if (isLowerToSea && isWaitlisted) {
+            setIsWaitlisted(false);
+        }
+    }, [isLowerToSea, isWaitlisted]);
 
 
     const usersQuery = trpc.user.list.useQuery({ pageSize: 1000 });
@@ -305,6 +314,13 @@ export function AdminReservationForm({
             toast.error(lang === "hr"
                 ? "Nije moguće zakazati vađenje iz mora jer se plovilo već nalazi na kopnu (suhom vezu)."
                 : "Cannot schedule lift from sea because the vessel is already on dry berth.");
+            return;
+        }
+
+        if (isWaitlisted && isLowerToSea) {
+            toast.error(lang === "hr"
+                ? "Nije moguće staviti klijenta na listu čekanja za suhi vez kod operacije spuštanja u more jer je plovilo već na kopnu."
+                : "Cannot place client on dry berth waitlist for launch operation because the vessel is already on land.");
             return;
         }
 
@@ -500,23 +516,41 @@ export function AdminReservationForm({
                         />
                     </div>
                     {!isEditingWaitlist && (
-                        <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800/40 p-2.5 rounded-lg border border-gray-200 dark:border-gray-800 h-[42px]">
-                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none text-gray-700 dark:text-gray-300">
+                        <div
+                            className={cn(
+                                "flex items-center gap-2 p-2.5 rounded-lg border h-[42px] transition-colors",
+                                isLowerToSea
+                                    ? "bg-gray-100/80 dark:bg-gray-800/20 border-gray-200 dark:border-gray-800 opacity-60 cursor-not-allowed"
+                                    : "bg-gray-50 dark:bg-gray-800/40 border-gray-200 dark:border-gray-800"
+                            )}
+                            title={isLowerToSea ? (lang === "hr" ? "Nije moguće staviti na listu čekanja za suhi vez kod spuštanja u more jer je plovilo već na kopnu" : "Cannot place on dry berth waitlist because vessel is already on land") : undefined}
+                        >
+                            <label className={cn(
+                                "flex items-center gap-2 text-xs font-semibold select-none",
+                                isLowerToSea ? "cursor-not-allowed text-gray-400 dark:text-gray-500" : "cursor-pointer text-gray-700 dark:text-gray-300"
+                            )}>
                                 <input
                                     type="checkbox"
-                                    checked={isWaitlisted}
+                                    checked={!isLowerToSea && isWaitlisted}
+                                    disabled={isLowerToSea}
                                     onChange={(e) => {
+                                        if (isLowerToSea) return;
                                         setIsWaitlisted(e.target.checked);
                                         if (e.target.checked) {
                                             setOverrideCapacityCheck(false);
                                         }
                                     }}
-                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0 disabled:cursor-not-allowed"
                                 />
                                 <span>
                                     {lang === "hr"
                                         ? "Stavi klijenta na listu čekanja za suhi vez"
                                         : "Place client on dry berth waiting list"}
+                                    {isLowerToSea && (
+                                        <span className="text-[10px] font-normal text-amber-700 dark:text-amber-500 ml-1">
+                                            ({lang === "hr" ? "Zabranjeno - već na kopnu" : "Disabled - already on land"})
+                                        </span>
+                                    )}
                                 </span>
                             </label>
                         </div>
@@ -725,29 +759,54 @@ export function AdminReservationForm({
 
 
                         {/* Waitlist Toggle Checkbox */}
-                        <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-800 space-y-1.5">
-                            <label className="flex items-center gap-2 text-xs font-semibold cursor-pointer select-none">
+                        <div
+                            className={cn(
+                                "p-3 rounded-lg border space-y-1.5 transition-colors",
+                                isLowerToSea
+                                    ? "bg-slate-100/70 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800 opacity-60 cursor-not-allowed"
+                                    : "bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800"
+                            )}
+                            title={isLowerToSea ? (lang === "hr" ? "Nije moguće staviti na listu čekanja za suhi vez kod spuštanja u more jer je plovilo već na kopnu" : "Cannot place on dry berth waitlist because vessel is already on land") : undefined}
+                        >
+                            <label className={cn(
+                                "flex items-center gap-2 text-xs font-semibold select-none",
+                                isLowerToSea ? "cursor-not-allowed text-slate-400 dark:text-slate-500" : "cursor-pointer"
+                            )}>
                                 <input
                                     type="checkbox"
-                                    checked={isWaitlisted}
+                                    checked={!isLowerToSea && isWaitlisted}
+                                    disabled={isLowerToSea}
                                     onChange={(e) => {
+                                        if (isLowerToSea) return;
                                         setIsWaitlisted(e.target.checked);
                                         if (e.target.checked) {
                                             setOverrideCapacityCheck(false);
                                         }
                                     }}
-                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                    className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary disabled:cursor-not-allowed"
                                 />
                                 <span className="flex items-center gap-1.5 text-slate-800 dark:text-slate-200">
                                     📋 {lang === "hr" ? "Stavi na listu čekanja za suhi vez" : "Place on dry berth waiting list"}
+                                    {isLowerToSea && (
+                                        <span className="text-[10px] font-normal text-amber-700 dark:text-amber-500">
+                                            ({lang === "hr" ? "Zabranjeno - plovilo je već na kopnu" : "Disabled - vessel is already on land"})
+                                        </span>
+                                    )}
                                 </span>
                             </label>
-                            {isWaitlisted && (
+                            {isWaitlisted && !isLowerToSea && (
                                 <p className="text-[11px] text-muted-foreground pl-6">
                                     {lang === "hr"
                                         ? "Plovilo se upisuje na listu čekanja uz odabranu dizalicu. Točan datum i termin operacije bit će dodijeljeni kada se oslobodi suhi vez."
                                         : "Vessel is placed on the waiting list with designated crane. Operation slot will be scheduled once a dry berth spot is freed."
                                     }
+                                </p>
+                            )}
+                            {isLowerToSea && (
+                                <p className="text-[11px] text-amber-700 dark:text-amber-500 pl-6">
+                                    {lang === "hr"
+                                        ? "Prijenos na listu čekanja za suhi vez nije primjenjiv za operaciju spuštanja u more jer se plovilo već nalazi na suhom vezu / kopnu."
+                                        : "Dry berth waitlist is not applicable for launch operations because the vessel is already on land."}
                                 </p>
                             )}
                         </div>
