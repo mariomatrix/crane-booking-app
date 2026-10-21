@@ -5,6 +5,7 @@ export interface ZoneData {
   code: string;
   name: string;
   totalSpots: number;
+  manualOccupiedSpots?: number | null;
 }
 
 export interface CapacityEvent {
@@ -146,6 +147,7 @@ export function calculateZoneCapacitySnapshots(params: {
       totalSpots,
       currentOccupied,
       currentFree,
+      manualOccupiedSpots: zone.manualOccupiedSpots ?? 0,
       plannedLiftsToday: plannedLifts.length,
       plannedLowersToday: plannedLowers.length,
       endOfDayFree: lastSlotFree,

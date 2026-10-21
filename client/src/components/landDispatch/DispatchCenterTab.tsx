@@ -725,7 +725,10 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                     </div>
 
                     <div className="flex items-center justify-between text-[9px] text-muted-foreground pt-0.5">
-                      <span>Popunjenost: {fillPercent}%</span>
+                      <span>
+                        Popunjenost: {fillPercent}%
+                        {zone.manualOccupiedSpots ? ` (Ručno: ${zone.manualOccupiedSpots})` : ""}
+                      </span>
                       <span
                         className={`font-semibold ${
                           zone.hasDeficit ? "text-rose-600 font-bold" : "text-muted-foreground"

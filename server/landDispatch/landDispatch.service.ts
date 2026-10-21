@@ -138,6 +138,7 @@ export class LandDispatchService {
         code: landZones.code,
         name: landZones.name,
         totalSpots: landZones.totalSpots,
+        manualOccupiedSpots: landZones.manualOccupiedSpots,
       })
       .from(landZones)
       .where(eq(landZones.isActive, true));
@@ -153,8 +154,12 @@ export class LandDispatchService {
       .groupBy(landOccupancies.zoneId);
 
     const currentOccupiedMap = new Map<string, number>();
+    for (const zone of dbZones) {
+      currentOccupiedMap.set(zone.id, zone.manualOccupiedSpots || 0);
+    }
     for (const row of activeOccupancies) {
-      currentOccupiedMap.set(row.zoneId, row.count);
+      const existing = currentOccupiedMap.get(row.zoneId) || 0;
+      currentOccupiedMap.set(row.zoneId, existing + row.count);
     }
 
     // 4. Fetch all reservations for this date + all pending / waitlisted
@@ -1009,7 +1014,7 @@ export class LandDispatchService {
         )
       );
 
-    const activeInTarget = targetCount?.count || 0;
+    const activeInTarget = (targetCount?.count || 0) + (targetZone.manualOccupiedSpots || 0);
     if (activeInTarget >= targetZone.totalSpots) {
       throw new Error(`Ciljna zona ${targetZone.code} (${targetZone.name}) je popunjena (${activeInTarget}/${targetZone.totalSpots}).`);
     }

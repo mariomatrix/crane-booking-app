@@ -12,6 +12,7 @@ export interface ZoneCapacitySnapshot {
   totalSpots: number;
   currentOccupied: number;
   currentFree: number;
+  manualOccupiedSpots?: number;
   plannedLiftsToday: number;
   plannedLowersToday: number;
   endOfDayFree: number;
