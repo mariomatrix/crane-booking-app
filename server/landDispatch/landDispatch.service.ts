@@ -185,6 +185,7 @@ export class LandDispatchService {
         serviceTypeId: reservations.serviceTypeId,
         serviceTypeName: serviceTypes.name,
         operationCategory: serviceTypes.operationCategory,
+        opServiceTypeName: serviceTypes.name,
         defaultDurationMin: serviceTypes.defaultDurationMin,
         durationMin: reservations.durationMin,
         craneId: reservations.craneId,
@@ -580,6 +581,7 @@ export class LandDispatchService {
         vesselBeamM: reservations.vesselBeamM,
         vesselLengthM: reservations.vesselLengthM,
         operationCategory: serviceTypes.operationCategory,
+        opServiceTypeName: serviceTypes.name,
         defaultDurationMin: serviceTypes.defaultDurationMin,
         durationMin: reservations.durationMin,
         requestedZoneId: reservations.requestedZoneId,
@@ -807,6 +809,7 @@ export class LandDispatchService {
         craneId: reservations.craneId,
         landZoneId: reservations.landZoneId,
         operationCategory: serviceTypes.operationCategory,
+        opServiceTypeName: serviceTypes.name,
         defaultDurationMin: serviceTypes.defaultDurationMin,
         durationMin: reservations.durationMin,
         scheduledStart: reservations.scheduledStart,
@@ -847,7 +850,9 @@ export class LandDispatchService {
           liftedAt: res.scheduledStart ? new Date(res.scheduledStart) : now,
           returnedAt: null,
           createdBy: operatorUserId,
-          note: notes || "Podignuto na kopno kroz Dispečerski centar",
+          note: res.opServiceTypeName?.toLowerCase().includes("kamion")
+            ? `[KAMION] ${notes || "Iskrcaj novog broda s kamiona kroz Dispečerski centar"}`
+            : (notes || "Podignuto na kopno kroz Dispečerski centar"),
         });
       } else if (res.operationCategory === "lower_to_sea" && res.vesselId) {
         // Vessel left land: update existing open occupancy

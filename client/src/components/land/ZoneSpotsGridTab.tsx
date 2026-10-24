@@ -18,8 +18,11 @@ import {
   Ship,
   CheckCircle2,
   Loader2,
+  Truck,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TruckDeliveryToLandDialog } from "@/components/land/TruckDeliveryToLandDialog";
 
 interface ZoneSpotsGridTabProps {
   onAssignFromWaitlist?: (spotId: string) => void;
@@ -31,6 +34,11 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
   const [statusFilter, setStatusFilter] = useState<"ALL" | "AVAILABLE" | "OCCUPIED">("ALL");
   const [selectedSpot, setSelectedSpot] = useState<any | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+
+  // Truck delivery dialog state
+  const [truckDialogOpen, setTruckDialogOpen] = useState(false);
+  const [truckDefaultSpotId, setTruckDefaultSpotId] = useState<string | null>(null);
+  const [truckDefaultSpotNumber, setTruckDefaultSpotNumber] = useState<number | null>(null);
 
   const utils = trpc.useUtils();
 
@@ -54,6 +62,7 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
       toast.success("Plovilo je uspješno spušteno u more (boravak završen). Mjesto je oslobođeno.");
       utils.landFlow.getSpotsByZone.invalidate();
       utils.landZone.list.invalidate();
+      utils.landOccupancy.listActive.invalidate();
       setDetailModalOpen(false);
     },
     onError: (err) => toast.error(err.message),
@@ -88,34 +97,58 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
     }
   };
 
+  const openTruckDeliveryForSpot = (spot?: any) => {
+    if (spot) {
+      setTruckDefaultSpotId(spot.id);
+      setTruckDefaultSpotNumber(spot.spotNumber);
+    } else {
+      setTruckDefaultSpotId(null);
+      setTruckDefaultSpotNumber(null);
+    }
+    setDetailModalOpen(false);
+    setTruckDialogOpen(true);
+  };
+
   return (
     <div className="space-y-4">
       {/* Zone Selector Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-        {zones.map((zone) => {
-          const isSelected = zone.id === activeZoneId;
-          return (
-            <button
-              key={zone.id}
-              onClick={() => setSelectedZoneId(zone.id)}
-              className={cn(
-                "px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-2",
-                isSelected
-                  ? "bg-primary text-primary-foreground border-primary shadow-xs"
-                  : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border"
-              )}
-            >
-              <span className="font-bold">{zone.code}</span>
-              <span>{zone.name}</span>
-              <Badge
-                variant={isSelected ? "secondary" : "outline"}
-                className="text-[10px] px-1.5 py-0 rounded-full"
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+          {zones.map((zone) => {
+            const isSelected = zone.id === activeZoneId;
+            return (
+              <button
+                key={zone.id}
+                onClick={() => setSelectedZoneId(zone.id)}
+                className={cn(
+                  "px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-2",
+                  isSelected
+                    ? "bg-primary text-primary-foreground border-primary shadow-xs"
+                    : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border"
+                )}
               >
-                {zone.totalSpots} mjesta
-              </Badge>
-            </button>
-          );
-        })}
+                <span className="font-bold">{zone.code}</span>
+                <span>{zone.name}</span>
+                <Badge
+                  variant={isSelected ? "secondary" : "outline"}
+                  className="text-[10px] px-1.5 py-0 rounded-full"
+                >
+                  {zone.totalSpots} mjesta
+                </Badge>
+              </button>
+            );
+          })}
+        </div>
+
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => openTruckDeliveryForSpot()}
+          className="h-8 text-xs font-semibold border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800 gap-1.5"
+        >
+          <Truck className="w-3.5 h-3.5 text-amber-600" />
+          Iskrcaj s kamiona (Bez dizalice)
+        </Button>
       </div>
 
       {/* Zone Overview & Filters */}
@@ -206,7 +239,7 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
-                {filteredSpots.map((spot) => {
+                {filteredSpots.map((spot: any) => {
                   const isOccupied = spot.isOccupied;
 
                   return (
@@ -220,7 +253,7 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
                           : "bg-background border-border/80 hover:border-emerald-400 hover:bg-emerald-50/10"
                       )}
                     >
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-1">
                         <span className="font-mono font-bold text-xs text-foreground">
                           {spot.code}
                         </span>
@@ -239,21 +272,32 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
 
                       {/* Content inside card */}
                       {isOccupied ? (
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <p className="font-semibold text-[11px] text-foreground truncate flex items-center gap-1">
                             <Ship className="w-3 h-3 text-sky-600 shrink-0" />
                             {spot.currentVesselName || "Plovilo"}
                           </p>
-                          {spot.currentVesselReg && (
-                            <p className="text-[10px] text-muted-foreground font-mono truncate">
-                              {spot.currentVesselReg}
-                            </p>
-                          )}
-                          {spot.liftedAt && (
-                            <p className="text-[10px] text-muted-foreground">
-                              Od: {new Date(spot.liftedAt).toLocaleDateString("hr-HR")}
-                            </p>
-                          )}
+                          <p className="text-[10px] text-muted-foreground font-mono truncate">
+                            {spot.currentVesselReg || "Bez registracije"}
+                          </p>
+                          <div className="flex items-center justify-between gap-1 pt-0.5 flex-wrap">
+                            {spot.daysOnLand != null && (
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] px-1.5 py-0 font-semibold bg-amber-100/80 text-amber-900 dark:bg-amber-950/50 dark:text-amber-300"
+                              >
+                                ⏱️ {spot.daysOnLand} {spot.daysOnLand === 1 ? "dan" : "dana"}
+                              </Badge>
+                            )}
+                            {spot.isTruckDelivery && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] px-1 py-0 border-amber-300 text-amber-800 dark:text-amber-300"
+                              >
+                                🚚 Kamion
+                              </Badge>
+                            )}
+                          </div>
                         </div>
                       ) : (
                         <div className="py-2 text-center text-[10px] text-muted-foreground flex items-center justify-center gap-1">
@@ -288,7 +332,7 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
                 <DialogTitle className="text-base">Detalji mjesta na suhom vezu</DialogTitle>
               </div>
               <DialogDescription className="text-xs">
-                Zona {currentZone?.name} ({currentZone?.code}) • Pozicija: Red {selectedSpot.rowNumber ?? "-"}, Kolona {selectedSpot.columnNumber ?? "-"}
+                Zona {currentZone?.name} ({currentZone?.code}) • Mjesto #{selectedSpot.spotNumber}
               </DialogDescription>
             </DialogHeader>
 
@@ -306,8 +350,8 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
                     <span className="font-bold">{selectedSpot.maxBeamM} m</span>
                   </div>
                   <div>
-                    <span className="block text-[10px] text-muted-foreground">Maks. gaz</span>
-                    <span className="font-bold">{selectedSpot.maxDraftM ?? "—"} m</span>
+                    <span className="block text-[10px] text-muted-foreground">Maks. težina</span>
+                    <span className="font-bold">{selectedSpot.maxWeightTons ?? "—"} t</span>
                   </div>
                 </div>
               </div>
@@ -315,26 +359,45 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
               {/* Occupancy Info */}
               {selectedSpot.isOccupied ? (
                 <div className="p-3 rounded-lg border bg-sky-50/60 dark:bg-sky-950/20 space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
                     <span className="font-semibold text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
                       <Ship className="w-3.5 h-3.5" />
-                      Trenutno plovilo na vezu:
+                      Trenutno plovilo na mjestu:
                     </span>
-                    <Badge className="text-[10px] py-0 bg-sky-600">Aktivno zauzeto</Badge>
+                    <div className="flex items-center gap-1">
+                      {selectedSpot.isTruckDelivery && (
+                        <Badge variant="outline" className="text-[10px] py-0 bg-amber-50 text-amber-800 border-amber-300">
+                          🚚 Iskrcaj s kamiona
+                        </Badge>
+                      )}
+                      <Badge className="text-[10px] py-0 bg-sky-600">Aktivno zauzeto</Badge>
+                    </div>
                   </div>
                   <div className="space-y-1 text-[11px]">
                     <p>
                       <strong>Naziv:</strong> {selectedSpot.currentVesselName || "Plovilo"}
                     </p>
-                    {selectedSpot.currentVesselReg && (
-                      <p>
-                        <strong>Registracija:</strong> {selectedSpot.currentVesselReg}
-                      </p>
-                    )}
+                    <p>
+                      <strong>Registracija:</strong> {selectedSpot.currentVesselReg || "Bez registracije"}
+                    </p>
                     {selectedSpot.liftedAt && (
                       <p>
-                        <strong>Datum vađenja na kopno:</strong>{" "}
+                        <strong>Datum smještaja na kopno:</strong>{" "}
                         {new Date(selectedSpot.liftedAt).toLocaleString("hr-HR")}
+                      </p>
+                    )}
+                    {selectedSpot.daysOnLand != null && (
+                      <div className="pt-1 flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-300">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>
+                          Proteklo do spuštanja: {selectedSpot.daysOnLand}{" "}
+                          {selectedSpot.daysOnLand === 1 ? "dan" : "dana"}
+                        </span>
+                      </div>
+                    )}
+                    {selectedSpot.occupancyNote && (
+                      <p className="text-muted-foreground pt-1 italic">
+                        Napomena: {selectedSpot.occupancyNote}
                       </p>
                     )}
                   </div>
@@ -354,14 +417,22 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
                   )}
                 </div>
               ) : (
-                <div className="p-3 rounded-lg border bg-emerald-50/60 dark:bg-emerald-950/20 text-center space-y-2">
+                <div className="p-3 rounded-lg border bg-emerald-50/60 dark:bg-emerald-950/20 text-center space-y-2.5">
                   <CheckCircle2 className="w-5 h-5 text-emerald-600 mx-auto" />
                   <p className="font-semibold text-emerald-800 dark:text-emerald-300">
                     Mjesto je slobodno i dostupno za dodjelu
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    Možete dodijeliti ovo mjesto plovilu s liste čekanja ili izravnim radnim nalogom.
+                    Možete smjestiti novi brod iskrcan s kamiona izravno na ovo mjesto (bez angažmana dizalice).
                   </p>
+                  <Button
+                    size="sm"
+                    onClick={() => openTruckDeliveryForSpot(selectedSpot)}
+                    className="w-full text-xs bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    Smjesti brod s kamiona na ovo mjesto
+                  </Button>
                 </div>
               )}
             </div>
@@ -379,6 +450,15 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Truck Delivery to Land Dialog */}
+      <TruckDeliveryToLandDialog
+        open={truckDialogOpen}
+        onOpenChange={setTruckDialogOpen}
+        defaultZoneId={activeZoneId}
+        defaultSpotId={truckDefaultSpotId}
+        defaultSpotNumber={truckDefaultSpotNumber}
+      />
     </div>
   );
 }

@@ -648,10 +648,14 @@ export class LandFlowService {
                 )
             );
 
-        const occBySpotId = new Map(activeOccupancies.map(o => [o.occupancy.spotId || "", o]));
+        const occBySpotId = new Map(activeOccupancies.filter(o => o.occupancy.spotId).map(o => [o.occupancy.spotId!, o]));
+        const occBySpotNum = new Map(activeOccupancies.filter(o => o.occupancy.spotNumber != null).map(o => [o.occupancy.spotNumber!, o]));
 
         return spots.map(s => {
-            const occ = occBySpotId.get(s.id);
+            const occ = occBySpotId.get(s.id) || occBySpotNum.get(s.spotNumber);
+            const daysOnLand = occ?.occupancy.liftedAt
+                ? Math.max(1, Math.ceil((Date.now() - new Date(occ.occupancy.liftedAt).getTime()) / (1000 * 60 * 60 * 24)))
+                : null;
             return {
                 ...s,
                 isOccupied: !!occ,
@@ -659,6 +663,9 @@ export class LandFlowService {
                 currentVesselReg: occ?.vessel?.registration,
                 liftedAt: occ?.occupancy.liftedAt,
                 occupancyId: occ?.occupancy.id,
+                daysOnLand,
+                isTruckDelivery: occ ? (!occ.occupancy.reservationId || !!occ.occupancy.note?.toLowerCase().includes("kamion")) : false,
+                occupancyNote: occ?.occupancy.note || null,
             };
         });
     }

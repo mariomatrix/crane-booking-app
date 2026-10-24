@@ -109,6 +109,7 @@ export function AdminReservationForm({
 
     const selectedServiceType = (serviceTypes as any[]).find(st => st.id === serviceTypeId);
     const isLiftFromSea = selectedServiceType?.operationCategory === "lift_from_sea";
+    const isTruckDelivery = !!selectedServiceType?.name?.toLowerCase().includes("kamion");
     const isLowerToSea = selectedServiceType?.operationCategory === "lower_to_sea" ||
         selectedServiceType?.name?.toLowerCase().includes("spušt") ||
         selectedServiceType?.name?.toLowerCase().includes("spust");
@@ -631,6 +632,18 @@ export function AdminReservationForm({
                         </div>
 
                         {/* Land zone display and selection */}
+                        {isTruckDelivery && (
+                            <div className="p-3 bg-amber-50/90 border border-amber-300 rounded-lg text-amber-900 text-xs space-y-1">
+                                <p className="font-semibold flex items-center gap-1.5">
+                                    🚚 {lang === "hr" ? "Iskrcaj novog broda s kamiona na mjesto na kopnu" : "Truck delivery of new vessel to dry berth"}
+                                </p>
+                                <p className="text-[11px] text-amber-800">
+                                    {lang === "hr"
+                                        ? "Klupska dizalica nije angažirana za dizanje (ne troši se pravo na dizalicu), ali se planira termin radi angažmana tima operatera i rezervacije mjesta u zoni na kopnu. Po izvršenju započinje informativno brojanje dana do spuštanja u more."
+                                        : "Marina crane is not engaged for lifting, but the slot is scheduled for team allocation and dry berth spot reservation."}
+                                </p>
+                            </div>
+                        )}
                         {isLiftFromSea && (
                             <div className="space-y-4 pt-2 pb-2 bg-gray-50/50 p-3 rounded-lg border border-gray-100">
                                 <div className="space-y-2">
@@ -829,7 +842,9 @@ export function AdminReservationForm({
                             </div>
                             <div className="space-y-1.5">
                                 <Label className="text-xs font-semibold">
-                                    {lang === "hr" ? "Dizalica *" : "Crane *"}
+                                    {isTruckDelivery
+                                        ? (lang === "hr" ? "Područje / Stupac u kalendaru (tim) *" : "Calendar Column (Team) *")
+                                        : (lang === "hr" ? "Dizalica *" : "Crane *")}
                                     {isWaitlisted && (
                                         <span className="text-[10px] text-muted-foreground font-normal ml-1">
                                             ({lang === "hr" ? "namijenjena za plovilo" : "intended for vessel"})

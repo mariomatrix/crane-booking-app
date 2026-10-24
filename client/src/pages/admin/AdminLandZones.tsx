@@ -13,12 +13,13 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Anchor, Loader2, Pencil, Plus, Trash2, Ship, Info, Calendar, ListOrdered, ArrowRightLeft } from "lucide-react";
+import { Anchor, Loader2, Pencil, Plus, Trash2, Ship, Info, Calendar, ListOrdered, ArrowRightLeft, Truck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
 import { ZoneMoveDialog } from "@/components/landDispatch/ZoneMoveDialog";
+import { TruckDeliveryToLandDialog } from "@/components/land/TruckDeliveryToLandDialog";
 
 type ZoneForm = {
   name: string;
@@ -47,6 +48,7 @@ export default function AdminLandZones() {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"active" | "reserved" | "waiting">("active");
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [truckDialogOpen, setTruckDialogOpen] = useState(false);
   const [moveVessel, setMoveVessel] = useState<{
     vesselId: string;
     vesselName: string;
@@ -155,6 +157,16 @@ export default function AdminLandZones() {
           <p className="text-sm text-muted-foreground">
             {isHr ? "Upravljajte zonama na kopnu i pratite aktivna plovila na suhom vezu." : "Manage dry berth zones and track vessels currently stored on land."}
           </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+          <Button
+            onClick={() => setTruckDialogOpen(true)}
+            variant="outline"
+            className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800 rounded-xl shadow-xs font-semibold"
+          >
+            <Truck className="h-4 w-4 mr-2 text-amber-600" />
+            {isHr ? "Iskrcaj s kamiona (Bez dizalice)" : "Truck Delivery (No Crane)"}
+          </Button>
         </div>
         <Button onClick={openCreate} className="bg-primary hover:bg-primary/95 text-white rounded-xl shadow-md">
           <Plus className="h-4 w-4 mr-2" />
@@ -326,6 +338,7 @@ export default function AdminLandZones() {
                       const daysOnLand = Math.max(1, Math.ceil((Date.now() - liftedDate.getTime()) / (1000 * 60 * 60 * 24)));
                       const isMember = ((occ.user as any)?.clientCategory || "member") === "member";
                       const isOverLimit = isMember && daysOnLand > 30;
+                      const isTruckDelivery = !(occ as any).reservationId || !!(occ as any).note?.toLowerCase().includes("kamion");
 
                       return (
                         <TableRow key={occ.id}>
@@ -336,7 +349,16 @@ export default function AdminLandZones() {
                               ({occ.vessel.lengthM}m × {occ.vessel.beamM}m)
                             </span>
                           </TableCell>
-                          <TableCell><Badge variant="secondary">{occ.vessel.registration}</Badge></TableCell>
+                          <TableCell>
+                            <div className="flex flex-col items-start gap-1">
+                              <Badge variant="secondary">{occ.vessel.registration || (isHr ? "Bez registracije" : "No reg.")}</Badge>
+                              {isTruckDelivery && (
+                                <Badge variant="outline" className="text-[10px] py-0 px-1.5 bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/30 dark:text-amber-300">
+                                  🚚 {isHr ? "Iskrcaj s kamiona" : "Truck delivery"}
+                                </Badge>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <div>
                               <div className="font-medium text-xs">{occ.user.name || occ.user.email}</div>
@@ -353,7 +375,16 @@ export default function AdminLandZones() {
                             </span>
                           </TableCell>
                           <TableCell>
-                            {isMember ? (
+                            {isTruckDelivery ? (
+                              <div className="space-y-0.5">
+                                <Badge className="bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 font-bold text-[11px]">
+                                  ⏱️ {daysOnLand} {daysOnLand === 1 ? "dan" : "dana"} na kopnu
+                                </Badge>
+                                <div className="text-[10px] text-muted-foreground">
+                                  {isHr ? "Informativno (do spuštanja)" : "Informative (until launch)"}
+                                </div>
+                              </div>
+                            ) : isMember ? (
                               isOverLimit ? (
                                 <Badge className="bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 font-bold text-[11px]">
                                   ⚠️ {daysOnLand} dana (+{daysOnLand - 30} d doplata)
@@ -557,6 +588,12 @@ export default function AdminLandZones() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <TruckDeliveryToLandDialog
+        open={truckDialogOpen}
+        onOpenChange={setTruckDialogOpen}
+        defaultZoneId={selectedZoneId}
+      />
 
       <ZoneMoveDialog
         open={moveDialogOpen}

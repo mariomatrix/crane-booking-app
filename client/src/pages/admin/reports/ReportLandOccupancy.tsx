@@ -47,6 +47,7 @@ export default function ReportLandOccupancy() {
             "Registracija": item.vesselRegistration || "",
             "Zona": item.zoneName || "",
             "Mjesto": item.spotNumber || "",
+            "Način smještaja": (!(item as any).reservationId || (item as any).note?.toLowerCase().includes("kamion")) ? "Iskrcaj s kamiona (Bez dizalice)" : "Dizalica (Vađenje iz mora)",
             "Datum dizanja": format(new Date(item.liftedAt), "dd.MM.yyyy"),
             "Datum povratka": item.returnedAt
                 ? format(new Date(item.returnedAt), "dd.MM.yyyy")
@@ -198,7 +199,16 @@ export default function ReportLandOccupancy() {
                                                 <TableCell className="font-semibold">{item.clientName}</TableCell>
                                                 <TableCell>
                                                     <span className="font-semibold">{item.vesselName}</span>
-                                                    {item.vesselRegistration && <span className="block text-xs font-mono text-muted-foreground">Reg: {item.vesselRegistration}</span>}
+                                                    {item.vesselRegistration ? (
+                                                        <span className="block text-xs font-mono text-muted-foreground">Reg: {item.vesselRegistration}</span>
+                                                    ) : (
+                                                        <span className="block text-xs text-muted-foreground italic">Bez registracije</span>
+                                                    )}
+                                                    {(!(item as any).reservationId || (item as any).note?.toLowerCase().includes("kamion")) && (
+                                                        <Badge variant="outline" className="mt-0.5 text-[9px] py-0 px-1 bg-amber-50 text-amber-800 border-amber-300">
+                                                            🚚 Iskrcaj s kamiona
+                                                        </Badge>
+                                                    )}
                                                 </TableCell>
                                                 <TableCell>
                                                     <span className="font-semibold">{item.zoneName || "—"}</span>

@@ -147,6 +147,7 @@ import {
   landWaitingList,
   landOccupancies,
   landZones,
+  landSpots,
   vessels,
   workOrders,
 } from "../drizzle/schema";
@@ -3426,7 +3427,9 @@ export const appRouter = router({
               reservationId: reservation.id,
               liftedAt: new Date(),
               createdBy: ctx.user.id,
-              note: input.note,
+              note: serviceType?.name?.toLowerCase().includes("kamion")
+                ? `[KAMION] ${input.note || "Iskrcaj novog broda s kamiona na kopno"}`
+                : input.note,
             });
           }
         } else if (isLowerToSea && reservation.vesselId) {
@@ -5081,6 +5084,175 @@ export const appRouter = router({
       )
       .query(async ({ input }) => {
         return listActiveOccupancies(input);
+      }),
+
+    placeFromTruck: operatorProcedure
+      .input(
+        z.object({
+          userId: z.string().uuid(),
+          vesselId: z.string().uuid().optional(),
+          newVessel: z
+            .object({
+              name: z.string().min(1, "Naziv plovila je obavezan"),
+              type: z
+                .enum(["jedrilica", "motorni", "katamaran", "ostalo"])
+                .default("motorni"),
+              registration: z.string().optional(),
+              lengthM: z.number().positive().optional(),
+              beamM: z.number().positive().optional(),
+              draftM: z.number().positive().optional(),
+              weightTons: z.number().nonnegative().optional(),
+            })
+            .optional(),
+          zoneId: z.string().uuid(),
+          spotId: z.string().uuid().optional(),
+          spotNumber: z.number().int().positive().optional(),
+          liftedAt: z.date().optional(),
+          note: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        let targetVesselId = input.vesselId;
+
+        if (!targetVesselId && input.newVessel) {
+          const cleanReg = input.newVessel.registration?.trim() || undefined;
+          if (cleanReg) {
+            const [existingReg] = await db
+              .select({ id: vessels.id })
+              .from(vessels)
+              .where(sql`lower(${vessels.registration}) = lower(${cleanReg})`)
+              .limit(1);
+            if (existingReg) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message: `Plovilo s registracijom "${cleanReg}" već postoji u sustavu.`,
+              });
+            }
+          }
+
+          targetVesselId = await createVessel({
+            ownerId: input.userId,
+            name: input.newVessel.name.trim(),
+            type: input.newVessel.type,
+            registration: cleanReg,
+            lengthM: input.newVessel.lengthM
+              ? String(input.newVessel.lengthM)
+              : undefined,
+            beamM: input.newVessel.beamM
+              ? String(input.newVessel.beamM)
+              : undefined,
+            draftM: input.newVessel.draftM
+              ? String(input.newVessel.draftM)
+              : undefined,
+            weightTons:
+              input.newVessel.weightTons !== undefined
+                ? String(input.newVessel.weightTons)
+                : undefined,
+          });
+        }
+
+        if (!targetVesselId) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              "Odaberite postojeće plovilo ili unesite podatke za novi brod.",
+          });
+        }
+
+        const existingActive = await getActiveOccupancyByVessel(targetVesselId);
+        if (existingActive) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Odabrano plovilo je već evidentirano na kopnu.",
+          });
+        }
+
+        let resolvedSpotId = input.spotId;
+        let resolvedSpotNumber = input.spotNumber;
+
+        if (resolvedSpotId) {
+          const [spotRow] = await db
+            .select()
+            .from(landSpots)
+            .where(eq(landSpots.id, resolvedSpotId))
+            .limit(1);
+          if (!spotRow) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Odabrano mjesto na kopnu nije pronađeno.",
+            });
+          }
+          resolvedSpotNumber = spotRow.spotNumber;
+
+          const [occupiedSpot] = await db
+            .select({ id: landOccupancies.id })
+            .from(landOccupancies)
+            .where(
+              and(
+                eq(landOccupancies.zoneId, input.zoneId),
+                or(
+                  eq(landOccupancies.spotId, resolvedSpotId),
+                  eq(landOccupancies.spotNumber, spotRow.spotNumber)
+                ),
+                isNull(landOccupancies.returnedAt)
+              )
+            )
+            .limit(1);
+
+          if (occupiedSpot) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: `Mjesto ${spotRow.code} je već zauzeto.`,
+            });
+          }
+        } else if (resolvedSpotNumber) {
+          const [spotRow] = await db
+            .select()
+            .from(landSpots)
+            .where(
+              and(
+                eq(landSpots.zoneId, input.zoneId),
+                eq(landSpots.spotNumber, resolvedSpotNumber)
+              )
+            )
+            .limit(1);
+          if (spotRow) {
+            resolvedSpotId = spotRow.id;
+          }
+        }
+
+        const id = await createLandOccupancy({
+          vesselId: targetVesselId,
+          userId: input.userId,
+          zoneId: input.zoneId,
+          spotId: resolvedSpotId,
+          spotNumber: resolvedSpotNumber,
+          reservationId: null,
+          liftedAt: input.liftedAt || new Date(),
+          note:
+            input.note?.trim() ||
+            "Iskrcaj novog broda s kamiona — priprema za spuštanje u more",
+          createdBy: ctx.user.id,
+        });
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "land_occupancy_truck_delivery",
+          entityType: "land_occupancy",
+          entityId: id,
+          payload: {
+            vesselId: targetVesselId,
+            zoneId: input.zoneId,
+            spotId: resolvedSpotId,
+            spotNumber: resolvedSpotNumber,
+            createdNewVessel: !!input.newVessel,
+          },
+        });
+
+        return { id, vesselId: targetVesselId };
       }),
 
     create: operatorProcedure

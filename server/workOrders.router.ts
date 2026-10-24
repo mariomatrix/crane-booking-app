@@ -362,7 +362,9 @@ export const workOrdersRouter = router({
             let quotaOperationType: "lift" | "lower" | "none" = "none";
             if (res.serviceTypeId) {
                 const [st] = await db.select().from(serviceTypes).where(eq(serviceTypes.id, res.serviceTypeId)).limit(1);
-                if (st?.operationCategory === "lift_from_sea") quotaOperationType = "lift";
+                const isTruckOp = !!st?.name?.toLowerCase().includes("kamion");
+                if (isTruckOp) quotaOperationType = "none";
+                else if (st?.operationCategory === "lift_from_sea") quotaOperationType = "lift";
                 else if (st?.operationCategory === "lower_to_sea") quotaOperationType = "lower";
             }
 
@@ -570,9 +572,11 @@ export const workOrdersRouter = router({
             // Handle Dry Berth Occupancy (Kopno)
             if (resRow && resRow.vesselId) {
                 let opCategory: string | null = null;
+                let isTruckDelivery = false;
                 if (resRow.serviceTypeId) {
                     const [st] = await db.select().from(serviceTypes).where(eq(serviceTypes.id, resRow.serviceTypeId)).limit(1);
                     opCategory = st?.operationCategory || null;
+                    isTruckDelivery = !!st?.name?.toLowerCase().includes("kamion");
                 }
 
                 const isLift = opCategory === "lift_from_sea";
@@ -599,7 +603,9 @@ export const workOrdersRouter = router({
                                 reservationId: resRow.id,
                                 liftedAt: completedAt,
                                 createdBy: ctx.user.id,
-                                note: input.operatorNotes || "Smješteno na kopno putem radnog naloga",
+                                note: isTruckDelivery
+                                    ? `[KAMION] ${input.operatorNotes || "Iskrcaj novog broda s kamiona na kopno"}`
+                                    : (input.operatorNotes || "Smješteno na kopno putem radnog naloga"),
                             });
                         }
                         await db.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, resRow.id));
@@ -798,10 +804,14 @@ export const workOrdersRouter = router({
 
             let quotaOperationType: "lift" | "lower" | "none" = "none";
             let opCategory: string | null = null;
+            let isTruckDelivery = false;
             if (res.serviceTypeId) {
                 const [st] = await db.select().from(serviceTypes).where(eq(serviceTypes.id, res.serviceTypeId)).limit(1);
                 opCategory = st?.operationCategory || null;
-                if (st?.operationCategory === "lift_from_sea") quotaOperationType = "lift";
+                isTruckDelivery = !!st?.name?.toLowerCase().includes("kamion");
+                const isTruckOp = !!st?.name?.toLowerCase().includes("kamion");
+                if (isTruckOp) quotaOperationType = "none";
+                else if (st?.operationCategory === "lift_from_sea") quotaOperationType = "lift";
                 else if (st?.operationCategory === "lower_to_sea") quotaOperationType = "lower";
             }
 
@@ -948,7 +958,9 @@ export const workOrdersRouter = router({
                                 reservationId: res.id,
                                 liftedAt: effectiveCompletedAt,
                                 createdBy: ctx.user.id,
-                                note: input.operatorNotes || "Smješteno na kopno putem radnog naloga",
+                                note: isTruckDelivery
+                                    ? `[KAMION] ${input.operatorNotes || "Iskrcaj novog broda s kamiona na kopno"}`
+                                    : (input.operatorNotes || "Smješteno na kopno putem radnog naloga"),
                             });
                         }
                         await db.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, res.id));

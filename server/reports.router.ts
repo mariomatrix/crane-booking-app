@@ -360,6 +360,7 @@ export const reportsRouter = router({
                     liftedAt: landOccupancies.liftedAt,
                     returnedAt: landOccupancies.returnedAt,
                     spotNumber: landOccupancies.spotNumber,
+                    reservationId: landOccupancies.reservationId,
                     note: landOccupancies.note,
                     clientOib: users.oib,
                     clientName: sql<string>`${users.firstName} || ' ' || ${users.lastName}`,

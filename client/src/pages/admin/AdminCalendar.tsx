@@ -1470,7 +1470,7 @@ export default function AdminCalendar() {
                                     </div>
                                     {p.serviceTypeName && (
                                         <div className="text-[10px] font-semibold opacity-95 truncate">
-                                            {p.serviceTypeName}
+                                            {p.serviceTypeName?.toLowerCase().includes("kamion") ? `🚚 ${p.serviceTypeName}` : p.serviceTypeName}
                                         </div>
                                     )}
                                     {details && (

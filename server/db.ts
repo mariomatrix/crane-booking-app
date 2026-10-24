@@ -625,6 +625,7 @@ export async function listAllWaiting(limit = 50, offset = 0) {
         name: users.name,
         email: users.email,
         phone: users.phone,
+        clientCategory: users.clientCategory,
       },
       crane: {
         name: cranes.name,
@@ -751,6 +752,20 @@ export async function listAuditLog(limit = 50) {
 export async function listServiceTypes(onlyActive = false) {
   const db = await getDb();
   if (!db) return [];
+  const allExisting = await db.select().from(serviceTypes);
+  const hasTruckType = allExisting.some(s => s.name.toLowerCase().includes("kamion"));
+  if (allExisting.length > 0 && !hasTruckType) {
+    try {
+      await db.insert(serviceTypes).values({
+        name: "Iskrcaj s kamiona na kopno",
+        description: "Iskrcaj novog broda kamionskom dizalicom na mjesto na kopnu (bez angažmana klupske dizalice, uz angažman tima)",
+        defaultDurationMin: 60,
+        operationCategory: "lift_from_sea",
+        isActive: true,
+        sortOrder: 5,
+      });
+    } catch {}
+  }
   const query = db.select().from(serviceTypes);
   if (onlyActive) query.where(eq(serviceTypes.isActive, true));
   return query.orderBy(asc(serviceTypes.sortOrder), asc(serviceTypes.name));
@@ -1346,6 +1361,7 @@ export async function listActiveOccupancies(filters?: { zoneId?: string; userId?
       vesselId: landOccupancies.vesselId,
       userId: landOccupancies.userId,
       zoneId: landOccupancies.zoneId,
+      spotId: landOccupancies.spotId,
       spotNumber: landOccupancies.spotNumber,
       reservationId: landOccupancies.reservationId,
       returnReservationId: landOccupancies.returnReservationId,
@@ -1370,6 +1386,7 @@ export async function listActiveOccupancies(filters?: { zoneId?: string; userId?
         name: users.name,
         email: users.email,
         phone: users.phone,
+        clientCategory: users.clientCategory,
       },
       zone: {
         id: landZones.id,
@@ -1403,6 +1420,7 @@ export async function listOccupancyHistory(filters?: { zoneId?: string; userId?:
       vesselId: landOccupancies.vesselId,
       userId: landOccupancies.userId,
       zoneId: landOccupancies.zoneId,
+      spotId: landOccupancies.spotId,
       spotNumber: landOccupancies.spotNumber,
       reservationId: landOccupancies.reservationId,
       returnReservationId: landOccupancies.returnReservationId,
@@ -1493,6 +1511,7 @@ export async function isVesselCurrentlyOnLand(vesselId?: string | null, registra
       vesselId: landOccupancies.vesselId,
       userId: landOccupancies.userId,
       zoneId: landOccupancies.zoneId,
+      spotId: landOccupancies.spotId,
       spotNumber: landOccupancies.spotNumber,
       liftedAt: landOccupancies.liftedAt,
       zoneName: landZones.name,
@@ -1515,6 +1534,7 @@ export async function isVesselCurrentlyOnLand(vesselId?: string | null, registra
       vesselId: landOccupancies.vesselId,
       userId: landOccupancies.userId,
       zoneId: landOccupancies.zoneId,
+      spotId: landOccupancies.spotId,
       spotNumber: landOccupancies.spotNumber,
       liftedAt: landOccupancies.liftedAt,
       zoneName: landZones.name,
@@ -1563,6 +1583,7 @@ export async function listLandWaitingList() {
         name: users.name,
         email: users.email,
         phone: users.phone,
+        clientCategory: users.clientCategory,
       },
       vessel: {
         id: vessels.id,

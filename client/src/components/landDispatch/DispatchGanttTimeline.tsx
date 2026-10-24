@@ -434,7 +434,7 @@ export function DispatchGanttTimeline({
                               {/* 2. Red: Vrsta usluge */}
                               {opInSlot.serviceTypeName && (
                                 <div className="text-[10px] font-semibold opacity-95 truncate">
-                                  {opInSlot.serviceTypeName}
+                                  {opInSlot.serviceTypeName?.toLowerCase().includes("kamion") ? `🚚 ${opInSlot.serviceTypeName}` : opInSlot.serviceTypeName}
                                 </div>
                               )}
 
