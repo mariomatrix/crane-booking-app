@@ -57,11 +57,17 @@ async function requireMobileAuth(req: AuthenticatedRequest, res: Response, next:
 // Helper for generating order number: RN-YYYY-XXXXX
 async function generateWorkOrderNumber(db: any, year: number): Promise<string> {
     const prefix = `RN-${year}-`;
-    const [result] = await db
-        .select({ count: count() })
+    const rows = await db
+        .select({ orderNumber: workOrders.orderNumber })
         .from(workOrders)
         .where(sql`${workOrders.orderNumber} LIKE ${prefix + '%'}`);
-    const nextSeq = (result?.count || 0) + 1;
+    let maxSeq = 0;
+    for (const row of rows) {
+        const suffix = String(row.orderNumber || "").slice(prefix.length);
+        const num = parseInt(suffix, 10);
+        if (!Number.isNaN(num) && num > maxSeq) maxSeq = num;
+    }
+    const nextSeq = maxSeq + 1;
     return `${prefix}${String(nextSeq).padStart(5, '0')}`;
 }
 

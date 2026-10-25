@@ -25,22 +25,34 @@ import { eq, desc, and, gte, lte, sql, count, ne, or } from "drizzle-orm";
 // Helper for generating order number: RN-YYYY-XXXXX
 async function generateWorkOrderNumber(db: any, year: number): Promise<string> {
     const prefix = `RN-${year}-`;
-    const [result] = await db
-        .select({ count: count() })
+    const rows = await db
+        .select({ orderNumber: workOrders.orderNumber })
         .from(workOrders)
         .where(sql`${workOrders.orderNumber} LIKE ${prefix + '%'}`);
-    const nextSeq = (result?.count || 0) + 1;
+    let maxSeq = 0;
+    for (const row of rows) {
+        const suffix = String(row.orderNumber || "").slice(prefix.length);
+        const num = parseInt(suffix, 10);
+        if (!Number.isNaN(num) && num > maxSeq) maxSeq = num;
+    }
+    const nextSeq = maxSeq + 1;
     return `${prefix}${String(nextSeq).padStart(5, '0')}`;
 }
 
 // Helper for generating invoice number: PON-YYYY-XXXXX or RAC-YYYY-XXXXX
 async function generateInvoiceNumber(db: any, year: number, isProforma: boolean = true): Promise<string> {
     const prefix = isProforma ? `PON-${year}-` : `RAC-${year}-`;
-    const [result] = await db
-        .select({ count: count() })
+    const rows = await db
+        .select({ invoiceNumber: invoices.invoiceNumber })
         .from(invoices)
         .where(sql`${invoices.invoiceNumber} LIKE ${prefix + '%'}`);
-    const nextSeq = (result?.count || 0) + 1;
+    let maxSeq = 0;
+    for (const row of rows) {
+        const suffix = String(row.invoiceNumber || "").slice(prefix.length);
+        const num = parseInt(suffix, 10);
+        if (!Number.isNaN(num) && num > maxSeq) maxSeq = num;
+    }
+    const nextSeq = maxSeq + 1;
     return `${prefix}${String(nextSeq).padStart(5, '0')}`;
 }
 
