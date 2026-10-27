@@ -9,7 +9,17 @@ import { Router, Request, Response, NextFunction } from "express";
 import { processClan03Rows } from "../memberSync/syncEngine";
 import type { LegacyClan03Row } from "../memberSync/types";
 import { getDb } from "../db";
-import { sql } from "drizzle-orm";
+import { sql, eq, and, isNull } from "drizzle-orm";
+import {
+    landZones,
+    landSpots,
+    landOccupancies,
+    vessels,
+    users,
+    auditLog,
+    cranes,
+    craneZoneAffinities,
+} from "../../drizzle/schema";
 
 const router = Router();
 
@@ -450,6 +460,327 @@ router.post("/push", requireSyncApiKey, async (req: Request, res: Response) => {
         res.status(500).json({
             success: false,
             error: `Interna pogreška pri obradi sinkronizacije: ${err?.message || err}`,
+        });
+    }
+});
+
+/**
+ * @route POST /api/v1/member-sync/import-land-state
+ * Uvoz početnog stanja na kopnu (RASPORED NA KOPNU.xlsx)
+ * Sinkronizira 90 plovila na kopnu, njihova mjesta, zone, vlasnike i napomene
+ */
+router.post("/import-land-state", requireSyncApiKey, async (req: Request, res: Response) => {
+    try {
+        const db = await getDb();
+        if (!db) {
+            return res.status(500).json({ success: false, error: "Database not available" });
+        }
+
+        const items = req.body?.items;
+        if (!items || !Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "Tijelo zahtjeva mora sadržavati polje 'items' s popisom plovila.",
+            });
+        }
+
+        console.log(`[MemberSync API] Primljen zahtjev za uvoz početnog stanja kopna (${items.length} stavki) od ${req.ip}`);
+
+        const normalizeReg = (reg: string): string => {
+            return reg.toUpperCase().replace(/\s+/g, "").replace(/[-_]/g, "");
+        };
+
+        // 1. Osiguraj postojanje zone 'MD' (Mala dizalica)
+        let [mdZone] = await db.select().from(landZones).where(eq(landZones.code, "MD")).limit(1);
+        if (!mdZone) {
+            console.log("[MemberSync API] Dodavanje zone 'MD'...");
+            const [inserted] = await db
+                .insert(landZones)
+                .values({
+                    name: "Mala dizalica",
+                    code: "MD",
+                    totalSpots: 5,
+                    manualOccupiedSpots: 0,
+                    description: "Plato i prostor uz malu dizalicu",
+                    sortOrder: 6,
+                    isActive: true,
+                })
+                .returning();
+            mdZone = inserted;
+        }
+
+        // 2. Osiguraj mjesta MD-01 do MD-05
+        const existingMdSpots = await db.select().from(landSpots).where(eq(landSpots.zoneId, mdZone.id));
+        if (existingMdSpots.length === 0) {
+            console.log("[MemberSync API] Kreiranje mjesta MD-01 do MD-05...");
+            const mdSpotsToInsert = [];
+            for (let i = 1; i <= 5; i++) {
+                mdSpotsToInsert.push({
+                    zoneId: mdZone.id,
+                    spotNumber: i,
+                    code: `MD-${String(i).padStart(2, "0")}`,
+                    maxLengthM: "10.00",
+                    maxBeamM: "3.50",
+                    maxWeightTons: "5.00",
+                    isActive: true,
+                    isBlocked: false,
+                    sortOrder: i,
+                });
+            }
+            await db.insert(landSpots).values(mdSpotsToInsert);
+        }
+
+        // 3. Osiguraj sistemskog korisnika za nepoznate vlasnike / goste
+        let [placeholderUser] = await db
+            .select()
+            .from(users)
+            .where(eq(users.email, "gost-kopno@spinut.hr"))
+            .limit(1);
+
+        if (!placeholderUser) {
+            const [inserted] = await db
+                .insert(users)
+                .values({
+                    email: "gost-kopno@spinut.hr",
+                    name: "Nepoznati vlasnik / Gost",
+                    firstName: "Gost",
+                    lastName: "Kopno",
+                    clientCategory: "commercial",
+                    role: "user",
+                    userStatus: "active",
+                    city: "Split",
+                    postalCode: "21000",
+                })
+                .returning();
+            placeholderUser = inserted;
+        }
+
+        // 4. Dohvati administratora za audit / createdBy
+        const [adminUser] = await db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.role, "admin"))
+            .limit(1);
+        const adminId = adminUser?.id || null;
+
+        // 5. Brisanje prethodnih aktivnih zauzeća ako je zatraženo (default true)
+        if (req.body?.resetOccupancies !== false) {
+            console.log("[MemberSync API] Brisanje prethodnih zapisa u land_occupancies...");
+            await db.delete(landOccupancies);
+        }
+
+        // 6. Učitaj sve zone, mjesta, plovila i korisnike
+        const allZones = await db.select().from(landZones);
+        const allSpots = await db.select().from(landSpots);
+        const allVessels = await db.select().from(vessels);
+        const allUsers = await db.select().from(users);
+
+        const localVessels = [...allVessels];
+        const localUsers = [...allUsers];
+
+        let vesselsCreatedCount = 0;
+        let usersCreatedCount = 0;
+        const occupanciesToInsert: any[] = [];
+
+        for (const item of items) {
+            const zone = allZones.find((z) => z.code === item.zoneCode);
+            if (!zone) {
+                console.warn(`[MemberSync API] Zona s kodom ${item.zoneCode} nije pronađena!`);
+                continue;
+            }
+
+            const spot = allSpots.find(
+                (s) => s.zoneId === zone.id && s.spotNumber === Number(item.spotNumber)
+            );
+
+            // Match vessel
+            let targetVessel = localVessels.find(
+                (v) => v.registration && normalizeReg(v.registration) === normalizeReg(item.reg)
+            );
+
+            if (!targetVessel && item.altReg) {
+                targetVessel = localVessels.find(
+                    (v) => v.registration && normalizeReg(v.registration) === normalizeReg(item.altReg)
+                );
+            }
+
+            if (!targetVessel) {
+                targetVessel = localVessels.find(
+                    (v) => v.name && v.name.trim().toLowerCase() === item.reg.trim().toLowerCase()
+                );
+            }
+
+            // Match owner
+            let targetUser = targetVessel ? localUsers.find((u) => u.id === targetVessel!.ownerId) : null;
+
+            const ownerStr = (item.owner || "").trim();
+            if (!targetUser && ownerStr) {
+                if (ownerStr.toLowerCase().startsWith("radina")) {
+                    let uRadina = localUsers.find((u) => u.name?.toLowerCase().includes("radina b"));
+                    if (!uRadina) {
+                        const [newU] = await db
+                            .insert(users)
+                            .values({
+                                name: "Radina B.",
+                                lastName: "Radina",
+                                firstName: "B.",
+                                phone: item.phone || "098634128",
+                                role: "user",
+                                clientCategory: "commercial",
+                                city: "Split",
+                                postalCode: "21000",
+                            })
+                            .returning();
+                        uRadina = newU;
+                        localUsers.push(newU);
+                        usersCreatedCount++;
+                    }
+                    targetUser = uRadina;
+                } else if (ownerStr.toLowerCase().startsWith("ivančević n")) {
+                    targetUser = localUsers.find((u) => u.name?.toLowerCase().includes("nikola ivančević")) || null;
+                } else if (ownerStr.toLowerCase().startsWith("mladinić m")) {
+                    targetUser = localUsers.find((u) => u.name?.toLowerCase().includes("mario mladinić")) || null;
+                } else if (ownerStr.toLowerCase().startsWith("dujmović m")) {
+                    targetUser = localUsers.find((u) => u.name?.toLowerCase().includes("marin dujmović")) || null;
+                } else if (ownerStr.toLowerCase().startsWith("šakić")) {
+                    targetUser = localUsers.find((u) => u.name?.toLowerCase().includes("branko šakić")) || null;
+                } else if (ownerStr.toLowerCase().startsWith("sekulić")) {
+                    targetUser = localUsers.find((u) => u.name?.toLowerCase().includes("nikola sekulić")) || null;
+                } else if (ownerStr.toLowerCase().startsWith("barić f")) {
+                    targetUser = localUsers.find((u) => u.name?.toLowerCase().includes("filip barišić")) || null;
+                    if (!targetUser) {
+                        const [newU] = await db
+                            .insert(users)
+                            .values({
+                                name: "Barić F.",
+                                lastName: "Barić",
+                                firstName: "F.",
+                                role: "user",
+                                clientCategory: "commercial",
+                                city: "Split",
+                                postalCode: "21000",
+                            })
+                            .returning();
+                        targetUser = newU;
+                        localUsers.push(newU);
+                        usersCreatedCount++;
+                    }
+                } else {
+                    const parts = ownerStr.split(/[\s.]+/).filter((p: string) => p.length > 2);
+                    targetUser = localUsers.find((u) => {
+                        const uFull = `${u.firstName || ""} ${u.lastName || ""} ${u.name || ""}`.toLowerCase();
+                        return parts.some((p: string) => uFull.includes(p.toLowerCase()));
+                    }) || null;
+                }
+            }
+
+            if (!targetUser) {
+                targetUser = placeholderUser;
+            }
+
+            // Create vessel if needed
+            if (!targetVessel) {
+                let vType: "jedrilica" | "motorni" | "katamaran" | "ostalo" = "motorni";
+                const lowerDesc = `${item.reg} ${item.fullNote || ""}`.toLowerCase();
+                if (lowerDesc.includes("jedrilic") || lowerDesc.includes("jed.") || lowerDesc.includes("dufour")) {
+                    vType = "jedrilica";
+                } else if (lowerDesc.includes("katamaran") || lowerDesc.includes("pajot")) {
+                    vType = "katamaran";
+                }
+
+                const isFormalReg = /^[A-ZŠĐČĆŽ]{2}[-_ ]?[0-9]+/i.test(item.reg) || /^[0-9]+[-_ ][A-ZŠĐČĆŽ]{2}/i.test(item.reg);
+                const vesselReg = isFormalReg ? item.reg : null;
+                const vesselName = !isFormalReg ? item.reg : (ownerStr ? `${item.reg} (${ownerStr})` : item.reg);
+
+                const [newVessel] = await db
+                    .insert(vessels)
+                    .values({
+                        ownerId: targetUser.id,
+                        name: vesselName,
+                        type: vType,
+                        registration: vesselReg,
+                    })
+                    .returning();
+
+                targetVessel = newVessel;
+                localVessels.push(newVessel);
+                vesselsCreatedCount++;
+            }
+
+            const liftedAtDate = item.liftedAt ? new Date(item.liftedAt) : new Date("2026-01-01T08:00:00Z");
+
+            occupanciesToInsert.push({
+                vesselId: targetVessel.id,
+                userId: targetUser.id,
+                zoneId: zone.id,
+                spotId: spot?.id || null,
+                spotNumber: Number(item.spotNumber),
+                liftedAt: liftedAtDate,
+                returnedAt: null,
+                note: item.fullNote || item.note || null,
+                createdBy: adminId,
+            });
+        }
+
+        // 7. Bulk insert all occupancies
+        for (let i = 0; i < occupanciesToInsert.length; i += 25) {
+            await db.insert(landOccupancies).values(occupanciesToInsert.slice(i, i + 25));
+        }
+
+        // 8. Reset manualOccupiedSpots to 0 across all land zones
+        await db.update(landZones).set({ manualOccupiedSpots: 0, updatedAt: new Date() });
+
+        // 9. Write audit log entry
+        if (adminId) {
+            await db.insert(auditLog).values({
+                actorId: adminId,
+                action: "initial_land_occupancy_import",
+                entityType: "land_occupancy",
+                entityId: adminId,
+                payload: {
+                    totalBoats: occupanciesToInsert.length,
+                    vesselsCreatedCount,
+                    usersCreatedCount,
+                    importedAt: new Date().toISOString(),
+                    source: "remote_api_import",
+                },
+            });
+        }
+
+        // 10. Generate zone breakdown summary
+        const finalZones = await db.select().from(landZones);
+        const breakdown = [];
+        for (const z of finalZones.sort((a, b) => a.sortOrder - b.sortOrder)) {
+            const occs = await db
+                .select({ count: sql<number>`count(*)` })
+                .from(landOccupancies)
+                .where(and(eq(landOccupancies.zoneId, z.id), isNull(landOccupancies.returnedAt)));
+            const occupied = Number(occs[0]?.count || 0);
+            breakdown.push({
+                code: z.code,
+                name: z.name,
+                totalSpots: z.totalSpots,
+                occupied,
+                free: z.totalSpots - occupied,
+                occupancyPct: `${((occupied / z.totalSpots) * 100).toFixed(1)}%`,
+            });
+        }
+
+        console.log(`[MemberSync API] Uvoz početnog stanja kopna uspješno dovršen: ${occupanciesToInsert.length} zauzeća.`);
+
+        res.json({
+            success: true,
+            totalImported: occupanciesToInsert.length,
+            vesselsCreatedCount,
+            usersCreatedCount,
+            breakdown,
+            message: `Uspješno uvezeno ${occupanciesToInsert.length} plovila u početno stanje kopna na poslužitelju.`,
+        });
+    } catch (err: any) {
+        console.error("[MemberSync API] Greška pri uvozu početnog stanja kopna:", err);
+        res.status(500).json({
+            success: false,
+            error: `Greška pri uvozu početnog stanja kopna: ${err?.message || err}`,
         });
     }
 });

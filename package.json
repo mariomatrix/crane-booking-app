@@ -13,9 +13,11 @@
     "db:push": "drizzle-kit push",
     "db:clean-members": "tsx server/scripts/cleanMembers.ts",
     "db:seed-akvatorij": "tsx server/scripts/seedAkvatorij.ts",
+    "db:import-land": "tsx server/scripts/importInitialLandState.ts",
     "migrate": "node dist/migrate.js",
     "sync:brod": "tsx server/scripts/sync-brod-manual.ts",
     "sync:push": "tsx server/memberSync/agent/cli.ts",
+    "sync:push-land": "tsx server/scripts/pushLandStateToRemote.ts",
     "sync:daemon": "tsx server/memberSync/agent/daemon.ts"
   },
   "dependencies": {
