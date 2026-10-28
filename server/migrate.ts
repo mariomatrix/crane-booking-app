@@ -55,7 +55,9 @@ async function runMigration() {
             ADD COLUMN IF NOT EXISTS "city" varchar(100) DEFAULT 'Split' NOT NULL,
             ADD COLUMN IF NOT EXISTS "postal_code" varchar(20) DEFAULT '21000' NOT NULL,
             ADD COLUMN IF NOT EXISTS "client_category" "public"."client_category" DEFAULT 'member' NOT NULL,
-            ADD COLUMN IF NOT EXISTS "pin_code" varchar(10)
+            ADD COLUMN IF NOT EXISTS "pin_code" varchar(10),
+            ADD COLUMN IF NOT EXISTS "email_verified" boolean DEFAULT false NOT NULL,
+            ADD COLUMN IF NOT EXISTS "image" text
         `;
         console.log("User table columns verified.");
     } catch (e: any) {
@@ -72,6 +74,51 @@ async function runMigration() {
             )
         `;
         console.log("operator_cranes table verified.");
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "auth_sessions" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "expires_at" timestamp NOT NULL,
+                "token" varchar(255) NOT NULL UNIQUE,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL,
+                "ip_address" text,
+                "user_agent" text,
+                "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "auth_sessions_user_id_idx" ON "auth_sessions" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "auth_sessions_token_idx" ON "auth_sessions" ("token")`;
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "auth_accounts" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "account_id" text NOT NULL,
+                "provider_id" varchar(100) NOT NULL,
+                "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+                "access_token" text,
+                "refresh_token" text,
+                "id_token" text,
+                "access_token_expires_at" timestamp,
+                "refresh_token_expires_at" timestamp,
+                "scope" text,
+                "password" text,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "auth_accounts_user_id_idx" ON "auth_accounts" ("user_id")`;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "auth_accounts_provider_account_idx" ON "auth_accounts" ("provider_id", "account_id")`;
+        await migrationClient`
+            CREATE TABLE IF NOT EXISTS "auth_verifications" (
+                "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+                "identifier" varchar(320) NOT NULL,
+                "value" text NOT NULL,
+                "expires_at" timestamp NOT NULL,
+                "created_at" timestamp DEFAULT now() NOT NULL,
+                "updated_at" timestamp DEFAULT now() NOT NULL
+            )
+        `;
+        await migrationClient`CREATE INDEX IF NOT EXISTS "auth_verifications_identifier_idx" ON "auth_verifications" ("identifier")`;
+        console.log("Better Auth tables verified.");
     } catch (e: any) {
         console.warn("operator_cranes table verification warning:", e?.message || e);
     }

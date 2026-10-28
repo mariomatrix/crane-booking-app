@@ -88,7 +88,9 @@ export const users = pgTable("users", {
     clientCategory: clientCategoryEnum("client_category").default("member").notNull(),
     role: roleEnum("role").default("user").notNull(),
     userStatus: userStatusEnum("user_status").default("active").notNull(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
     emailVerifiedAt: timestamp("email_verified_at"),
+    image: text("image"),
     anonymizedAt: timestamp("anonymized_at"),
     mustChangePassword: boolean("must_change_password").default(false).notNull(),
     loginMethod: varchar("login_method", { length: 64 }),
@@ -1232,6 +1234,57 @@ export type WorkStoppage = SelectWorkStoppage;
 export type InsertWaitingOffer = typeof waitingOffers.$inferInsert;
 export type SelectWaitingOffer = typeof waitingOffers.$inferSelect;
 export type WaitingOffer = SelectWaitingOffer;
+
+// ─── Better Auth Tables (Sessions, OAuth Accounts, OTP/Magic Link Verifications) ───
+export const authSessions = pgTable("auth_sessions", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    expiresAt: timestamp("expires_at").notNull(),
+    token: varchar("token", { length: 255 }).notNull().unique(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+}, (table) => {
+    return {
+        userIdIdx: index("auth_sessions_user_id_idx").on(table.userId),
+        tokenIdx: index("auth_sessions_token_idx").on(table.token),
+    };
+});
+
+export const authAccounts = pgTable("auth_accounts", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: text("account_id").notNull(),
+    providerId: varchar("provider_id", { length: 100 }).notNull(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at"),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        userIdIdx: index("auth_accounts_user_id_idx").on(table.userId),
+        providerAccountIdx: index("auth_accounts_provider_account_idx").on(table.providerId, table.accountId),
+    };
+});
+
+export const authVerifications = pgTable("auth_verifications", {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    identifier: varchar("identifier", { length: 320 }).notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+    return {
+        identifierIdx: index("auth_verifications_identifier_idx").on(table.identifier),
+    };
+});
 
 
 

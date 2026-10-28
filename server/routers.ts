@@ -553,6 +553,176 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    sendEmailOtp: publicProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const { sendEmailOtpCode } = await import("./_core/betterAuth");
+        await sendEmailOtpCode(input.email);
+        return { success: true };
+      }),
+
+    verifyEmailOtp: publicProcedure
+      .input(
+        z.object({
+          email: z.string().email(),
+          otp: z.string().length(6),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { verifyEmailOtpCode } = await import("./_core/betterAuth");
+          const result = await verifyEmailOtpCode({
+            email: input.email,
+            otp: input.otp,
+            ipAddress: ctx.req.ip,
+            userAgent: ctx.req.headers["user-agent"],
+          });
+          await issueTokenPair(String(result.user.id), result.user.role, ctx);
+          return {
+            success: true,
+            role: result.user.role,
+            needsMemberClaim: result.needsMemberClaim,
+          };
+        } catch (err: any) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: err?.message || "Neispravan ili istekao OTP kod.",
+          });
+        }
+      }),
+
+    sendMagicLink: publicProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input, ctx }) => {
+        const { sendMagicLinkUrl } = await import("./_core/betterAuth");
+        const baseUrl =
+          process.env.PUBLIC_URL ||
+          `${ctx.req.protocol}://${ctx.req.get("host") || "localhost:3000"}`;
+        await sendMagicLinkUrl(input.email, baseUrl);
+        return { success: true };
+      }),
+
+    verifyMagicLink: publicProcedure
+      .input(z.object({ token: z.string().min(10) }))
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { verifyMagicLinkToken } = await import("./_core/betterAuth");
+          const result = await verifyMagicLinkToken({
+            token: input.token,
+            ipAddress: ctx.req.ip,
+            userAgent: ctx.req.headers["user-agent"],
+          });
+          await issueTokenPair(String(result.user.id), result.user.role, ctx);
+          return {
+            success: true,
+            role: result.user.role,
+            needsMemberClaim: result.needsMemberClaim,
+          };
+        } catch (err: any) {
+          throw new TRPCError({
+            code: "UNAUTHORIZED",
+            message: err?.message || "Poveznica za prijavu je neispravna ili je istekla.",
+          });
+        }
+      }),
+
+    claimMemberProfile: protectedProcedure
+      .input(
+        z.object({
+          oib: z
+            .string()
+            .length(11)
+            .refine(isValidOib, { message: "OIB nije ispravan." }),
+          matBroj: z.string().min(1).max(20),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        try {
+          const { claimSyncedMemberProfile } = await import("./_core/betterAuth");
+          const result = await claimSyncedMemberProfile({
+            currentUserId: ctx.user.id,
+            oib: input.oib,
+            matBroj: input.matBroj,
+          });
+          const mergedUser = await getUserById(result.mergedUserId);
+          await issueTokenPair(
+            result.mergedUserId,
+            mergedUser?.role || "user",
+            ctx
+          );
+          return {
+            success: true,
+            memberName: result.memberName,
+            legacyMatBroj: result.legacyMatBroj,
+          };
+        } catch (err: any) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message:
+              err?.message ||
+              "Povezivanje s članskim profilom nije uspjelo.",
+          });
+        }
+      }),
+
+    requestCommercialAccess: protectedProcedure
+      .input(
+        z.object({
+          firstName: z.string().min(1).max(100),
+          lastName: z.string().min(1).max(100),
+          phone: z.string().min(5).max(50),
+          oib: z
+            .string()
+            .length(11)
+            .refine(isValidOib, { message: "OIB nije ispravan." })
+            .optional()
+            .nullable(),
+          isLegalEntity: z.boolean().optional(),
+          companyName: z.string().max(255).optional().nullable(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const cleanOib = input.oib ? input.oib.trim() : null;
+        const fullName =
+          input.isLegalEntity && input.companyName
+            ? input.companyName.trim()
+            : `${input.firstName.trim()} ${input.lastName.trim()}`.trim();
+
+        await db
+          .update(users)
+          .set({
+            firstName: input.firstName.trim(),
+            lastName: input.lastName.trim(),
+            name: fullName,
+            phone: input.phone.trim(),
+            oib: cleanOib,
+            isLegalEntity: Boolean(input.isLegalEntity),
+            companyName: input.companyName?.trim() || null,
+            clientCategory: "commercial",
+            userStatus: "active",
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, ctx.user.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "commercial_access_requested",
+          entityType: "user",
+          entityId: ctx.user.id,
+          payload: {
+            fullName,
+            phone: input.phone,
+            oib: cleanOib,
+            companyName: input.companyName,
+          },
+        });
+
+        return { success: true };
+      }),
+
     resendVerification: protectedProcedure.mutation(async ({ ctx }) => {
       if (ctx.user.emailVerifiedAt) {
         throw new TRPCError({
@@ -3281,16 +3451,11 @@ export const appRouter = router({
           sysSettings
         );
 
-        const bufferMin = Number(sysSettings.bufferMinutes ?? "15");
-        const effectiveEnd = new Date(
-          input.scheduledEnd.getTime() + bufferMin * 60000
-        );
-
         if (targetCraneId) {
           const hasOverlap = await checkOverlap(
             targetCraneId,
             input.scheduledStart,
-            effectiveEnd,
+            input.scheduledEnd,
             input.id
           );
           if (hasOverlap)
@@ -3323,6 +3488,7 @@ export const appRouter = router({
             .set({
               scheduledStart: input.scheduledStart,
               scheduledEnd: input.scheduledEnd,
+              durationMin: Math.max(30, Math.round((input.scheduledEnd.getTime() - input.scheduledStart.getTime()) / 60000)),
               craneId: targetCraneId,
               updatedAt: new Date(),
             })

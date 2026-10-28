@@ -1,6 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { jwtVerify, SignJWT } from "jose";
+import { fromNodeHeaders } from "better-auth/node";
 import {
   COOKIE_NAME,
   REFRESH_COOKIE_NAME,
@@ -9,6 +10,7 @@ import {
 import { parse as parseCookieHeader } from "cookie";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
+import { getAuth } from "./betterAuth";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -24,7 +26,8 @@ export function getJwtSecret() {
 
 export function getRefreshSecret() {
   const secret = process.env.JWT_REFRESH_SECRET;
-  if (!secret) throw new Error("JWT_REFRESH_SECRET environment variable is not set");
+  if (!secret)
+    throw new Error("JWT_REFRESH_SECRET environment variable is not set");
   return new TextEncoder().encode(secret);
 }
 
@@ -95,7 +98,6 @@ export async function createContext(
         if (userId) {
           user = (await db.getUserById(userId)) ?? null;
           if (user) {
-            // Issue a new access token and set it as a cookie
             const newAccessToken = await issueAccessToken(user.id);
             const cookieOptions = getSessionCookieOptions(opts.req);
             opts.res.cookie(COOKIE_NAME, newAccessToken, {
@@ -103,6 +105,30 @@ export async function createContext(
               maxAge: ACCESS_TOKEN_EXPIRY_MS,
             });
           }
+        }
+      }
+
+      // 3. Check Better Auth session (OAuth / Email OTP / Magic Link sessions stored in auth_sessions)
+      if (!user) {
+        try {
+          const auth = getAuth();
+          const baSession = await auth.api.getSession({
+            headers: fromNodeHeaders(opts.req.headers),
+          });
+          if (baSession?.user?.id) {
+            user = (await db.getUserById(baSession.user.id)) ?? null;
+            if (user) {
+              // Bridge Better Auth session to JWT cookie for fast path & legacy endpoints
+              const newAccessToken = await issueAccessToken(user.id);
+              const cookieOptions = getSessionCookieOptions(opts.req);
+              opts.res.cookie(COOKIE_NAME, newAccessToken, {
+                ...cookieOptions,
+                maxAge: ACCESS_TOKEN_EXPIRY_MS,
+              });
+            }
+          }
+        } catch {
+          // Ignore Better Auth lookup error if DB is unavailable in unit tests
         }
       }
     }

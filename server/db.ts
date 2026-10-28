@@ -77,6 +77,8 @@ export async function createLocalUser(data: {
   postalCode?: string;
   clientCategory?: "member" | "commercial";
   mustChangePassword?: boolean;
+  userStatus?: "active" | "suspended" | "pending_verification";
+  loginMethod?: string;
 }) {
   const db = await getDb();
   if (!db) throw new Error("DB not available");
@@ -97,6 +99,7 @@ export async function createLocalUser(data: {
     postalCode: data.postalCode || "21000",
     clientCategory: data.clientCategory || "member",
     mustChangePassword: data.mustChangePassword ?? false,
+    userStatus: data.userStatus || "active",
     loginMethod: "email",
     lastSignedIn: new Date(),
   }).returning({ id: users.id });

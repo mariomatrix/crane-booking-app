@@ -689,7 +689,9 @@ export default function AdminCalendar() {
         }
 
         const id = String(info.event.extendedProps.reservationId || info.event.id);
-        const durationMin = info.event.extendedProps?.durationMin || 30;
+        const durationMin = (info.event.end && info.event.start)
+            ? Math.max(30, Math.round((info.event.end.getTime() - info.event.start.getTime()) / 60000))
+            : (info.event.extendedProps?.durationMin || 30);
 
         if (viewMode !== 'master') {
             const dropStart = info.event.start!;

@@ -380,3 +380,62 @@ export async function sendLandSpotAvailable(opts: {
     return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
 }
 
+
+export async function sendAuthOtpEmail(opts: {
+    to: string;
+    otp: string;
+    type: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? `Vaš jednokratni kod za prijavu: ${opts.otp} — PŠD Špinut`
+        : `Your One-Time Login Code: ${opts.otp} — PŠD Špinut`;
+
+    const content = `
+        <h2>${isHr ? "Prijava bez lozinke" : "Passwordless Sign-In"}</h2>
+        <p>${isHr
+            ? "Unesite sljedeći 6-znamenkasti kod u aplikaciju za prijavu:"
+            : "Enter the following 6-digit code in the application to sign in:"
+        }</p>
+        <div style="margin:24px 0;padding:16px 24px;background:#f1f5f9;border-radius:8px;text-align:center;font-size:32px;font-weight:bold;letter-spacing:8px;color:#0f172a;font-family:monospace;">
+            ${opts.otp}
+        </div>
+        <p style="color:#64748b;font-size:13px;">${isHr
+            ? "Ovaj kod vrijedi 10 minuta. Ako niste zatražili prijavu, slobodno zanemarite ovu poruku."
+            : "This code is valid for 10 minutes. If you did not request this code, you can safely ignore this email."
+        }</p>
+    `;
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
+
+export async function sendMagicLinkEmail(opts: {
+    to: string;
+    url: string;
+    lang?: "hr" | "en";
+}) {
+    const { lang = "hr" } = opts;
+    const isHr = lang === "hr";
+    const subject = isHr
+        ? `Poveznica za brzu prijavu — PŠD Špinut`
+        : `Magic Link Sign-In — PŠD Špinut`;
+
+    const content = `
+        <h2>${isHr ? "Prijava jednim klikom" : "One-Click Sign-In"}</h2>
+        <p>${isHr
+            ? "Kliknite na donji gumb za izravnu i sigurnu prijavu u sustav rezervacija dizalica PŠD Špinut:"
+            : "Click the button below to securely sign in to the PŠD Špinut crane booking system:"
+        }</p>
+        <div style="margin:28px 0">
+            <a href="${opts.url}" style="background:#2563eb;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:bold;display:inline-block;">
+                ${isHr ? "Prijavi se u aplikaciju" : "Sign In to Application"}
+            </a>
+        </div>
+        <p style="color:#64748b;font-size:13px;">${isHr
+            ? "Ova poveznica vrijedi 10 minuta i može se iskoristiti samo jednom."
+            : "This link is valid for 10 minutes and can only be used once."
+        }</p>
+    `;
+    return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });
+}
