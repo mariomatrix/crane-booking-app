@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { buildGoogleCalendarUrl, generateReservationToken } from "../services/icalService";
 
 export interface EmailPayload {
     to: string;
@@ -93,6 +94,7 @@ export async function sendReservationConfirmation(opts: {
     startDate: Date;
     endDate: Date;
     craneLocation: string;
+    reservationId?: string;
     adminNotes?: string;
     vesselRegistration?: string;
     vesselType?: string;
@@ -107,6 +109,17 @@ export async function sendReservationConfirmation(opts: {
         : `Reservation Confirmed — ${opts.craneName}`;
     const startStr = opts.startDate.toLocaleString(isHr ? "hr-HR" : "en-GB", { timeZone: "Europe/Zagreb" });
     const endStr = opts.endDate.toLocaleString(isHr ? "hr-HR" : "en-GB", { timeZone: "Europe/Zagreb" });
+
+    const gcalUrl = buildGoogleCalendarUrl({
+        title: `⚓ Termin dizalice (${opts.craneName})${opts.vesselRegistration ? ` — ${opts.vesselRegistration}` : ""}`,
+        start: opts.startDate,
+        end: opts.endDate,
+        details: `Dizalica: ${opts.craneName}\nLokacija: ${opts.craneLocation}${opts.adminNotes ? `\nNapomena: ${opts.adminNotes}` : ""}`,
+        location: opts.craneLocation,
+    });
+    const icsUrl = opts.reservationId
+        ? `${BASE_URL}/api/calendar/reservation/${opts.reservationId}.ics?token=${generateReservationToken(opts.reservationId)}`
+        : null;
 
     const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
@@ -129,6 +142,10 @@ export async function sendReservationConfirmation(opts: {
       
       ${opts.adminNotes ? `<tr><td colspan="2" style="border-top:1px solid #eee;padding:8px 0 4px 0;font-size:12px;color:#888;text-transform:uppercase">${isHr ? "Napomena administratora" : "Admin Note"}</td></tr><tr><td colspan="2" style="padding:4px 0;color:#2563eb">${opts.adminNotes}</td></tr>` : ""}
     </table>
+    <div style="margin:20px 0;display:flex;gap:12px;flex-wrap:wrap;">
+      ${icsUrl ? `<a href="${icsUrl}" style="background:#0f172a;color:#fff;padding:10px 18px;text-decoration:none;border-radius:6px;font-size:13px;font-weight:bold;display:inline-block;margin-right:8px;">📅 ${isHr ? "Dodaj u kalendar (.ics)" : "Add to Calendar (.ics)"}</a>` : ""}
+      <a href="${gcalUrl}" style="background:#2563eb;color:#fff;padding:10px 18px;text-decoration:none;border-radius:6px;font-size:13px;font-weight:bold;display:inline-block;">🗓️ Google Calendar</a>
+    </div>
     <p style="margin-top:24px">${isHr ? "Vidimo se!" : "See you there!"}</p>
   `;
     return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });

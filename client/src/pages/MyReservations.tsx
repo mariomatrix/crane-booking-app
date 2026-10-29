@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, CalendarDays, Loader2, Plus, X, Anchor, Clock, MessageSquare, Check, Circle } from "lucide-react";
+import { ArrowLeft, CalendarDays, CalendarPlus, Copy, ExternalLink, Loader2, Plus, X, Anchor, Clock, MessageSquare, Check, Circle, Rss } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
@@ -32,12 +32,18 @@ export default function MyReservations() {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [chatReservationId, setChatReservationId] = useState<string | null>(null);
+  const [subDialogOpen, setSubDialogOpen] = useState(false);
 
   const isHr = lang === "hr";
 
   const { data: reservationsList = [], isLoading } = trpc.reservation.myReservations.useQuery(
     undefined,
     { enabled: !!user }
+  );
+
+  const { data: subscriptionLinks } = trpc.calendar.getSubscriptionLinks.useQuery(
+    undefined,
+    { enabled: !!user && subDialogOpen }
   );
 
   const { data: serviceTypes = [] } = trpc.serviceType.list.useQuery({ onlyActive: false });
@@ -151,10 +157,16 @@ export default function MyReservations() {
                 {isHr ? "Pratite status vaših zahtjeva za rezervaciju." : "Track the status of your reservation requests."}
               </p>
             </div>
-            <Button onClick={() => setLocation("/new-reservation")}>
-              <Plus className="h-4 w-4 mr-2" />
-              {isHr ? "Nova rezervacija" : "New Reservation"}
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button variant="outline" onClick={() => setSubDialogOpen(true)}>
+                <Rss className="h-4 w-4 mr-2 text-blue-600" />
+                {isHr ? "Pretplata na kalendar (.ics)" : "Calendar Feed (.ics)"}
+              </Button>
+              <Button onClick={() => setLocation("/new-reservation")}>
+                <Plus className="h-4 w-4 mr-2" />
+                {isHr ? "Nova rezervacija" : "New Reservation"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -245,6 +257,22 @@ export default function MyReservations() {
                         <StatusStepper status={reservation.status} />
                       </div>
                       <div className="flex flex-col gap-2 shrink-0">
+                        {reservation.scheduledStart && (reservation.status === "approved" || reservation.status === "completed") && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-blue-200 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300"
+                            asChild
+                          >
+                            <a
+                              href={(reservation as any).icsDownloadPath || `/api/calendar/reservation/${reservation.id}.ics`}
+                              download
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5 mr-1.5" />
+                              {isHr ? "U kalendar (.ics)" : "Add to Calendar (.ics)"}
+                            </a>
+                          </Button>
+                        )}
                         <div className="relative">
                           <Button
                             variant="outline"
@@ -333,6 +361,74 @@ export default function MyReservations() {
             {chatReservationId && (
               <ReservationChat reservationId={chatReservationId} pollInterval={15000} />
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* iCal Subscription Dialog */}
+        <Dialog open={subDialogOpen} onOpenChange={setSubDialogOpen}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Rss className="h-5 w-5 text-blue-600" />
+                {isHr ? "Pretplata na osobni kalendar (.ics)" : "Personal Calendar Subscription (.ics)"}
+              </DialogTitle>
+              <DialogDescription>
+                {isHr
+                  ? "Povežite svoje odobrene termine dizalice s Google Calendarom, Apple Calendarom ili Outlookom. Kalendar se automatski sinkronizira pri svakoj promjeni termina."
+                  : "Sync your approved crane reservations with Google Calendar, Apple Calendar, or Outlook."}
+              </DialogDescription>
+            </DialogHeader>
+            {subscriptionLinks?.userFeedPath ? (
+              <div className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                    {isHr ? "Vaš tajni iCal URL (Pretplata)" : "Your private iCal Feed URL"}
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}${subscriptionLinks.userFeedPath}`}
+                      className="flex-1 text-xs font-mono bg-muted px-3 py-2 rounded-md border select-all"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}${subscriptionLinks.userFeedPath}`);
+                        toast.success(isHr ? "iCal URL kopiran u međuspremnik!" : "iCal URL copied!");
+                      }}
+                    >
+                      <Copy className="h-4 w-4 mr-1" />
+                      {isHr ? "Kopiraj" : "Copy"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    asChild
+                  >
+                    <a
+                      href={`${window.location.origin.replace(/^https?:\/\//, "webcal://")}${subscriptionLinks.userFeedPath}`}
+                    >
+                      <ExternalLink className="h-4 w-4 mr-1.5" />
+                      {isHr ? "Otvori u Kalendar aplikaciji (webcal://)" : "Open in Calendar App (webcal://)"}
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex justify-center py-6">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSubDialogOpen(false)}>
+                {isHr ? "Zatvori" : "Close"}
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>

@@ -99,6 +99,10 @@ async function startServer() {
   // Mobile REST API v1
   app.use("/api/mobile/v1", mobileApiRouter);
 
+  // iCalendar (.ics) Export & Live Subscription Feeds (Phase 3)
+  const icalRouter = (await import("../routes/icalRoutes")).default;
+  app.use("/api/calendar", icalRouter);
+
   // SSE Real-time Calendar Sync Stream
   app.get("/api/events/calendar-stream", async (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");

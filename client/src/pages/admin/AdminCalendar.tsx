@@ -22,7 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus, ClipboardList, Ban } from "lucide-react";
+import { Printer, Hammer, Loader2, Filter, Users, Anchor, ChevronLeft, ChevronRight, ListTodo, CheckCircle2, XCircle, Clock, Plus, ClipboardList, Ban, Rss, Copy, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -75,7 +75,13 @@ export default function AdminCalendar() {
     });
     const [selectedCrane, setSelectedCrane] = useState<string>("all");
     const [isMaintOpen, setIsMaintOpen] = useState(false);
+    const [isIcalModalOpen, setIsIcalModalOpen] = useState(false);
     const [visibleRange, setVisibleRange] = useState<{ start: Date; end: Date } | null>(null);
+
+    const { data: subscriptionLinks } = trpc.calendar.getSubscriptionLinks.useQuery(
+        undefined,
+        { enabled: isIcalModalOpen }
+    );
 
     // Refs
     const draggableRef = useRef<HTMLDivElement>(null);
@@ -1099,6 +1105,126 @@ export default function AdminCalendar() {
                                     submitButtonText="Spremi i potvrdi rezervaciju"
                                 />
                             )}
+                        </DialogContent>
+                    </Dialog>
+                    <Button
+                        variant="outline"
+                        onClick={() => setIsIcalModalOpen(true)}
+                        className="gap-2 h-9 border-blue-200 text-blue-700 hover:bg-blue-50"
+                    >
+                        <Rss className="h-4 w-4" />
+                        <span className="hidden sm:inline">iCal (.ics)</span>
+                    </Button>
+                    <Dialog open={isIcalModalOpen} onOpenChange={setIsIcalModalOpen}>
+                        <DialogContent className="max-w-xl">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Rss className="h-5 w-5 text-blue-600" />
+                                    Live iCal (.ics) Pretplata na operativni kalendar
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Povežite operativni raspored dizalica i blokada održavanja s Google Calendarom, Apple Calendarom (iPhone/Mac) ili Outlookom. Kalendar se automatski osvježava.
+                                </DialogDescription>
+                            </DialogHeader>
+                            {subscriptionLinks ? (
+                                <div className="space-y-4 py-2 max-h-[65vh] overflow-y-auto pr-1">
+                                    {subscriptionLinks.operatorAllCranesFeedPath && (
+                                        <div className="p-3 rounded-lg border bg-blue-50/40 dark:bg-blue-950/20 space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <Label className="text-xs font-bold uppercase text-blue-800 dark:text-blue-300">
+                                                    Sve dizalice (Zbirni operativni kalendar)
+                                                </Label>
+                                                <Badge variant="secondary" className="text-[10px]">Preporučeno</Badge>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Input
+                                                    readOnly
+                                                    value={`${window.location.origin}${subscriptionLinks.operatorAllCranesFeedPath}`}
+                                                    className="text-xs font-mono h-8 bg-background"
+                                                />
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    className="h-8 shrink-0"
+                                                    onClick={() => {
+                                                        navigator.clipboard.writeText(`${window.location.origin}${subscriptionLinks.operatorAllCranesFeedPath}`);
+                                                        toast.success("URL za sve dizalice kopiran u međuspremnik!");
+                                                    }}
+                                                >
+                                                    <Copy className="h-3.5 w-3.5 mr-1" />
+                                                    Kopiraj
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="default"
+                                                    className="h-8 shrink-0"
+                                                    asChild
+                                                >
+                                                    <a href={`${window.location.origin.replace(/^https?:\/\//, "webcal://")}${subscriptionLinks.operatorAllCranesFeedPath}`}>
+                                                        <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                                                        webcal://
+                                                    </a>
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {subscriptionLinks.craneFeeds && subscriptionLinks.craneFeeds.length > 0 && (
+                                        <div className="space-y-2.5">
+                                            <Label className="text-xs font-semibold uppercase text-muted-foreground">
+                                                Pojedinačne dizalice
+                                            </Label>
+                                            {subscriptionLinks.craneFeeds.map((cf) => (
+                                                <div key={cf.craneId} className="p-2.5 rounded-md border bg-muted/20 space-y-1.5">
+                                                    <div className="text-xs font-semibold flex items-center gap-1.5">
+                                                        <Anchor className="h-3.5 w-3.5 text-primary" />
+                                                        {cf.craneName}
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Input
+                                                            readOnly
+                                                            value={`${window.location.origin}${cf.feedPath}`}
+                                                            className="text-xs font-mono h-8 bg-background"
+                                                        />
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="h-8 shrink-0"
+                                                            onClick={() => {
+                                                                navigator.clipboard.writeText(`${window.location.origin}${cf.feedPath}`);
+                                                                toast.success(`URL za ${cf.craneName} kopiran!`);
+                                                            }}
+                                                        >
+                                                            <Copy className="h-3.5 w-3.5 mr-1" />
+                                                            Kopiraj
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="secondary"
+                                                            className="h-8 shrink-0"
+                                                            asChild
+                                                        >
+                                                            <a href={`${window.location.origin.replace(/^https?:\/\//, "webcal://")}${cf.feedPath}`}>
+                                                                <ExternalLink className="h-3.5 w-3.5 mr-1" />
+                                                                webcal://
+                                                            </a>
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex justify-center py-8">
+                                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                                </div>
+                            )}
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setIsIcalModalOpen(false)}>
+                                    Zatvori
+                                </Button>
+                            </DialogFooter>
                         </DialogContent>
                     </Dialog>
                     <PDFDownloadLink

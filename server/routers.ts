@@ -33,6 +33,11 @@ import { landDispatchRouter } from "./landDispatch/landDispatch.router";
 import { validateReservationConstraintsAndOverrides } from "./landDispatch/feasibility";
 import { optimizationRouter } from "./optimization/optimization.router";
 import {
+  generateReservationToken,
+  generateFeedToken,
+  buildGoogleCalendarUrl,
+} from "./services/icalService";
+import {
   listCranes,
   getCraneById,
   createCrane,
@@ -2618,11 +2623,16 @@ export const appRouter = router({
         .where(eq(reservations.userId, ctx.user.id))
         .orderBy(desc(reservations.createdAt));
 
-      return items.map(row => ({
-        ...row.reservation,
-        crane: row.crane?.id ? row.crane : null,
-        unreadCount: row.unreadCount,
-      }));
+      return items.map(row => {
+        const icsToken = generateReservationToken(row.reservation.id);
+        return {
+          ...row.reservation,
+          crane: row.crane?.id ? row.crane : null,
+          unreadCount: row.unreadCount,
+          icsToken,
+          icsDownloadPath: `/api/calendar/reservation/${row.reservation.id}.ics?token=${icsToken}`,
+        };
+      });
     }),
 
     getById: protectedProcedure
@@ -3301,6 +3311,7 @@ export const appRouter = router({
             startDate: input.scheduledStart,
             endDate: scheduledEnd,
             craneLocation: crane.location || crane.name,
+            reservationId: input.id,
             adminNotes: input.adminNote,
             vesselRegistration: reservation.vesselRegistration || undefined,
             vesselType: reservation.vesselType || undefined,
@@ -4593,6 +4604,85 @@ export const appRouter = router({
           slots,
           availableSlots,
           otherCranesSummary,
+        };
+      }),
+
+    getSubscriptionLinks: protectedProcedure.query(async ({ ctx }) => {
+      const userId = ctx.user.id;
+      const isOperatorOrAdmin =
+        ctx.user.role === "admin" || ctx.user.role === "operator";
+
+      const userToken = generateFeedToken(userId, "user", "all");
+      const userFeedPath = `/api/calendar/feed.ics?userId=${encodeURIComponent(userId)}&scope=user&craneId=all&token=${userToken}`;
+
+      let operatorAllCranesFeedPath: string | null = null;
+      const craneFeeds: {
+        craneId: string;
+        craneName: string;
+        feedPath: string;
+      }[] = [];
+
+      if (isOperatorOrAdmin) {
+        const opAllToken = generateFeedToken(userId, "operator", "all");
+        operatorAllCranesFeedPath = `/api/calendar/feed.ics?userId=${encodeURIComponent(userId)}&scope=operator&craneId=all&token=${opAllToken}`;
+
+        const allCranes = await listCranes(true);
+        for (const c of allCranes) {
+          const cToken = generateFeedToken(userId, "operator", c.id);
+          craneFeeds.push({
+            craneId: c.id,
+            craneName: c.name,
+            feedPath: `/api/calendar/feed.ics?userId=${encodeURIComponent(userId)}&scope=operator&craneId=${encodeURIComponent(c.id)}&token=${cToken}`,
+          });
+        }
+      }
+
+      return {
+        userFeedPath,
+        isOperatorOrAdmin,
+        operatorAllCranesFeedPath,
+        craneFeeds,
+      };
+    }),
+
+    getReservationIcsLinks: protectedProcedure
+      .input(z.object({ reservationId: z.string().uuid() }))
+      .query(async ({ input, ctx }) => {
+        const reservation = await getReservationById(input.reservationId);
+        if (!reservation) {
+          throw new TRPCError({ code: "NOT_FOUND" });
+        }
+        const isStaff =
+          ctx.user.role === "admin" || ctx.user.role === "operator";
+        if (!isStaff && reservation.userId !== ctx.user.id) {
+          throw new TRPCError({ code: "FORBIDDEN" });
+        }
+
+        const token = generateReservationToken(reservation.id);
+        const icsDownloadPath = `/api/calendar/reservation/${reservation.id}.ics?token=${token}`;
+
+        let googleCalendarUrl: string | null = null;
+        if (reservation.scheduledStart) {
+          const crane = reservation.craneId
+            ? await getCraneById(reservation.craneId)
+            : null;
+          const start = new Date(reservation.scheduledStart);
+          const durMin = Number(reservation.durationMin) || 30;
+          const end = reservation.scheduledEnd
+            ? new Date(reservation.scheduledEnd)
+            : new Date(start.getTime() + durMin * 60000);
+          googleCalendarUrl = buildGoogleCalendarUrl({
+            title: `⚓ Termin dizalice (${crane?.name || "Dizalica"})${reservation.vesselRegistration ? ` — ${reservation.vesselRegistration}` : ""}`,
+            start,
+            end,
+            details: `Rezervacija: ${reservation.reservationNumber || reservation.id.slice(0, 8)}\nDizalica: ${crane?.name || "-"}`,
+            location: crane?.location || "PŠD Špinut, Lučica 7, 21000 Split",
+          });
+        }
+
+        return {
+          icsDownloadPath,
+          googleCalendarUrl,
         };
       }),
   }),
