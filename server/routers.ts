@@ -30,6 +30,7 @@ import { invoicesRouter } from "./invoices.router";
 import { resourcesRouter } from "./resources.router";
 import { landFlowRouter } from "./landFlow.router";
 import { landDispatchRouter } from "./landDispatch/landDispatch.router";
+import { optimizationRouter } from "./optimization/optimization.router";
 import {
   listCranes,
   getCraneById,
@@ -6265,6 +6266,7 @@ export const appRouter = router({
   // ─── Land Flow & Dispatcher Matrix ─────────────────────────────────────
   landFlow: landFlowRouter,
   landDispatch: landDispatchRouter,
+  optimization: optimizationRouter,
 });
 
 export type AppRouter = typeof appRouter;
