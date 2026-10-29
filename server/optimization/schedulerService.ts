@@ -21,6 +21,7 @@ import type {
   OptimizationZone,
   OptimizationAffinity,
   ExistingSlotOccupation,
+  OptimizationOverrides,
 } from "./types";
 import { toZagreb, fromZagreb } from "@shared/timezone";
 
@@ -88,13 +89,14 @@ export class SchedulerOptimizationService {
     dateStr: string;
     requestIds?: string[]; // opcionalno: ako se želi optimizirati specifičan skup zahtjeva
     maxConcurrentTeams?: number;
+    overrides?: OptimizationOverrides;
   }): Promise<OptimizationResult> {
     const db = await getDb();
     if (!db) {
       throw new Error("Baza podataka nije dostupna");
     }
 
-    const { dateStr, requestIds, maxConcurrentTeams = 2 } = params;
+    const { dateStr, requestIds, maxConcurrentTeams = 2, overrides } = params;
     const wh = await this.getWorkingHoursForDate(dateStr);
     const timeSlots = this.generateTimeSlots(wh.from, wh.to);
 
@@ -249,6 +251,7 @@ export class SchedulerOptimizationService {
       affinities: optAffinities,
       existingOccupations,
       maxConcurrentTeams,
+      overrides,
     };
 
     return await this.optimizer.solve(problemInput);
@@ -283,6 +286,8 @@ export class SchedulerOptimizationService {
           scheduledEnd: endIso,
           durationMin: a.durationMin,
           status: "approved",
+          teamOverride: a.hasOverride ?? false,
+          teamOverrideReason: a.overrideReasons ? a.overrideReasons.join("; ") : null,
           adminNote: sql`COALESCE(admin_note || E'\n', '') || 'Optimizirano HiGHS solverom: ' || ${a.explanation}`,
           updatedAt: new Date(),
         })
@@ -303,6 +308,7 @@ export class SchedulerOptimizationService {
   async recommendBestSlotForRequest(params: {
     requestId: string;
     targetDateStr: string;
+    overrides?: OptimizationOverrides;
   }) {
     const db = await getDb();
     if (!db) throw new Error("Baza podataka nije dostupna");
@@ -310,6 +316,7 @@ export class SchedulerOptimizationService {
     const optResult = await this.optimizeDailySchedule({
       dateStr: params.targetDateStr,
       requestIds: [params.requestId],
+      overrides: params.overrides,
     });
 
     const assignment = optResult.assignments.find((a) => a.requestId === params.requestId);

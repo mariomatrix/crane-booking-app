@@ -4,9 +4,20 @@ import { SchedulerOptimizationService } from "./schedulerService";
 
 const schedulerService = new SchedulerOptimizationService();
 
+const overridesSchema = z
+  .object({
+    allowTeamOverride: z.boolean().optional(),
+    maxConcurrentTeamsOverride: z.number().int().min(1).max(10).optional(),
+    allowZoneCapacityOverride: z.boolean().optional(),
+    allowBlockedAffinityOverride: z.boolean().optional(),
+    weightTolerancePercent: z.number().min(0).max(50).default(10),
+  })
+  .optional();
+
 export const optimizationRouter = router({
   /**
    * Izračunava matematički optimalan dnevni raspored pomoću HiGHS solvera
+   * uz opcionalne dispečerske Overridee (tolerancija nosivosti 10%, timski kapacitet, zona)
    */
   optimizeDailySchedule: protectedProcedure
     .input(
@@ -14,6 +25,7 @@ export const optimizationRouter = router({
         dateStr: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format datuma mora biti YYYY-MM-DD"),
         requestIds: z.array(z.string().uuid()).optional(),
         maxConcurrentTeams: z.number().int().min(1).max(5).default(2),
+        overrides: overridesSchema,
       })
     )
     .query(async ({ input }) => {
@@ -44,6 +56,8 @@ export const optimizationRouter = router({
             affinityScore: z.number(),
             extraTransportMinutes: z.number(),
             matchQuality: z.enum(["optimal", "acceptable", "suboptimal"]),
+            hasOverride: z.boolean().optional(),
+            overrideReasons: z.array(z.string()).optional(),
             explanation: z.string(),
           })
         ),
@@ -64,6 +78,7 @@ export const optimizationRouter = router({
       z.object({
         requestId: z.string().uuid(),
         targetDateStr: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        overrides: overridesSchema,
       })
     )
     .query(async ({ input }) => {

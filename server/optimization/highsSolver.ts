@@ -20,6 +20,7 @@ async function getHighs() {
 export class HighsMarinaOptimizer {
   /**
    * Rješava problem dodjele dizalica, slotova i zona pomoću MILP solvera
+   * uz podršku za dispečerske Overridee (tolerancija nosivosti, timski kapacitet, zona)
    */
   async solve(input: OptimizationProblemInput): Promise<OptimizationResult> {
     const startTime = Date.now();
@@ -33,7 +34,17 @@ export class HighsMarinaOptimizer {
       affinities,
       existingOccupations,
       maxConcurrentTeams = 2,
+      overrides = {},
     } = input;
+
+    // Tolerancija nosivosti dizalice: default 10% prema zahtjevu marine
+    const weightTolerancePercent = overrides.weightTolerancePercent ?? 10;
+    const weightToleranceFactor = 1 + weightTolerancePercent / 100;
+
+    // Efektivni timski limit uz override (npr. 3 istovremena tima umjesto 2)
+    const effectiveTeamLimit = overrides.allowTeamOverride
+      ? (overrides.maxConcurrentTeamsOverride ?? (maxConcurrentTeams + 1))
+      : maxConcurrentTeams;
 
     if (requests.length === 0) {
       return {
@@ -48,6 +59,7 @@ export class HighsMarinaOptimizer {
           unassignedCount: 0,
           averageAffinityScore: 100,
           totalExtraTransportMinutes: 0,
+          overridesCount: 0,
           slotTeamUtilization: {},
           solveTimeMs: Date.now() - startTime,
         },
@@ -91,6 +103,8 @@ export class HighsMarinaOptimizer {
       zoneIndex: number;
       durationSlots: number;
       score: number;
+      hasOverride: boolean;
+      overrideReasons: string[];
     }
 
     const decisionVars: DecisionVar[] = [];
@@ -108,23 +122,33 @@ export class HighsMarinaOptimizer {
         const crane = cranes[cIdx];
         if (!crane.isActive) continue;
 
-        // Provjera nosivosti dizalice
-        if (req.vessel.weightTons > crane.maxCapacityTons) {
-          continue;
+        // Provjera nosivosti dizalice uz zadanu toleranciju (10%)
+        const maxAllowedWeight = crane.maxCapacityTons * weightToleranceFactor;
+        if (req.vessel.weightTons > maxAllowedWeight) {
+          continue; // Preteško čak i s tolerancijom
         }
 
-        // Zone: za operacije na kopnu (lift_from_sea, move, maintenance) bira se zona; za lower_to_sea ili ostalo zona 0
-        const eligibleZones = req.operationCategory === "lift_from_sea" || req.operationCategory === "move"
-          ? zones
-          : zones.length > 0 ? [zones[0]] : [{ id: "none", code: "NONE", name: "Bez zone", totalSpots: 999, freeSpots: 999 }];
+        const isWeightToleranceUsed = req.vessel.weightTons > crane.maxCapacityTons;
+
+        // Zone za smještaj
+        const eligibleZones =
+          req.operationCategory === "lift_from_sea" || req.operationCategory === "move"
+            ? zones
+            : zones.length > 0
+            ? [zones[0]]
+            : [{ id: "none", code: "NONE", name: "Bez zone", totalSpots: 999, freeSpots: 999 }];
 
         for (let zIdx = 0; zIdx < eligibleZones.length; zIdx++) {
           const zone = eligibleZones[zIdx];
           const aff = affinityMap.get(`${crane.id}_${zone.id}`);
 
-          // Fizička neprohodnost
+          // Fizička neprohodnost (osim ako je uključen allowBlockedAffinityOverride)
+          let isBlockedAffinityUsed = false;
           if (aff && !aff.isAllowed) {
-            continue;
+            if (!overrides.allowBlockedAffinityOverride) {
+              continue;
+            }
+            isBlockedAffinityUsed = true;
           }
 
           const affinityScore = aff ? aff.score : 50;
@@ -132,45 +156,76 @@ export class HighsMarinaOptimizer {
 
           // Za svaki mogući početni slot
           for (let sIdx = 0; sIdx <= timeSlots.length - durationSlots; sIdx++) {
-            // Provjera zauzetosti dizalice u svim pokrivenim slotovima
+            // Provjera zauzetosti dizalice u svim pokrivenim slotovima (isti brod/dizalica)
             let conflictWithExisting = false;
+            let isTeamOverrideNeeded = false;
+
             for (let span = 0; span < durationSlots; span++) {
               const currentSlot = sIdx + span;
+              // Ista dizalica ne može dizati dva broda u istom trenutku (apsolutno pravilo)
               if (existingCraneSlotBusy.has(`${crane.id}_${currentSlot}`)) {
                 conflictWithExisting = true;
                 break;
               }
-              // Timsko ograničenje s postojećim rezervacijama
+
+              // Provjera timskog limita
               const craneAlreadyCounted = cranesBusyInSlot.get(currentSlot)?.has(crane.id);
               const teamsAfterAdding = existingTeamsPerSlot[currentSlot] + (craneAlreadyCounted ? 0 : 1);
-              if (teamsAfterAdding > maxConcurrentTeams) {
+
+              if (teamsAfterAdding > effectiveTeamLimit) {
                 conflictWithExisting = true;
                 break;
+              }
+
+              if (teamsAfterAdding > maxConcurrentTeams) {
+                isTeamOverrideNeeded = true;
               }
             }
 
             if (conflictWithExisting) continue;
 
             // Izračun pondera za ciljnu funkciju
-            // Osnovna vrijednost: 1000 za završenu rezervaciju
-            let objWeight = 1000;
-            // Afinitet dizalice prema zoni (+10 po bodu afiniteta)
+            let objWeight = 1000; // Osnovna vrijednost za riješenu rezervaciju
             objWeight += affinityScore * 10;
-            // Penal za ekstra transportno vrijeme (-5 po minuti)
             objWeight -= extraMinutes * 5;
 
-            // Preferirani slot (ako postoji)
-            if (req.preferredSlotIndex !== undefined) {
-              const slotDiff = Math.abs(sIdx - req.preferredSlotIndex);
-              objWeight -= slotDiff * 20; // 20 bodova po 30 min kašnjenja
+            const varOverrideReasons: string[] = [];
+
+            // Ponder za toleranciju nosivosti (penal: -200 bodova)
+            if (isWeightToleranceUsed) {
+              objWeight -= 200;
+              const excessPercent = Math.round(
+                ((req.vessel.weightTons - crane.maxCapacityTons) / crane.maxCapacityTons) * 100
+              );
+              varOverrideReasons.push(
+                `Iskorištena tolerancija nosivosti dizalice (+${excessPercent}% iznad nazivne nosivosti ${crane.maxCapacityTons}t)`
+              );
             }
 
-            // Preferirana dizalica (+50 bodova)
+            // Ponder za timski override (penal: -150 bodova)
+            if (isTeamOverrideNeeded) {
+              objWeight -= 150;
+              varOverrideReasons.push(`Angažiran dodatni 3. operativni tim (dispečerski override)`);
+            }
+
+            // Ponder za blokirani afinitet (penal: -400 bodova)
+            if (isBlockedAffinityUsed) {
+              objWeight -= 400;
+              varOverrideReasons.push(`Nestandardna ruta platoa (blokirani afinitet)`);
+            }
+
+            // Preferirani slot
+            if (req.preferredSlotIndex !== undefined) {
+              const slotDiff = Math.abs(sIdx - req.preferredSlotIndex);
+              objWeight -= slotDiff * 20;
+            }
+
+            // Preferirana dizalica
             if (req.preferredCraneId && req.preferredCraneId === crane.id) {
               objWeight += 50;
             }
 
-            // Hitni zahtjevi (+300 bodova)
+            // Hitni zahtjevi
             if (req.isUrgent) {
               objWeight += 300;
             }
@@ -184,12 +239,14 @@ export class HighsMarinaOptimizer {
               zoneIndex: zIdx,
               durationSlots,
               score: Math.max(1, objWeight),
+              hasOverride: varOverrideReasons.length > 0,
+              overrideReasons: varOverrideReasons,
             };
 
             decisionVars.push(dvar);
             varsByRequest.get(rIdx)!.push(dvar);
 
-            // Indeksiranje po pokrivenim slotovima i dizalicama
+            // Indeksiranje po slotovima i dizalicama
             for (let span = 0; span < durationSlots; span++) {
               const currentSlot = sIdx + span;
               const csKey = `${cIdx}_${currentSlot}`;
@@ -219,18 +276,23 @@ export class HighsMarinaOptimizer {
     const lpLines: string[] = [];
     lpLines.push("Maximize");
 
-    // Funkcija cilja
     const objTerms: string[] = [];
     for (const v of decisionVars) {
       objTerms.push(`${v.score} ${v.varName}`);
     }
-    // Slack varijable za neobrađene zahtjeve (velika penalizacija: -5000)
+    // Slack varijable za neobrađene zahtjeve (penal: -5000)
     for (let rIdx = 0; rIdx < requests.length; rIdx++) {
       objTerms.push(`-5000 u_${rIdx}`);
     }
 
+    // Slack varijable za zonu ako je dozvoljen zone overflow (penal: -350 po mjestu prekoračenja)
+    if (overrides.allowZoneCapacityOverride) {
+      for (let zIdx = 0; zIdx < zones.length; zIdx++) {
+        objTerms.push(`-350 z_over_${zIdx}`);
+      }
+    }
+
     if (objTerms.length === 0) {
-      // Nema valjanih varijabli
       return {
         success: false,
         status: "Infeasible",
@@ -239,7 +301,7 @@ export class HighsMarinaOptimizer {
         unassignedRequests: requests.map((r) => ({
           requestId: r.id,
           vesselName: r.vessel.name,
-          reason: "Nema slobodnih slotova koji zadovoljavaju nosivost dizalice ili timsko ograničenje.",
+          reason: `Nema slobodnih slotova koji zadovoljavaju nosivost dizalice (s ${weightTolerancePercent}% tolerancije) ili timsko ograničenje.`,
         })),
         metrics: {
           totalRequests: requests.length,
@@ -247,6 +309,7 @@ export class HighsMarinaOptimizer {
           unassignedCount: requests.length,
           averageAffinityScore: 0,
           totalExtraTransportMinutes: 0,
+          overridesCount: 0,
           slotTeamUtilization: {},
           solveTimeMs: Date.now() - startTime,
         },
@@ -254,10 +317,9 @@ export class HighsMarinaOptimizer {
     }
 
     lpLines.push(" obj: " + objTerms.join(" + ").replace(/\+ -/g, "- "));
-
     lpLines.push("Subject To");
 
-    // 1. Ograničenje: Svaki zahtjev se dodjeljuje najviše jednom
+    // 1. Ograničenje: Svaki zahtjev najviše jednom
     for (let rIdx = 0; rIdx < requests.length; rIdx++) {
       const vars = varsByRequest.get(rIdx) || [];
       if (vars.length > 0) {
@@ -268,7 +330,7 @@ export class HighsMarinaOptimizer {
       }
     }
 
-    // 2. Ograničenje: Pojedina dizalica može raditi najviše jednu operaciju u istom slotu
+    // 2. Ograničenje: Pojedinačna dizalica može raditi najviše jednu operaciju u istom slotu
     for (let cIdx = 0; cIdx < cranes.length; cIdx++) {
       for (let s = 0; s < timeSlots.length; s++) {
         const csKey = `${cIdx}_${s}`;
@@ -280,13 +342,11 @@ export class HighsMarinaOptimizer {
       }
     }
 
-    // 3. Ograničenje: Timski kapacitet (najviše maxConcurrentTeams dizalica u istom slotu)
+    // 3. Ograničenje: Timski kapacitet (poštujući effectiveTeamLimit)
     for (let s = 0; s < timeSlots.length; s++) {
       const coveringVars = varsCoveringSlot.get(s) || [];
-      const remainingTeamSlots = maxConcurrentTeams - existingTeamsPerSlot[s];
+      const remainingTeamSlots = effectiveTeamLimit - existingTeamsPerSlot[s];
       if (coveringVars.length > 0 && remainingTeamSlots >= 0) {
-        // Zbroj svih novih operacija u slotu s mora biti <= remainingTeamSlots
-        // Pazimo na činjenicu da jedna dizalica već ima <= 1 constraint
         const terms = coveringVars.map((v) => v.varName).join(" + ");
         lpLines.push(` c_team_slot_${s}: ${terms} <= ${remainingTeamSlots}`);
       }
@@ -298,17 +358,29 @@ export class HighsMarinaOptimizer {
       const freeSpots = Math.max(0, zones[zIdx].freeSpots);
       if (zoneVars.length > 0) {
         const terms = zoneVars.map((v) => v.varName).join(" + ");
-        lpLines.push(` c_zone_${zIdx}: ${terms} <= ${freeSpots}`);
+        if (overrides.allowZoneCapacityOverride) {
+          // Soft constraint: dozvoljen overflow preko z_over
+          lpLines.push(` c_zone_${zIdx}: ${terms} - z_over_${zIdx} <= ${freeSpots}`);
+        } else {
+          lpLines.push(` c_zone_${zIdx}: ${terms} <= ${freeSpots}`);
+        }
       }
     }
 
-    // Sekcija binarnih varijabli
+    // Sekcija binarnih i cjelobrojnih varijabli
     lpLines.push("Binary");
     for (const v of decisionVars) {
       lpLines.push(` ${v.varName}`);
     }
     for (let rIdx = 0; rIdx < requests.length; rIdx++) {
       lpLines.push(` u_${rIdx}`);
+    }
+
+    if (overrides.allowZoneCapacityOverride) {
+      lpLines.push("Generals");
+      for (let zIdx = 0; zIdx < zones.length; zIdx++) {
+        lpLines.push(` z_over_${zIdx}`);
+      }
     }
 
     lpLines.push("End");
@@ -322,13 +394,13 @@ export class HighsMarinaOptimizer {
     const unassignedRequests: OptimizationResult["unassignedRequests"] = [];
     const slotTeamUtilization: Record<string, number> = {};
 
-    // Inicijalizacija metrike timske iskorištenosti s postojećim stanjem
     for (let s = 0; s < timeSlots.length; s++) {
       slotTeamUtilization[timeSlots[s]] = existingTeamsPerSlot[s];
     }
 
     let totalAffinity = 0;
     let totalTransport = 0;
+    let overridesCount = 0;
 
     if (solution.Status === "Optimal" || solution.Status === "Feasible") {
       const cols = solution.Columns as Record<string, { Primal: number }>;
@@ -351,7 +423,6 @@ export class HighsMarinaOptimizer {
           totalAffinity += affScore;
           totalTransport += extraMin;
 
-          // Ažuriranje iskorištenosti timova
           for (let span = 0; span < dvar.durationSlots; span++) {
             const sIdx = dvar.slotIndex + span;
             if (sIdx < timeSlots.length) {
@@ -360,18 +431,20 @@ export class HighsMarinaOptimizer {
             }
           }
 
-          let matchQuality: AssignmentResult["matchQuality"] = "optimal";
-          let explanation = `Optimalno dodijeljeno na dizalicu ${crane.name}`;
+          let matchQuality: AssignmentResult["matchQuality"] = dvar.hasOverride
+            ? "acceptable"
+            : "optimal";
 
-          if (affScore >= 80 && extraMin <= 5) {
+          let explanation = `Optimalno dodijeljeno na dizalicu ${crane.name}`;
+          if (dvar.hasOverride) {
+            overridesCount++;
+            explanation += ` [DISPEČERSKI OVERRIDE: ${dvar.overrideReasons.join(", ")}]`;
+          } else if (affScore >= 80 && extraMin <= 5) {
             matchQuality = "optimal";
             explanation += ` s visokim afinitetom (${affScore}%) i minimalnim transportom (${extraMin} min).`;
-          } else if (affScore >= 50) {
-            matchQuality = "acceptable";
-            explanation += ` uz prihvatljiv afinitet (${affScore}%) i ${extraMin} min transporta.`;
           } else {
-            matchQuality = "suboptimal";
-            explanation += ` uz kompromisni raspored radi izbjegavanja zastoja.`;
+            matchQuality = "acceptable";
+            explanation += ` uz prihvatljiv afinitet (${affScore}%).`;
           }
 
           assignments.push({
@@ -390,12 +463,43 @@ export class HighsMarinaOptimizer {
             affinityScore: affScore,
             extraTransportMinutes: extraMin,
             matchQuality,
+            hasOverride: dvar.hasOverride,
+            overrideReasons: dvar.overrideReasons.length > 0 ? [...dvar.overrideReasons] : undefined,
             explanation,
           });
         }
       }
 
-      // Detekcija neobrađenih zahtjeva
+      // Provjera post-solve timskog overridea (ako ukupan broj aktivnih dizalica u slotu prelazi standardni limit)
+      for (const a of assignments) {
+        let teamOverrideTriggered = false;
+        const durationSlots = Math.max(1, Math.ceil(a.durationMin / 30));
+        for (let span = 0; span < durationSlots; span++) {
+          const sIdx = a.slotIndex + span;
+          if (sIdx < timeSlots.length) {
+            const slotLabel = timeSlots[sIdx];
+            if ((slotTeamUtilization[slotLabel] || 0) > maxConcurrentTeams) {
+              teamOverrideTriggered = true;
+              break;
+            }
+          }
+        }
+
+        if (teamOverrideTriggered) {
+          if (!a.hasOverride) {
+            a.hasOverride = true;
+            overridesCount++;
+          }
+          a.overrideReasons = a.overrideReasons || [];
+          if (!a.overrideReasons.some((r) => r.includes("3. operativni tim") || r.includes("timski"))) {
+            a.overrideReasons.push("Angažiran dodatni 3. operativni tim (dispečerski override)");
+            if (!a.explanation.includes("DISPEČERSKI OVERRIDE")) {
+              a.explanation += " [DISPEČERSKI OVERRIDE: Angažiran dodatni 3. operativni tim]";
+            }
+          }
+        }
+      }
+
       for (let rIdx = 0; rIdx < requests.length; rIdx++) {
         const uCol = cols[`u_${rIdx}`];
         if (uCol && uCol.Primal > 0.5) {
@@ -403,12 +507,11 @@ export class HighsMarinaOptimizer {
           unassignedRequests.push({
             requestId: req.id,
             vesselName: req.vessel.name,
-            reason: "Nema slobodnog operativnog tima ili slobodnog mjesta u zoni unutar radnog vremena.",
+            reason: `Nema slobodnog operativnog tima ili slobodnog mjesta u zoni unutar radnog vremena (nosivost provjerena uz ${weightTolerancePercent}% tolerancije).`,
           });
         }
       }
     } else {
-      // Infeasible
       for (const req of requests) {
         unassignedRequests.push({
           requestId: req.id,
@@ -433,6 +536,7 @@ export class HighsMarinaOptimizer {
         unassignedCount: unassignedRequests.length,
         averageAffinityScore: avgAffinity,
         totalExtraTransportMinutes: totalTransport,
+        overridesCount,
         slotTeamUtilization,
         solveTimeMs: Date.now() - startTime,
       },

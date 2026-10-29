@@ -12,7 +12,7 @@ export interface OptimizationRequest {
   operationCategory: "lift_from_sea" | "lower_to_sea" | "move" | "maintenance" | "other";
   durationMin: number;
   preferredCraneId?: string;
-  preferredSlotIndex?: number; // indeks preferiranog slota unutar radnog dana
+  preferredSlotIndex?: number;
   preferredZoneId?: string;
   isUrgent?: boolean;
 }
@@ -46,6 +46,22 @@ export interface ExistingSlotOccupation {
   reservationId: string;
 }
 
+export interface OptimizationOverrides {
+  /** Dopušta istovremeni rad 3. dizalice u istom slotu (npr. vanjski tim radnika) */
+  allowTeamOverride?: boolean;
+  /** Prilagođeni maksimalni broj timova ako je allowTeamOverride aktivan (default: 3) */
+  maxConcurrentTeamsOverride?: number;
+  /** Dopušta privremeni smještaj na servisnom platou ili prolazu kad je zona formalno puna */
+  allowZoneCapacityOverride?: boolean;
+  /** Dopušta rute dizalica-zona koje su inače označene kao nepreporučene/blokirane */
+  allowBlockedAffinityOverride?: boolean;
+  /**
+   * Sigurnosna margina / tolerancija deklarirane nosivosti dizalice u postocima.
+   * Zadani standard za marinu: 10% (npr. dizalica od 10t prihvaća do 11t uz upozorenje).
+   */
+  weightTolerancePercent?: number;
+}
+
 export interface OptimizationProblemInput {
   dateStr: string;
   timeSlots: string[]; // npr. ["07:00", "07:30", ..., "14:30"]
@@ -55,6 +71,7 @@ export interface OptimizationProblemInput {
   affinities: OptimizationAffinity[];
   existingOccupations: ExistingSlotOccupation[];
   maxConcurrentTeams?: number; // default: 2
+  overrides?: OptimizationOverrides;
 }
 
 export interface AssignmentResult {
@@ -73,6 +90,8 @@ export interface AssignmentResult {
   affinityScore: number;
   extraTransportMinutes: number;
   matchQuality: "optimal" | "acceptable" | "suboptimal";
+  hasOverride?: boolean;
+  overrideReasons?: string[];
   explanation: string;
 }
 
@@ -92,7 +111,8 @@ export interface OptimizationResult {
     unassignedCount: number;
     averageAffinityScore: number;
     totalExtraTransportMinutes: number;
-    slotTeamUtilization: Record<string, number>; // slot => active cranes
+    overridesCount: number;
+    slotTeamUtilization: Record<string, number>;
     solveTimeMs: number;
   };
 }
