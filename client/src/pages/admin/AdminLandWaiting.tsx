@@ -40,9 +40,10 @@ import {
   Info,
   Clock,
   Pencil,
+  ShieldAlert,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate, formatToSqlDate, fromZagreb, toZagreb } from "@/lib/date-utils";
@@ -71,6 +72,8 @@ export default function AdminLandWaiting() {
   const [directTime, setDirectTime] = useState("08:00");
   const [directDuration, setDirectDuration] = useState("30");
   const [directAdminNote, setDirectAdminNote] = useState("");
+  const [directOverride, setDirectOverride] = useState(false);
+  const [directOverrideReason, setDirectOverrideReason] = useState("Preraspodjela osoblja na terenu");
 
   // Edit waitlist item states (Change crane/zone/note while keeping on waitlist)
   const [editWaitlistOpen, setEditWaitlistOpen] = useState(false);
@@ -85,6 +88,7 @@ export default function AdminLandWaiting() {
   const { data: overview, isLoading: overviewLoading } = trpc.landWaiting.getOverview.useQuery();
   const { data: zones = [] } = trpc.landZone.list.useQuery();
   const { data: cranes = [] } = trpc.crane.list.useQuery();
+  const { data: affinitiesMatrix = [] } = trpc.landDispatch.getAffinitiesMatrix.useQuery();
   const { data: usersListRes } = trpc.user.list.useQuery({ pageSize: 1000 });
   const usersList = usersListRes?.data || [];
 
@@ -95,11 +99,16 @@ export default function AdminLandWaiting() {
 
   // Available slots query for direct assign dialog (mirrors ReservationScheduleModal)
   const directDateStr = directDate ? formatToSqlDate(directDate) : "";
+  const { data: dailyOverview } = trpc.landDispatch.getDailyOverview.useQuery(
+    { dateStr: directDateStr },
+    { enabled: directAssignDialogOpen && !!directDateStr, refetchOnWindowFocus: false }
+  );
   const directSlotsQuery = trpc.calendar.availableSlots.useQuery(
     {
       craneId: directCraneId || undefined,
       date: directDateStr,
       durationMin: Number(directDuration) || 30,
+      excludeReservationId: directAssignEntry?.reservation?.id || undefined,
     },
     {
       enabled: directAssignDialogOpen && !!directDate && !!directCraneId,
@@ -238,6 +247,8 @@ export default function AdminLandWaiting() {
     setDirectTime("08:00");
     setDirectDuration("30");
     setDirectAdminNote("");
+    setDirectOverride(false);
+    setDirectOverrideReason("Preraspodjela osoblja na terenu");
     setDirectAssignDialogOpen(true);
   };
 
@@ -248,6 +259,8 @@ export default function AdminLandWaiting() {
     setVesselId(entry.vesselId || "");
     setDirectZoneId(entry.preferredZoneId || (overview?.zones?.[0]?.id || ""));
     setDirectSpotNumber("");
+    setDirectOverride(false);
+    setDirectOverrideReason("Preraspodjela osoblja na terenu");
 
     const vesselLength = Number(entry.vessel?.lengthM) || 0;
     const isLargeVessel = vesselLength >= 9 && vesselLength <= 15;
@@ -299,6 +312,148 @@ export default function AdminLandWaiting() {
     });
   };
 
+  // Active vessel in dialog (for length rules & guidance)
+  const currentModalVessel = directAssignEntry
+    ? directAssignEntry.vessel
+    : userVessels.find(v => v.id === vesselId);
+  const currentVesselLength = Number(currentModalVessel?.lengthM) || 0;
+  const currentVesselBeam = Number(currentModalVessel?.beamM) || 0;
+  const currentVesselWeight = Number(currentModalVessel?.weightTons) || 0;
+
+  const directSelectedSlotObj = useMemo(() => {
+    return directAllSlots.find((s: any) => s.time === directTime);
+  }, [directAllSlots, directTime]);
+
+  const directLiveDiagnostics = useMemo(() => {
+    const hardBlocks: string[] = [];
+    const overrideReasons: string[] = [];
+    const infoNotes: string[] = [];
+
+    if (!directCraneId || !directDate || !directTime) {
+      return { hardBlocks, overrideReasons, infoNotes, status: "incomplete" as const };
+    }
+
+    const selectedCrane = cranes.find((c: any) => c.id === directCraneId);
+    if (!directIsWorkingDay) {
+      hardBlocks.push("Odabrani datum je neradni dan.");
+    }
+
+    if (selectedCrane) {
+      const maxCapKN = Number(selectedCrane.maxCapacityKN) || 0;
+      const nominalTons = maxCapKN / 9.80665;
+      const maxToleranceTons = nominalTons * 1.1; // +10% tolerance
+      const maxPoolWidth = selectedCrane.maxPoolWidth ? Number(selectedCrane.maxPoolWidth) : null;
+
+      if (currentVesselWeight > 0 && nominalTons > 0) {
+        if (currentVesselWeight > maxToleranceTons) {
+          hardBlocks.push(
+            `Masa plovila (${currentVesselWeight.toFixed(1)} t) prelazi maksimalnu nosivost dizalice ${selectedCrane.name} čak i uz +10% toleranciju (max ${maxToleranceTons.toFixed(1)} t, nominalno ${nominalTons.toFixed(1)} t).`
+          );
+        } else if (currentVesselWeight > nominalTons) {
+          const exceedPct = ((currentVesselWeight - nominalTons) / nominalTons) * 100;
+          overrideReasons.push(
+            `Prekoračenje nosivosti dizalice ${selectedCrane.name} za +${exceedPct.toFixed(1)}% (${currentVesselWeight.toFixed(1)} t > nominalno ${nominalTons.toFixed(1)} t, unutar +10% tolerancije).`
+          );
+        }
+      }
+
+      if (maxPoolWidth && currentVesselBeam > 0 && currentVesselBeam > maxPoolWidth) {
+        hardBlocks.push(
+          `Širina plovila (${currentVesselBeam.toFixed(2)} m) prelazi širinu bazena dizalice ${selectedCrane.name} (${maxPoolWidth.toFixed(2)} m).`
+        );
+      }
+    }
+
+    if (directSelectedSlotObj) {
+      if (!directSelectedSlotObj.available && !directSelectedSlotObj.canOverride && !directSelectedSlotObj.teamCapacityWarning) {
+        hardBlocks.push(
+          `Termin ${directTime} na dizalici ${selectedCrane?.name || ""} je zauzet (${directSelectedSlotObj.occupiedBy || "preklapanje termina"}).`
+        );
+      } else if (directSelectedSlotObj.teamCapacityWarning || directSelectedSlotObj.canOverride) {
+        overrideReasons.push(
+          `Kapacitet posade je popunjen: u terminu ${directTime} već rade 2 dizalice (${directSelectedSlotObj.busyCranesNames?.join(" i ") || "2 aktivna tima"}).`
+        );
+      }
+    }
+
+    if (dailyOverview?.activeStoppages && directDateStr) {
+      const durNum = Number(directDuration) || 30;
+      const sStart = fromZagreb(directDateStr, directTime).getTime();
+      const sEnd = sStart + durNum * 60000;
+
+      for (const st of dailyOverview.activeStoppages) {
+        const stS = new Date(st.startsAt).getTime();
+        const stE = st.endsAt ? new Date(st.endsAt).getTime() : Infinity;
+        if (sStart < stE && sEnd > stS) {
+          if (st.scope === "all_cranes") {
+            hardBlocks.push(`Aktivna obustava rada svih dizalica u tom terminu (${st.reason}).`);
+          } else if (st.scope === "single_crane" && st.craneId === directCraneId) {
+            hardBlocks.push(`Dizalica ${selectedCrane?.name || ""} ima aktivnu obustavu rada (${st.reason}).`);
+          } else if (st.scope === "single_zone" && directZoneId && st.zoneId === directZoneId) {
+            hardBlocks.push(`Odabrana zona na kopnu ima aktivnu obustavu rada (${st.reason}).`);
+          }
+        }
+      }
+    }
+
+    if (directZoneId) {
+      const selectedZone = zones.find((z: any) => z.id === directZoneId);
+      const aff = (affinitiesMatrix as any[]).find(
+        (a: any) => a.craneId === directCraneId && a.zoneId === directZoneId
+      );
+      const overviewZone = dailyOverview?.zones.find((oz) => oz.zoneId === directZoneId);
+      const timelineSlot = overviewZone?.hourlyTimeline.find((t) => t.time === directTime);
+      const freeSpotsAtSlot =
+        timelineSlot != null
+          ? timelineSlot.free
+          : overviewZone != null
+            ? overviewZone.currentFree
+            : selectedZone
+              ? (selectedZone.totalSpots || 0) - (selectedZone.activeSpots || 0)
+              : 1;
+
+      if (aff && (!aff.isAllowed || aff.isBlocked)) {
+        overrideReasons.push(
+          `Blokiran tehnički afinitet: ${selectedCrane?.name || "Odabrana dizalica"} nema standardni tehnički pristup zoni ${selectedZone?.code || ""} (${selectedZone?.name || ""}).`
+        );
+      } else if (aff?.isPrimary) {
+        infoNotes.push(
+          `Optimalan par: ${selectedZone?.name || ""} (${selectedZone?.code || ""}) je primarna zona za ovu dizalicu (${aff.affinityScore}/100).`
+        );
+      }
+
+      if (freeSpotsAtSlot <= 0) {
+        overrideReasons.push(
+          `Zona ${selectedZone?.code || ""} (${selectedZone?.name || ""}) je popunjena u ovom terminu (0 slobodnih mjesta).`
+        );
+      }
+    }
+
+    const status =
+      hardBlocks.length > 0
+        ? ("blocked" as const)
+        : overrideReasons.length > 0
+          ? ("override_required" as const)
+          : ("optimal" as const);
+
+    return { hardBlocks, overrideReasons, infoNotes, status };
+  }, [
+    directCraneId,
+    directDate,
+    directTime,
+    cranes,
+    directIsWorkingDay,
+    currentVesselWeight,
+    currentVesselBeam,
+    directSelectedSlotObj,
+    dailyOverview,
+    directDateStr,
+    directDuration,
+    directZoneId,
+    zones,
+    affinitiesMatrix,
+  ]);
+
   const handleDirectAssignSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!directAssignEntry && !userId) {
@@ -307,6 +462,14 @@ export default function AdminLandWaiting() {
     }
     if (!directCraneId || !directDate || !directTime) {
       toast.error(isHr ? "Molimo popunite sva obavezna polja (dizalica, datum, vrijeme)." : "Please fill in all required fields.");
+      return;
+    }
+    if (directLiveDiagnostics.status === "blocked") {
+      toast.error(directLiveDiagnostics.hardBlocks[0] || "Odabrana kombinacija nije tehnički izvediva.");
+      return;
+    }
+    if (directLiveDiagnostics.status === "override_required" && (!directOverride || !directOverrideReason.trim())) {
+      toast.error(isHr ? "Potrebno je potvrditi dispečerski override i unijeti razlog." : "Please confirm override and enter reason.");
       return;
     }
     const dateStr = formatToSqlDate(directDate);
@@ -322,6 +485,8 @@ export default function AdminLandWaiting() {
       scheduledStart,
       durationMin: Number(directDuration),
       adminNote: directAdminNote || undefined,
+      overrideTeamCapacity: directOverride || undefined,
+      overrideReason: directOverride ? (directOverrideReason.trim() || undefined) : undefined,
     });
   };
 
@@ -343,12 +508,6 @@ export default function AdminLandWaiting() {
   const totalDryFree = overview?.zones?.reduce((acc, z) => acc + (z.freeSpots || 0), 0) || 0;
   const totalDryOccupied = overview?.zones?.reduce((acc, z) => acc + (z.totalOccupied || 0), 0) || 0;
   const totalLaunches = overview?.zones?.reduce((acc, z) => acc + (z.upcomingLaunchesCount || 0), 0) || 0;
-
-  // Active vessel in dialog (for length rules & guidance)
-  const currentModalVessel = directAssignEntry
-    ? directAssignEntry.vessel
-    : userVessels.find(v => v.id === vesselId);
-  const currentVesselLength = Number(currentModalVessel?.lengthM) || 0;
 
   return (
     <div className="space-y-6">
@@ -1040,16 +1199,32 @@ export default function AdminLandWaiting() {
                     ) : directAllSlots.length === 0 ? (
                       <SelectItem value="none" disabled>{isHr ? "Nema termina" : "No slots available"}</SelectItem>
                     ) : (
-                      directAllSlots.map((slot: any) => (
-                        <SelectItem
-                          key={slot.time}
-                          value={slot.time}
-                          disabled={!slot.available}
-                          className={!slot.available ? "text-muted-foreground opacity-60 line-through" : "text-emerald-700 font-medium"}
-                        >
-                          {slot.available ? `✓ ${slot.time} (${isHr ? "Slobodno" : "Free"})` : `✗ ${slot.time} (${isHr ? "Zauzeto" : "Busy"})`}
-                        </SelectItem>
-                      ))
+                      directAllSlots.map((slot: any) => {
+                        if (slot.available) {
+                          return (
+                            <SelectItem key={slot.time} value={slot.time} className="text-emerald-700 font-medium">
+                              ✓ {slot.time} ({isHr ? "Slobodno" : "Free"})
+                            </SelectItem>
+                          );
+                        }
+                        if (slot.canOverride || slot.teamCapacityWarning) {
+                          return (
+                            <SelectItem key={slot.time} value={slot.time} className="text-amber-700 font-semibold bg-amber-50/70">
+                              ⚠️ {slot.time} ({slot.occupiedBy || "Zauzeta 2 tima - uz override"})
+                            </SelectItem>
+                          );
+                        }
+                        return (
+                          <SelectItem
+                            key={slot.time}
+                            value={slot.time}
+                            disabled
+                            className="text-muted-foreground opacity-60 line-through"
+                          >
+                            ✗ {slot.time} ({isHr ? "Zauzeto" : "Busy"})
+                          </SelectItem>
+                        );
+                      })
                     )}
                   </SelectContent>
                 </Select>
@@ -1114,6 +1289,81 @@ export default function AdminLandWaiting() {
               </div>
             )}
 
+            {/* Unified feasibility diagnostics & conscious override */}
+            {directLiveDiagnostics.status === "blocked" && (
+              <div className="rounded-xl border-2 border-rose-300 bg-rose-50/90 p-3 space-y-1.5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-rose-950 space-y-1">
+                    <p className="font-bold">
+                      Tvrda zabrana (Neizvediva kombinacija — spremanje nije dozvoljeno):
+                    </p>
+                    <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-rose-900">
+                      {directLiveDiagnostics.hardBlocks.map((reason, idx) => (
+                        <li key={idx}>{reason}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {directLiveDiagnostics.status === "override_required" && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-3 space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-950 space-y-1 flex-1">
+                    <p className="font-bold">
+                      Detektirana ograničenja / kolizije — zahtijeva svjesni dispečerski override:
+                    </p>
+                    <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900 font-medium">
+                      {directLiveDiagnostics.overrideReasons.map((reason, idx) => (
+                        <li key={idx}>{reason}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 text-xs font-bold text-amber-950 bg-amber-100/80 p-2 rounded-lg border border-amber-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={directOverride}
+                    onChange={(e) => setDirectOverride(e.target.checked)}
+                    className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>
+                    Svjesno potvrđujem dispečerski override navedenih ograničenja
+                  </span>
+                </label>
+                {directOverride && (
+                  <div className="space-y-1 pt-0.5">
+                    <Label className="text-xs font-bold text-amber-950">
+                      Obvezan razlog dispečerskog overridea *
+                    </Label>
+                    <Input
+                      value={directOverrideReason}
+                      onChange={(e) => setDirectOverrideReason(e.target.value)}
+                      placeholder="Unesite razlog (npr. Preraspodjela osoblja na terenu)..."
+                      className="h-8 text-xs bg-white border-amber-300 rounded-lg"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {directLiveDiagnostics.status === "optimal" && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5 flex items-start gap-2 text-xs text-emerald-900">
+                <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-semibold">
+                    Izvedivo bez kolizija — sva ograničenja nosivosti, timova i zona su zadovoljena.
+                  </p>
+                  {directLiveDiagnostics.infoNotes.map((note, idx) => (
+                    <p key={idx} className="text-[11px] text-emerald-800">{note}</p>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* 5. Operator note */}
             <div className="space-y-1">
               <Label className="text-xs font-semibold">{isHr ? "Napomena operatera" : "Operator Note"}</Label>
@@ -1137,7 +1387,14 @@ export default function AdminLandWaiting() {
               <Button
                 type="submit"
                 className="rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
-                disabled={directAssignMutation.isPending || (!directAssignEntry && !userId) || !directCraneId || !directDate}
+                disabled={
+                  directAssignMutation.isPending ||
+                  (!directAssignEntry && !userId) ||
+                  !directCraneId ||
+                  !directDate ||
+                  directLiveDiagnostics.status === "blocked" ||
+                  (directLiveDiagnostics.status === "override_required" && (!directOverride || !directOverrideReason.trim()))
+                }
               >
                 {directAssignMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {isHr ? "Potvrdi i dodijeli termin" : "Confirm & Schedule"}

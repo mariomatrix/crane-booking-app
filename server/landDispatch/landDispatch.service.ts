@@ -1,6 +1,17 @@
 import { eq, and, sql, or, isNull, inArray, gte, lte } from "drizzle-orm";
 import { toZagreb, fromZagreb } from "@shared/timezone";
-import { getDb } from "../db";
+import {
+  getDb,
+  getCraneById,
+  getReservationById,
+  getVesselById,
+  getServiceTypeById,
+  getUserById,
+  checkTeamCapacity,
+  getAllSettings,
+  createAuditEntry,
+} from "../db";
+import { completeReservationOperation } from "../workOrders.router";
 import {
   cranes,
   landZones,
@@ -26,7 +37,7 @@ import {
   OperationCategory,
 } from "./types";
 import { calculateZoneCapacitySnapshots } from "./capacity";
-import { checkFeasibility } from "./feasibility";
+import { checkFeasibility, validateReservationConstraintsAndOverrides } from "./feasibility";
 import { computeRecommendationScore } from "./scoring";
 import { fetchActiveStoppagesForDate } from "./stoppage";
 
@@ -771,9 +782,50 @@ export class LandDispatchService {
       adminUserId,
     } = params;
 
+    const reservation = await getReservationById(reservationId);
+    if (!reservation) throw new Error("Rezervacija nije pronađena.");
+
+    const crane = await getCraneById(craneId);
+    if (!crane || crane.craneStatus !== "active") {
+      throw new Error("Odabrana dizalica nije aktivna.");
+    }
+
     const start = new Date(scheduledStartIso);
     const end = new Date(scheduledEndIso);
     const durationMin = Math.round((end.getTime() - start.getTime()) / (60 * 1000));
+
+    const sysSettings = await getAllSettings();
+    const teamCap = await checkTeamCapacity(
+      start,
+      end,
+      craneId,
+      reservationId,
+      Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+    );
+    const serviceType = reservation.serviceTypeId
+      ? await getServiceTypeById(reservation.serviceTypeId)
+      : null;
+    const linkedVessel = reservation.vesselId
+      ? await getVesselById(reservation.vesselId)
+      : null;
+
+    const constraintValidation = await validateReservationConstraintsAndOverrides({
+      crane,
+      landZoneId: landZoneId || null,
+      scheduledStart: start,
+      scheduledEnd: end,
+      operationCategory: serviceType?.operationCategory || "other",
+      vesselWeightTons: reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null,
+      vesselBeamM: reservation.vesselBeamM ?? linkedVessel?.beamM ?? null,
+      overrideConfirmed: !!teamOverride,
+      overrideReason: teamOverrideReason,
+      requireReasonOnOverride: false,
+      teamCapacityCheck: teamCap,
+    });
+
+    if (!constraintValidation.allowed) {
+      throw new Error(constraintValidation.message || "Odabrana opcija krši ograničenja sustava.");
+    }
 
     // Update reservation
     await db
@@ -785,13 +837,21 @@ export class LandDispatchService {
         scheduledEnd: end,
         durationMin: durationMin > 0 ? durationMin : 30,
         status: "approved",
-        teamOverride,
-        teamOverrideReason: teamOverride ? (teamOverrideReason || "Dispečerski override kapaciteta posade") : null,
+        teamOverride: constraintValidation.hasOverride,
+        teamOverrideReason: constraintValidation.formattedOverrideReason,
         approvedBy: adminUserId,
         approvedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(reservations.id, reservationId));
+
+    await db
+      .update(landWaitingList)
+      .set({
+        status: "assigned",
+        updatedAt: new Date(),
+      })
+      .where(eq(landWaitingList.reservationId, reservationId));
 
     // If rotational predecessor is specified, create operation dependency
     if (rotationalPredecessorId) {
@@ -804,6 +864,46 @@ export class LandDispatchService {
         note: "Rotacija isti dan: spuštanje oslobađa mjesto za podizanje",
       });
     }
+
+    if (adminUserId) {
+      await createAuditEntry({
+        actorId: adminUserId,
+        action: "reservation_approved",
+        entityType: "reservation",
+        entityId: reservationId,
+      });
+    }
+
+    // Notify user via email
+    const user = await getUserById(reservation.userId);
+    if (user?.email) {
+      const { sendReservationConfirmation } = await import("../_core/email");
+      sendReservationConfirmation({
+        to: user.email,
+        userName: user.name || user.email,
+        craneName: crane.name,
+        startDate: start,
+        endDate: end,
+        craneLocation: crane.location || crane.name,
+        reservationId,
+        vesselRegistration: reservation.vesselRegistration || linkedVessel?.registration || undefined,
+        vesselType: reservation.vesselType || linkedVessel?.type || undefined,
+        vesselWeightTons: reservation.vesselWeightTons || linkedVessel?.weightTons || undefined,
+        userNote: reservation.userNote || undefined,
+      }).catch(console.warn);
+    }
+
+    try {
+      const { calendarSync } = await import("../services/calendarSync");
+      calendarSync.broadcast({
+        type: "CALENDAR_UPDATED",
+        actorId: adminUserId || "system",
+        actorName: "Dispečer",
+        reservationId,
+        actionText: "je rasporedio/la i odobrio/la rezervaciju",
+        timestamp: new Date().toISOString(),
+      });
+    } catch {}
 
     return { success: true, reservationId };
   }
@@ -824,109 +924,19 @@ export class LandDispatchService {
 
     const { reservationId, status, actualZoneId, notPerformedReason, operatorUserId, notes } = params;
 
-    const [res] = await db
-      .select({
-        id: reservations.id,
-        vesselId: reservations.vesselId,
-        userId: reservations.userId,
-        craneId: reservations.craneId,
-        landZoneId: reservations.landZoneId,
-        operationCategory: serviceTypes.operationCategory,
-        opServiceTypeName: serviceTypes.name,
-        defaultDurationMin: serviceTypes.defaultDurationMin,
-        durationMin: reservations.durationMin,
-        scheduledStart: reservations.scheduledStart,
-        scheduledEnd: reservations.scheduledEnd,
-      })
-      .from(reservations)
-      .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
-      .where(eq(reservations.id, reservationId));
-
-    if (!res) throw new Error("Reservation not found");
+    if (status === "completed") {
+      await completeReservationOperation({
+        reservationId,
+        operatorId: operatorUserId,
+        zoneId: actualZoneId,
+        operatorNotes: notes || "Zaključeno kroz Dispečerski centar",
+        allowFutureDate: false,
+      });
+      return { success: true, reservationId, status };
+    }
 
     const now = new Date();
-
-    if (status === "completed") {
-      const finalZoneId = actualZoneId || res.landZoneId;
-
-      // 1. Update reservation
-      await db
-        .update(reservations)
-        .set({
-          status: "completed",
-          landZoneId: finalZoneId,
-          completedAt: now,
-          adminNote: notes ? notes : undefined,
-          updatedAt: now,
-        })
-        .where(eq(reservations.id, reservationId));
-
-      // 2. Update dry berth occupancies (land_occupancies)
-      if (res.operationCategory === "lift_from_sea" && res.vesselId && finalZoneId) {
-        // Vessel is now on land: create active occupancy
-        await db.insert(landOccupancies).values({
-          vesselId: res.vesselId,
-          userId: res.userId,
-          zoneId: finalZoneId,
-          reservationId: res.id,
-          liftedAt: res.scheduledStart ? new Date(res.scheduledStart) : now,
-          returnedAt: null,
-          createdBy: operatorUserId,
-          note: res.opServiceTypeName?.toLowerCase().includes("kamion")
-            ? `[KAMION] ${notes || "Iskrcaj novog broda s kamiona kroz Dispečerski centar"}`
-            : (notes || "Podignuto na kopno kroz Dispečerski centar"),
-        });
-      } else if (res.operationCategory === "lower_to_sea" && res.vesselId) {
-        // Vessel left land: update existing open occupancy
-        await db
-          .update(landOccupancies)
-          .set({
-            returnedAt: res.scheduledEnd ? new Date(res.scheduledEnd) : now,
-            returnReservationId: res.id,
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(landOccupancies.vesselId, res.vesselId),
-              isNull(landOccupancies.returnedAt)
-            )
-          );
-      }
-
-      // 3. Complete associated work order if exists
-      await db
-        .update(workOrders)
-        .set({
-          status: "completed",
-          completedAt: now,
-          updatedAt: now,
-        })
-        .where(eq(workOrders.reservationId, reservationId));
-
-      // 4. Record in craneOperationLog
-      if (res.craneId) {
-        await db.insert(craneOperationLog).values({
-          craneId: res.craneId,
-          reservationId: res.id,
-          operationType: res.operationCategory || "crane_operation",
-          startTime: res.scheduledStart ? new Date(res.scheduledStart) : now,
-          endTime: res.scheduledEnd ? new Date(res.scheduledEnd) : now,
-          durationMinutes: res.durationMin || 30,
-          operatorId: operatorUserId,
-          note: notes || "Zaključeno na kraju dana",
-        });
-      }
-
-      // 5. If this was a predecessor in operation_dependencies, mark as fulfilled
-      await db
-        .update(operationDependencies)
-        .set({
-          status: "fulfilled",
-          updatedAt: now,
-        })
-        .where(eq(operationDependencies.predecessorReservationId, reservationId));
-
-    } else if (status === "not_performed") {
+    if (status === "not_performed") {
       await db
         .update(reservations)
         .set({

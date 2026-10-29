@@ -21,7 +21,7 @@ import {
 import { z } from "zod";
 import { isValidOib } from "../shared/oib";
 import { reportsRouter } from "./reports.router";
-import { workOrdersRouter } from "./workOrders.router";
+import { workOrdersRouter, completeReservationOperation } from "./workOrders.router";
 import { userCardRouter } from "./userCard.router";
 import { priceListRouter } from "./priceList.router";
 import { memberSyncRouter } from "./memberSync/memberSync.router";
@@ -2074,6 +2074,7 @@ export const appRouter = router({
           landWaitingId: z.string().uuid().optional(),
           overrideCapacityCheck: z.boolean().optional(),
           overrideTeamCapacity: z.boolean().optional(),
+          overrideReason: z.string().optional(),
           status: z.enum(["pending", "waitlisted"]).optional(),
           resources: z
             .array(
@@ -2332,6 +2333,8 @@ export const appRouter = router({
         let finalDurationMin = undefined;
         let finalApprovedBy = undefined;
         let finalApprovedAt = undefined;
+        let finalTeamOverride = false;
+        let finalTeamOverrideReason: string | null = null;
         let autoApproveCrane = null;
 
         // Validate crane for waitlisted reservations (crane is known, schedule is not)
@@ -2389,21 +2392,35 @@ export const appRouter = router({
               message: "Drugi termin se preklapa s ovim.",
             });
 
-          // Check team capacity (max concurrent active cranes)
-          if (!input.overrideTeamCapacity) {
-            const teamCap = await checkTeamCapacity(
-              input.scheduledStart,
-              finalScheduledEnd,
-              input.craneId,
-              undefined,
-              Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
-            );
-            if (!teamCap.hasCapacity) {
-              throw new TRPCError({
-                code: "CONFLICT",
-                message: `U ovom terminu već rade 2 dizalice (${teamCap.busyCranesNames.join(" i ")}). Nema raspoloživog tima operatera. Označite override ako želite ipak zakazati.`,
-              });
-            }
+          const teamCap = await checkTeamCapacity(
+            input.scheduledStart,
+            finalScheduledEnd,
+            input.craneId,
+            undefined,
+            Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+          );
+
+          const constraintValidation = await validateReservationConstraintsAndOverrides({
+            crane: autoApproveCrane,
+            landZoneId: input.landZoneId || null,
+            scheduledStart: input.scheduledStart,
+            scheduledEnd: finalScheduledEnd,
+            operationCategory: serviceType?.operationCategory || "other",
+            vesselWeightTons: vesselSnapshot.vesselWeightTons ?? null,
+            vesselBeamM: vesselSnapshot.vesselBeamM ?? null,
+            overrideConfirmed: !!(input.overrideTeamCapacity || input.overrideCapacityCheck),
+            overrideReason: input.overrideReason,
+            requireReasonOnOverride: false,
+            teamCapacityCheck: teamCap,
+          });
+
+          if (!constraintValidation.allowed) {
+            throw new TRPCError({
+              code: constraintValidation.code || "BAD_REQUEST",
+              message:
+                constraintValidation.message ||
+                "Odabrani termin/dizalica/zona krši tehnička ograničenja sustava.",
+            });
           }
 
           finalStatus = "approved";
@@ -2412,6 +2429,8 @@ export const appRouter = router({
           finalDurationMin = input.durationMin;
           finalApprovedBy = ctx.user.id;
           finalApprovedAt = new Date();
+          finalTeamOverride = constraintValidation.hasOverride;
+          finalTeamOverrideReason = constraintValidation.formattedOverrideReason;
         }
 
         const { reservations: resTable } = await import("../drizzle/schema");
@@ -2431,6 +2450,8 @@ export const appRouter = router({
             durationMin: finalDurationMin,
             approvedBy: finalApprovedBy,
             approvedAt: finalApprovedAt,
+            teamOverride: finalTeamOverride,
+            teamOverrideReason: finalTeamOverrideReason,
             vesselType: vesselSnapshot.vesselType,
             vesselRegistration: vesselSnapshot.vesselRegistration,
             vesselLengthM: vesselSnapshot.vesselLengthM,
@@ -2542,6 +2563,7 @@ export const appRouter = router({
               startDate: finalScheduledStart,
               endDate: finalScheduledEnd,
               craneLocation: autoApproveCrane.location || autoApproveCrane.name,
+              reservationId: resId,
               vesselRegistration: vesselSnapshot.vesselRegistration || undefined,
               vesselType: vesselSnapshot.vesselType || undefined,
               vesselWeightTons: vesselSnapshot.vesselWeightTons || undefined,
@@ -3638,116 +3660,14 @@ export const appRouter = router({
           });
         }
 
-        // Check that reservation is not scheduled for a future date
-        const targetDate = reservation.scheduledStart
-          ? new Date(reservation.scheduledStart)
-          : reservation.requestedDate
-            ? new Date(reservation.requestedDate)
-            : null;
-
-        if (targetDate) {
-          const now = new Date();
-          const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-          if (targetDate.getTime() > endOfToday.getTime()) {
-            const dateStr = targetDate.toLocaleDateString("hr-HR");
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `Nije moguće završiti rezervaciju koja je zakazana za budući datum (${dateStr}). Rezervaciju je moguće označiti kao završenu tek na dan termina ili nakon njega.`,
-            });
-          }
-        }
-
-        const serviceType = reservation.serviceTypeId
-          ? await getServiceTypeById(reservation.serviceTypeId)
-          : null;
-        const isLiftFromSea =
-          serviceType?.operationCategory === "lift_from_sea";
-        const isLowerToSea = serviceType?.operationCategory === "lower_to_sea";
-
-        // 1. Dry Berth (Kopnene zone) logic
-        if (isLiftFromSea && reservation.vesselId && reservation.userId) {
-          // Haul out: place boat on dry berth
-          let targetZoneId = input.zoneId || reservation.landZoneId;
-          if (!targetZoneId) {
-            // Find first zone with available capacity
-            const zones = await listLandZones();
-            const freeZone = zones.find(
-              z => z.activeSpots < z.totalSpots && z.isActive
-            );
-            if (freeZone) {
-              targetZoneId = freeZone.id;
-            } else if (zones.length > 0) {
-              targetZoneId = zones[0].id;
-            }
-          }
-          if (targetZoneId) {
-            await createLandOccupancy({
-              vesselId: reservation.vesselId,
-              userId: reservation.userId,
-              zoneId: targetZoneId,
-              spotNumber: input.spotNumber,
-              reservationId: reservation.id,
-              liftedAt: new Date(),
-              createdBy: ctx.user.id,
-              note: serviceType?.name?.toLowerCase().includes("kamion")
-                ? `[KAMION] ${input.note || "Iskrcaj novog broda s kamiona na kopno"}`
-                : input.note,
-            });
-          }
-        } else if (isLowerToSea && reservation.vesselId) {
-          // Launch: remove boat from dry berth
-          const activeOccupancy = await getActiveOccupancyByVessel(
-            reservation.vesselId
-          );
-          if (activeOccupancy) {
-            await completeLandOccupancy(
-              activeOccupancy.id,
-              reservation.id,
-              new Date()
-            );
-          }
-        }
-
-        // 2. Log crane operation
-        if (reservation.craneId) {
-          const startTime = reservation.scheduledStart
-            ? new Date(reservation.scheduledStart)
-            : new Date();
-          const endTime = new Date();
-          const durationMinutes =
-            reservation.durationMin ??
-            Math.max(
-              1,
-              Math.round((endTime.getTime() - startTime.getTime()) / 60000)
-            );
-          await logCraneOperation({
-            craneId: reservation.craneId,
-            reservationId: reservation.id,
-            operationType: isLiftFromSea
-              ? "lift"
-              : isLowerToSea
-                ? "lower"
-                : "move",
-            startTime,
-            endTime,
-            durationMinutes,
-            operatorId: ctx.user.id,
-            note: input.note,
-          });
-        }
-
-        // 3. Mark reservation completed
-        const db = await getDb();
-        if (db) {
-          await db
-            .update(reservations)
-            .set({
-              status: "completed",
-              completedAt: new Date(),
-              updatedAt: new Date(),
-            })
-            .where(eq(reservations.id, input.id));
-        }
+        await completeReservationOperation({
+          reservationId: input.id,
+          operatorId: ctx.user.id,
+          zoneId: input.zoneId,
+          spotNumber: input.spotNumber,
+          operatorNotes: input.note,
+          allowFutureDate: false,
+        });
 
         await createAuditEntry({
           actorId: ctx.user.id,
@@ -6018,6 +5938,8 @@ export const appRouter = router({
           zoneId: z.string().uuid().optional(),
           spotNumber: z.number().int().positive().optional(),
           adminNote: z.string().optional(),
+          overrideTeamCapacity: z.boolean().optional(),
+          overrideReason: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -6078,6 +6000,40 @@ export const appRouter = router({
         );
 
         let activeReservationId = entry.reservationId;
+        const targetZoneId = input.zoneId || entry.preferredZoneId || null;
+
+        const vesselObj = entry.vesselId
+          ? await db.select().from(vessels).where(eq(vessels.id, entry.vesselId)).limit(1).then(r => r[0])
+          : null;
+
+        const teamCap = await checkTeamCapacity(
+          input.scheduledStart,
+          scheduledEnd,
+          input.craneId,
+          activeReservationId || undefined,
+          Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+        );
+
+        const constraintValidation = await validateReservationConstraintsAndOverrides({
+          crane,
+          landZoneId: targetZoneId,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd,
+          operationCategory: "lift_from_sea",
+          vesselWeightTons: vesselObj?.weightTons ?? null,
+          vesselBeamM: vesselObj?.beamM ?? null,
+          overrideConfirmed: !!input.overrideTeamCapacity,
+          overrideReason: input.overrideReason,
+          requireReasonOnOverride: false,
+          teamCapacityCheck: teamCap,
+        });
+
+        if (!constraintValidation.allowed) {
+          throw new TRPCError({
+            code: constraintValidation.code || "BAD_REQUEST",
+            message: constraintValidation.message || "Raspoređivanje krši ograničenja sustava.",
+          });
+        }
 
         if (activeReservationId) {
           const reservation = await getReservationById(activeReservationId);
@@ -6107,8 +6063,10 @@ export const appRouter = router({
               scheduledStart: input.scheduledStart,
               scheduledEnd,
               durationMin: input.durationMin,
-              landZoneId: input.zoneId || entry.preferredZoneId || reservation.landZoneId,
+              landZoneId: targetZoneId || reservation.landZoneId,
               status: "approved",
+              teamOverride: constraintValidation.hasOverride,
+              teamOverrideReason: constraintValidation.formattedOverrideReason,
               adminNote: input.adminNote || reservation.adminNote,
               approvedBy: ctx.user.id,
               approvedAt: new Date(),
@@ -6131,9 +6089,6 @@ export const appRouter = router({
           const allSt = await db.select().from(serviceTypes);
           const stLift = allSt.find(s => s.operationCategory === "lift_from_sea") || allSt[0];
           const userObj = await getUserById(entry.userId);
-          const vesselObj = entry.vesselId
-            ? await db.select().from(vessels).where(eq(vessels.id, entry.vesselId)).limit(1).then(r => r[0])
-            : null;
           const resNumber = `REZ-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
 
           const [newRes] = await db
@@ -6148,6 +6103,8 @@ export const appRouter = router({
               scheduledEnd,
               durationMin: input.durationMin,
               status: "approved",
+              teamOverride: constraintValidation.hasOverride,
+              teamOverrideReason: constraintValidation.formattedOverrideReason,
               userOib: userObj?.oib || null,
               vesselName: vesselObj?.name || null,
               vesselType: vesselObj?.type || null,
@@ -6155,7 +6112,7 @@ export const appRouter = router({
               vesselBeamM: vesselObj?.beamM || null,
               vesselWeightTons: vesselObj?.weightTons || null,
               vesselRegistration: vesselObj?.registration || null,
-              landZoneId: input.zoneId || entry.preferredZoneId || null,
+              landZoneId: targetZoneId,
               adminNote: input.adminNote || entry.note || null,
               approvedBy: ctx.user.id,
               approvedAt: new Date(),
@@ -6169,24 +6126,10 @@ export const appRouter = router({
             .where(eq(landWaitingList.id, entryId));
         }
 
-        // Record land occupancy if a dry berth zone is selected
-        let occupancyId: string | undefined = undefined;
-        if (input.zoneId && entry.vesselId) {
-          occupancyId = await createLandOccupancy({
-            vesselId: entry.vesselId,
-            userId: entry.userId,
-            zoneId: input.zoneId,
-            spotNumber: input.spotNumber,
-            createdBy: ctx.user.id,
-            liftedAt: input.scheduledStart,
-          });
-        }
-
-        // Update waitlist entry to assigned
+        // Update waitlist entry to assigned (land_occupancies will be created when the crane operation is completed)
         await updateLandWaitingListStatus(
           entryId,
-          "assigned",
-          occupancyId ? { assignedOccupancyId: occupancyId } : undefined
+          "assigned"
         );
 
         await createAuditEntry({
@@ -6207,6 +6150,7 @@ export const appRouter = router({
             startDate: input.scheduledStart,
             endDate: scheduledEnd,
             craneLocation: crane.location || "",
+            reservationId: activeReservationId,
             adminNotes: input.adminNote,
           }).catch(console.error);
         }

@@ -15,7 +15,7 @@ import { formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
-import { Loader2, Send, UserPlus, XCircle, AlertTriangle } from "lucide-react";
+import { Loader2, Send, UserPlus, XCircle, AlertTriangle, ShieldAlert, CheckCircle2 } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { cn } from "@/lib/utils";
@@ -70,6 +70,7 @@ export function AdminReservationForm({
     const [landZoneId, setLandZoneId] = useState(initialData?.landZoneId || "");
     const [overrideCapacityCheck, setOverrideCapacityCheck] = useState(false);
     const [overrideTeamCapacity, setOverrideTeamCapacity] = useState(false);
+    const [overrideReason, setOverrideReason] = useState("Preraspodjela osoblja na terenu");
     const [isWaitlisted, setIsWaitlisted] = useState(false);
     const [adminNote, setAdminNote] = useState(initialData?.adminNote || "");
 
@@ -158,6 +159,11 @@ export function AdminReservationForm({
     const usersList = usersQuery.data?.data || [];
     const { data: cranes = [] } = trpc.crane.list.useQuery();
     const { data: seasonsList = [] } = trpc.season.list.useQuery();
+    const { data: affinitiesMatrix = [] } = trpc.landDispatch.getAffinitiesMatrix.useQuery();
+    const { data: dailyOverview } = trpc.landDispatch.getDailyOverview.useQuery(
+        { dateStr: requestedDate ? formatToSqlDate(requestedDate) : "" },
+        { enabled: !isWaitlisted && !!requestedDate, refetchOnWindowFocus: false }
+    );
 
     // Auto-select first active crane if none selected
     useEffect(() => {
@@ -233,6 +239,143 @@ export function AdminReservationForm({
     const selectedSlotObj = useMemo(() => {
         return allSlots.find((s: any) => s.time === scheduledTime);
     }, [allSlots, scheduledTime]);
+
+    // Unified feasibility diagnostics (weight +10% tolerance, pool width, stoppages, crane-zone affinity, team capacity)
+    const liveDiagnostics = useMemo(() => {
+        const hardBlocks: string[] = [];
+        const overrideReasons: string[] = [];
+        const infoNotes: string[] = [];
+
+        if (isWaitlisted || !craneId || !requestedDate || !scheduledTime) {
+            return { hardBlocks, overrideReasons, infoNotes, status: "incomplete" as const };
+        }
+
+        const selectedCrane = (cranes as any[]).find((c: any) => c.id === craneId);
+        const currentWeightTons = vesselWeight ? Number(vesselWeight) : 0;
+        const currentBeam = vesselWidth ? Number(vesselWidth) : 0;
+
+        if (!isWorkingDay) {
+            hardBlocks.push(nonWorkingReason || "Odabrani datum je neradni dan.");
+        }
+
+        if (selectedCrane) {
+            const maxCapKN = Number(selectedCrane.maxCapacityKN) || 0;
+            const nominalTons = maxCapKN / 9.80665;
+            const maxToleranceTons = nominalTons * 1.1; // +10% tolerance
+            const maxPoolWidth = selectedCrane.maxPoolWidth ? Number(selectedCrane.maxPoolWidth) : null;
+
+            if (currentWeightTons > 0 && nominalTons > 0) {
+                if (currentWeightTons > maxToleranceTons) {
+                    hardBlocks.push(
+                        `Masa plovila (${currentWeightTons.toFixed(1)} t) prelazi maksimalnu nosivost dizalice ${selectedCrane.name} čak i uz +10% toleranciju (max ${maxToleranceTons.toFixed(1)} t, nominalno ${nominalTons.toFixed(1)} t).`
+                    );
+                } else if (currentWeightTons > nominalTons) {
+                    const exceedPct = ((currentWeightTons - nominalTons) / nominalTons) * 100;
+                    overrideReasons.push(
+                        `Prekoračenje nosivosti dizalice ${selectedCrane.name} za +${exceedPct.toFixed(1)}% (${currentWeightTons.toFixed(1)} t > nominalno ${nominalTons.toFixed(1)} t, unutar +10% tolerancije).`
+                    );
+                }
+            }
+
+            if (maxPoolWidth && currentBeam > 0 && currentBeam > maxPoolWidth) {
+                hardBlocks.push(
+                    `Širina plovila (${currentBeam.toFixed(2)} m) prelazi širinu bazena dizalice ${selectedCrane.name} (${maxPoolWidth.toFixed(2)} m).`
+                );
+            }
+        }
+
+        if (selectedSlotObj) {
+            if (!selectedSlotObj.available && !selectedSlotObj.canOverride && !selectedSlotObj.teamCapacityWarning) {
+                hardBlocks.push(
+                    `Termin ${scheduledTime} na dizalici ${selectedCrane?.name || ""} je zauzet (${selectedSlotObj.occupiedBy || "preklapanje termina"}).`
+                );
+            } else if (selectedSlotObj.teamCapacityWarning || selectedSlotObj.canOverride) {
+                overrideReasons.push(
+                    `Kapacitet posade je popunjen: u terminu ${scheduledTime} već rade 2 dizalice (${selectedSlotObj.busyCranesNames?.join(" i ") || "2 aktivna tima"}).`
+                );
+            }
+        }
+
+        const dateStr = formatToSqlDate(requestedDate);
+        if (dailyOverview?.activeStoppages && dateStr) {
+            const durNum = Number(durationMin) || 30;
+            const sStart = fromZagreb(dateStr, scheduledTime).getTime();
+            const sEnd = sStart + durNum * 60000;
+
+            for (const st of dailyOverview.activeStoppages) {
+                const stS = new Date(st.startsAt).getTime();
+                const stE = st.endsAt ? new Date(st.endsAt).getTime() : Infinity;
+                if (sStart < stE && sEnd > stS) {
+                    if (st.scope === "all_cranes") {
+                        hardBlocks.push(`Aktivna obustava rada svih dizalica u tom terminu (${st.reason}).`);
+                    } else if (st.scope === "single_crane" && st.craneId === craneId) {
+                        hardBlocks.push(`Dizalica ${selectedCrane?.name || ""} ima aktivnu obustavu rada (${st.reason}).`);
+                    } else if (st.scope === "single_zone" && landZoneId && landZoneId !== "none" && st.zoneId === landZoneId) {
+                        hardBlocks.push(`Odabrana zona na kopnu ima aktivnu obustavu rada (${st.reason}).`);
+                    }
+                }
+            }
+        }
+
+        if (landZoneId && landZoneId !== "none") {
+            const selectedZone = (landZones as any[]).find((z: any) => z.id === landZoneId);
+            const aff = (affinitiesMatrix as any[]).find(
+                (a: any) => a.craneId === craneId && a.zoneId === landZoneId
+            );
+            const overviewZone = dailyOverview?.zones.find((oz) => oz.zoneId === landZoneId);
+            const timelineSlot = overviewZone?.hourlyTimeline.find((t) => t.time === scheduledTime);
+            const freeSpotsAtSlot =
+                timelineSlot != null
+                    ? timelineSlot.free
+                    : overviewZone != null
+                        ? overviewZone.currentFree
+                        : selectedZone
+                            ? (selectedZone.totalSpots || 0) - (selectedZone.activeSpots || 0)
+                            : 1;
+
+            if (aff && (!aff.isAllowed || aff.isBlocked)) {
+                overrideReasons.push(
+                    `Blokiran tehnički afinitet: ${selectedCrane?.name || "Odabrana dizalica"} nema standardni tehnički pristup zoni ${selectedZone?.code || ""} (${selectedZone?.name || ""}).`
+                );
+            } else if (aff?.isPrimary) {
+                infoNotes.push(
+                    `Optimalan par: ${selectedZone?.name || ""} (${selectedZone?.code || ""}) je primarna zona za ovu dizalicu (${aff.affinityScore}/100).`
+                );
+            }
+
+            if (isLiftFromSea && freeSpotsAtSlot <= 0) {
+                overrideReasons.push(
+                    `Zona ${selectedZone?.code || ""} (${selectedZone?.name || ""}) je popunjena u ovom terminu (0 slobodnih mjesta).`
+                );
+            }
+        }
+
+        const status =
+            hardBlocks.length > 0
+                ? ("blocked" as const)
+                : overrideReasons.length > 0
+                    ? ("override_required" as const)
+                    : ("optimal" as const);
+
+        return { hardBlocks, overrideReasons, infoNotes, status };
+    }, [
+        isWaitlisted,
+        craneId,
+        requestedDate,
+        scheduledTime,
+        cranes,
+        vesselWeight,
+        vesselWidth,
+        isWorkingDay,
+        nonWorkingReason,
+        selectedSlotObj,
+        dailyOverview,
+        durationMin,
+        landZoneId,
+        landZones,
+        affinitiesMatrix,
+        isLiftFromSea,
+    ]);
 
     // Auto-select first available free slot when date/crane/duration changes
     useEffect(() => {
@@ -339,15 +482,19 @@ export function AdminReservationForm({
 
         let scheduledStartDate: Date | undefined = undefined;
         if (!isWaitlisted && requestedDate) {
-            const currentSlot = allSlots.find((s: any) => s.time === scheduledTime);
-            if (currentSlot?.teamCapacityWarning) {
+            if (liveDiagnostics.status === "blocked") {
+                toast.error(liveDiagnostics.hardBlocks[0] || "Odabrana kombinacija nije tehnički izvediva.");
+                return;
+            }
+            if (liveDiagnostics.status === "override_required") {
                 if (!overrideTeamCapacity) {
-                    toast.error(`Odabrani termin (${scheduledTime}) zahtijeva potvrdu dopuštenja (override) jer su u tom terminu angažirana 2 tima na drugim dizalicama.`);
+                    toast.error("Zahtijeva se svjesna potvrda dispečerskog overridea za detektirana ograničenja.");
                     return;
                 }
-            } else if (freeSlots.length > 0 && !freeSlots.includes(scheduledTime)) {
-                toast.error(`Odabrani termin (${scheduledTime}) je već zauzet na ovoj dizalici. Molimo odaberite slobodan termin.`);
-                return;
+                if (!overrideReason.trim()) {
+                    toast.error("Molimo unesite razlog za dispečerski override.");
+                    return;
+                }
             }
             if (!allowedTimeSlots.includes(scheduledTime)) {
                 toast.error(`Odabrani termin (${scheduledTime}) mora biti unutar radnog vremena sezone (${activeSeasonForSelectedDate?.from || "08:00"} - ${activeSeasonForSelectedDate?.to || "16:00"}).`);
@@ -372,8 +519,9 @@ export function AdminReservationForm({
             contactPhone,
             landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
             landWaitingId: initialData?.landWaitingId || undefined,
-            overrideCapacityCheck: overrideCapacityCheck || undefined,
+            overrideCapacityCheck: overrideCapacityCheck || overrideTeamCapacity || undefined,
             overrideTeamCapacity: overrideTeamCapacity || undefined,
+            overrideReason: overrideTeamCapacity ? (overrideReason.trim() || undefined) : undefined,
             status: isWaitlisted ? ("waitlisted" as const) : undefined,
             isAutoApprove: !isWaitlisted ? true : undefined,
             craneId: craneId || undefined,
@@ -946,27 +1094,41 @@ export function AdminReservationForm({
                             </p>
                         )}
 
-                        {/* Team capacity warning & override checkbox */}
-                        {!isWaitlisted && selectedSlotObj?.teamCapacityWarning && (
-                            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 space-y-2">
+                        {/* Unified feasibility diagnostics & conscious override */}
+                        {!isWaitlisted && liveDiagnostics.status === "blocked" && (
+                            <div className="rounded-lg border-2 border-rose-300 bg-rose-50/90 p-3 space-y-1.5">
                                 <div className="flex items-start gap-2">
-                                    <span className="text-amber-600 font-bold text-sm leading-none mt-0.5">⚠️</span>
-                                    <div className="text-xs text-amber-900 space-y-0.5">
-                                        <p className="font-semibold">
-                                            {lang === "hr"
-                                                ? `Upozorenje: U terminu ${scheduledTime} već rade 2 dizalice (${selectedSlotObj.busyCranesNames?.join(" i ") || "ostale dizalice"}).`
-                                                : `Warning: 2 cranes are already working at ${scheduledTime} (${selectedSlotObj.busyCranesNames?.join(" & ") || "other cranes"}).`
-                                            }
+                                    <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                                    <div className="text-xs text-rose-950 space-y-1">
+                                        <p className="font-bold">
+                                            Tvrda zabrana (Neizvediva kombinacija — kreiranje nije dozvoljeno):
                                         </p>
-                                        <p className="text-amber-800 text-[11px]">
-                                            {lang === "hr"
-                                                ? "Ova dizalica je fizički slobodna, ali su 2 tima operatera već zauzeta na drugim dizalicama. Za zakazivanje termina označite ručni override."
-                                                : "This crane is physically free, but 2 operator teams are busy on other cranes. Manual override is required to schedule."
-                                            }
-                                        </p>
+                                        <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-rose-900">
+                                            {liveDiagnostics.hardBlocks.map((reason, idx) => (
+                                                <li key={idx}>{reason}</li>
+                                            ))}
+                                        </ul>
                                     </div>
                                 </div>
-                                <label className="flex items-center gap-2 text-xs font-semibold text-amber-950 bg-amber-100/80 p-2 rounded border border-amber-300 cursor-pointer select-none">
+                            </div>
+                        )}
+
+                        {!isWaitlisted && liveDiagnostics.status === "override_required" && (
+                            <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3 space-y-2.5">
+                                <div className="flex items-start gap-2">
+                                    <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                                    <div className="text-xs text-amber-950 space-y-1 flex-1">
+                                        <p className="font-bold">
+                                            Detektirana ograničenja / kolizije — zahtijeva svjesni dispečerski override:
+                                        </p>
+                                        <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900 font-medium">
+                                            {liveDiagnostics.overrideReasons.map((reason, idx) => (
+                                                <li key={idx}>{reason}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                </div>
+                                <label className="flex items-center gap-2 text-xs font-bold text-amber-950 bg-amber-100/80 p-2 rounded border border-amber-300 cursor-pointer select-none">
                                     <input
                                         type="checkbox"
                                         checked={overrideTeamCapacity}
@@ -974,12 +1136,36 @@ export function AdminReservationForm({
                                         className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
                                     />
                                     <span>
-                                        {lang === "hr"
-                                            ? "Dopusti dodjelu termina unatoč zauzetosti timova (ručni override)"
-                                            : "Allow slot assignment despite team capacity (manual override)"
-                                        }
+                                        Svjesno potvrđujem dispečerski override navedenih ograničenja
                                     </span>
                                 </label>
+                                {overrideTeamCapacity && (
+                                    <div className="space-y-1 pt-0.5">
+                                        <Label className="text-xs font-bold text-amber-950">
+                                            Obvezan razlog dispečerskog overridea *
+                                        </Label>
+                                        <Input
+                                            value={overrideReason}
+                                            onChange={(e) => setOverrideReason(e.target.value)}
+                                            placeholder="Unesite razlog (npr. Preraspodjela osoblja na terenu)..."
+                                            className="h-8 text-xs bg-white border-amber-300"
+                                        />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {!isWaitlisted && liveDiagnostics.status === "optimal" && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5 flex items-start gap-2 text-xs text-emerald-900">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                                <div className="space-y-0.5">
+                                    <p className="font-semibold">
+                                        Izvedivo bez kolizija — sva ograničenja nosivosti, timova i zona su zadovoljena.
+                                    </p>
+                                    {liveDiagnostics.infoNotes.map((note, idx) => (
+                                        <p key={idx} className="text-[11px] text-emerald-800">{note}</p>
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -1311,8 +1497,9 @@ export function AdminReservationForm({
                             (!isWaitlisted && (
                                 !durationMin ||
                                 !scheduledTime || 
-                                (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck) ||
-                                (selectedSlotObj?.teamCapacityWarning && !overrideTeamCapacity)
+                                liveDiagnostics.status === "blocked" ||
+                                (liveDiagnostics.status === "override_required" && (!overrideTeamCapacity || !overrideReason.trim())) ||
+                                (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck && !overrideTeamCapacity)
                             ))
                         }
                         className="min-w-[140px]"

@@ -81,6 +81,10 @@ export function SlotRecommendationDialog({
     onSuccess: () => {
       toast.success("Zahtjev je uspješno raspoređen i potvrđen!");
       utils.landDispatch.getDailyOverview.invalidate();
+      utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
+      utils.calendar.events.invalidate();
+      utils.landWaiting.listAll.invalidate();
       onOpenChange(false);
       onSuccess?.();
     },

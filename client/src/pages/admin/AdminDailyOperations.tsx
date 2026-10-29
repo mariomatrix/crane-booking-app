@@ -31,6 +31,7 @@ import {
     Check,
 } from "lucide-react";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
+import { ReservationScheduleModal } from "@/components/ReservationScheduleModal";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { CalendarSchedulePdf } from "@/components/ReportPdfTemplates";
 import { formatAppDate, formatToSqlDate } from "@/lib/date-utils";
@@ -53,10 +54,8 @@ export default function AdminDailyOperations() {
     // Work order modal state
     const [activeWorkOrderRes, setActiveWorkOrderRes] = useState<any | null>(null);
 
-    // Quick edit modal state
+    // Schedule / edit modal state
     const [editingRes, setEditingRes] = useState<any | null>(null);
-    const [editAdminNote, setEditAdminNote] = useState<string>("");
-    const [editDurationMin, setEditDurationMin] = useState<string>("30");
 
     const utils = trpc.useUtils();
 
@@ -74,29 +73,6 @@ export default function AdminDailyOperations() {
     // Query cranes list for filter
     const { data: cranesList = [] } = trpc.crane.list.useQuery();
     const { data: sysSettings } = trpc.settings.get.useQuery();
-
-    // Quick edit mutation
-    const updateResMutation = trpc.reservation.updateDetails.useMutation({
-        onSuccess: () => {
-            toast.success(isHr ? "Rezervacija je ažurirana." : "Reservation updated.");
-            utils.reservation.listDailyOperations.invalidate();
-            utils.reservation.listAll.invalidate();
-            utils.calendar.events.invalidate();
-            setEditingRes(null);
-        },
-        onError: (err: any) => toast.error(err.message),
-    });
-
-    const handleQuickEditSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!editingRes) return;
-        const isEditingCompleted = editingRes.status === "completed" || editingRes.workOrder?.status === "completed";
-        updateResMutation.mutate({
-            id: editingRes.id,
-            adminNote: editAdminNote,
-            durationMin: isEditingCompleted ? undefined : (Number(editDurationMin) || 30),
-        });
-    };
 
     // Filter by search
     const filteredOps = useMemo(() => {
@@ -607,8 +583,6 @@ export default function AdminDailyOperations() {
                                                                 className="text-xs text-muted-foreground hover:text-foreground h-6 px-1.5"
                                                                 onClick={() => {
                                                                     setEditingRes(op);
-                                                                    setEditAdminNote(op.adminNote || "");
-                                                                    setEditDurationMin(String(op.durationMin || 30));
                                                                 }}
                                                             >
                                                                 <Edit3 className="h-3 w-3 mr-1" />
@@ -651,71 +625,17 @@ export default function AdminDailyOperations() {
                 />
             )}
 
-            {/* Quick Edit Reservation Dialog */}
-            <Dialog open={!!editingRes} onOpenChange={(open) => !open && setEditingRes(null)}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>{isHr ? "Uredi detalje rezervacije" : "Edit Reservation Details"}</DialogTitle>
-                        <DialogDescription>
-                            {editingRes?.vessel?.registration || editingRes?.vesselRegistration || "Plovilo"} — {editingRes?.user?.name || "Korisnik"}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <form onSubmit={handleQuickEditSubmit} className="space-y-4 py-2">
-                        {(() => {
-                            const isEditingCompleted = editingRes?.status === "completed" || editingRes?.workOrder?.status === "completed";
-                            return (
-                                <div className="space-y-2">
-                                    <div className="flex items-center justify-between">
-                                        <Label htmlFor="durationInput">{isHr ? "Planirano trajanje (minuta)" : "Duration (minutes)"}</Label>
-                                        {isEditingCompleted && (
-                                            <Badge variant="outline" className="text-[10px] text-amber-700 bg-amber-50 border-amber-200">
-                                                {isHr ? "Zaključeno nalogom" : "Locked by work order"}
-                                            </Badge>
-                                        )}
-                                    </div>
-                                    <Input
-                                        id="durationInput"
-                                        type="number"
-                                        step="15"
-                                        min="15"
-                                        max="240"
-                                        value={editDurationMin}
-                                        onChange={(e) => setEditDurationMin(e.target.value)}
-                                        disabled={isEditingCompleted}
-                                        className={isEditingCompleted ? "bg-muted text-muted-foreground cursor-not-allowed" : ""}
-                                    />
-                                    {isEditingCompleted && (
-                                        <p className="text-[11px] text-muted-foreground italic">
-                                            {isHr ? "Trajanje operacije je zaključeno prema izvršenom radnom nalogu i ne može se mijenjati." : "Duration is locked according to completed work order."}
-                                        </p>
-                                    )}
-                                </div>
-                            );
-                        })()}
-
-                        <div className="space-y-2">
-                            <Label htmlFor="adminNoteInput">{isHr ? "Interna napomena operatera" : "Operator internal note"}</Label>
-                            <Textarea
-                                id="adminNoteInput"
-                                rows={3}
-                                value={editAdminNote}
-                                onChange={(e) => setEditAdminNote(e.target.value)}
-                                placeholder={isHr ? "Zabilješke o vremenskim prilikama, posebnostima podizanja..." : "Notes..."}
-                            />
-                        </div>
-
-                        <DialogFooter className="pt-2">
-                            <Button variant="outline" type="button" onClick={() => setEditingRes(null)}>
-                                {isHr ? "Odustani" : "Cancel"}
-                            </Button>
-                            <Button type="submit" disabled={updateResMutation.isPending}>
-                                {updateResMutation.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                                {isHr ? "Spremi promjene" : "Save Changes"}
-                            </Button>
-                        </DialogFooter>
-                    </form>
-                </DialogContent>
-            </Dialog>
+            {/* Unified Reservation Schedule / Edit Modal */}
+            <ReservationScheduleModal
+                open={!!editingRes}
+                onOpenChange={(open) => !open && setEditingRes(null)}
+                mode={editingRes?.status === "pending" ? "approve" : "edit"}
+                reservation={editingRes}
+                onOpenWorkOrder={(target) => {
+                    setEditingRes(null);
+                    setActiveWorkOrderRes(target);
+                }}
+            />
         </div>
     );
 }
