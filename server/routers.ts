@@ -30,6 +30,7 @@ import { invoicesRouter } from "./invoices.router";
 import { resourcesRouter } from "./resources.router";
 import { landFlowRouter } from "./landFlow.router";
 import { landDispatchRouter } from "./landDispatch/landDispatch.router";
+import { validateReservationConstraintsAndOverrides } from "./landDispatch/feasibility";
 import { optimizationRouter } from "./optimization/optimization.router";
 import {
   listCranes,
@@ -3074,6 +3075,8 @@ export const appRouter = router({
           vesselRegistration: z.string().optional(),
           contactPhone: z.string().optional(),
           ignoreNoSpace: z.boolean().optional().default(false),
+          overrideTeamCapacity: z.boolean().optional(),
+          overrideReason: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -3120,7 +3123,7 @@ export const appRouter = router({
               );
             const queueCount = Number(existingQueue[0]?.count ?? 0);
 
-            if (queueCount > 0 && !input.ignoreNoSpace) {
+            if (queueCount > 0 && !input.ignoreNoSpace && !input.overrideTeamCapacity) {
               throw new TRPCError({
                 code: "BAD_REQUEST",
                 message: `Upozorenje: Na listi čekanja za ovu zonu već čeka ${queueCount} drugih klijenata. Potvrdite ignoriranje limita ako želite preskočiti listu.`,
@@ -3128,7 +3131,7 @@ export const appRouter = router({
             }
 
             const cap = await getLandZoneCapacity(finalLandZoneId);
-            if (cap.isOver80 && !input.ignoreNoSpace) {
+            if (cap.isOver80 && !input.ignoreNoSpace && !input.overrideTeamCapacity) {
               throw new TRPCError({
                 code: "PRECONDITION_FAILED",
                 message: `Zona ${cap.name} (${cap.code}) je popunjena ${cap.percentFull}% (${cap.activeSpots}/${cap.totalSpots} mjesta). Potvrdite ignoriranje limita za nastavak.`,
@@ -3190,6 +3193,44 @@ export const appRouter = router({
             message: "Drugi termin se preklapa s ovim.",
           });
 
+        // Vessel dimensions & weight (reservation or linked vessel fallback)
+        const linkedVessel = reservation.vesselId
+          ? await getVesselById(reservation.vesselId)
+          : null;
+        const effectiveWeightTons =
+          reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null;
+        const effectiveBeamM =
+          reservation.vesselBeamM ?? linkedVessel?.beamM ?? null;
+
+        const teamCap = await checkTeamCapacity(
+          input.scheduledStart,
+          scheduledEnd,
+          input.craneId,
+          input.id,
+          Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+        );
+
+        const constraintValidation = await validateReservationConstraintsAndOverrides({
+          crane,
+          landZoneId: finalLandZoneId,
+          scheduledStart: input.scheduledStart,
+          scheduledEnd,
+          operationCategory: serviceType?.operationCategory || "other",
+          vesselWeightTons: effectiveWeightTons,
+          vesselBeamM: effectiveBeamM,
+          overrideConfirmed: !!(input.overrideTeamCapacity || input.ignoreNoSpace),
+          overrideReason: input.overrideReason,
+          requireReasonOnOverride: false,
+          teamCapacityCheck: teamCap,
+        });
+
+        if (!constraintValidation.allowed) {
+          throw new TRPCError({
+            code: constraintValidation.code || "BAD_REQUEST",
+            message: constraintValidation.message || "Operacija krši ograničenja sustava.",
+          });
+        }
+
         // Update reservation
         const db = await getDb();
         if (db) {
@@ -3202,6 +3243,8 @@ export const appRouter = router({
               durationMin: input.durationMin,
               landZoneId: finalLandZoneId,
               status: "approved",
+              teamOverride: constraintValidation.hasOverride,
+              teamOverrideReason: constraintValidation.formattedOverrideReason,
               adminNote:
                 input.adminNote !== undefined
                   ? input.adminNote
@@ -3424,6 +3467,7 @@ export const appRouter = router({
           scheduledEnd: z.date(),
           craneId: z.string().uuid().optional(),
           overrideTeamCapacity: z.boolean().optional(),
+          overrideReason: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -3452,7 +3496,18 @@ export const appRouter = router({
           sysSettings
         );
 
+        let hasOverride = false;
+        let formattedOverrideReason: string | null = null;
+
         if (targetCraneId) {
+          const crane = await getCraneById(targetCraneId);
+          if (!crane || crane.craneStatus !== "active") {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Odabrana dizalica nije aktivna.",
+            });
+          }
+
           const hasOverlap = await checkOverlap(
             targetCraneId,
             input.scheduledStart,
@@ -3465,21 +3520,48 @@ export const appRouter = router({
               message: "Preslagani termin se preklapa.",
             });
 
-          if (!input.overrideTeamCapacity) {
-            const teamCap = await checkTeamCapacity(
-              input.scheduledStart,
-              input.scheduledEnd,
-              targetCraneId,
-              input.id,
-              Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
-            );
-            if (!teamCap.hasCapacity) {
-              throw new TRPCError({
-                code: "CONFLICT",
-                message: `U ovom terminu već rade 2 dizalice (${teamCap.busyCranesNames.join(" i ")}). Potreban je override za preklapanje timova.`,
-              });
-            }
+          const teamCap = await checkTeamCapacity(
+            input.scheduledStart,
+            input.scheduledEnd,
+            targetCraneId,
+            input.id,
+            Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+          );
+
+          const serviceType = reservation.serviceTypeId
+            ? await getServiceTypeById(reservation.serviceTypeId)
+            : null;
+          const linkedVessel = reservation.vesselId
+            ? await getVesselById(reservation.vesselId)
+            : null;
+          const effectiveWeightTons =
+            reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null;
+          const effectiveBeamM =
+            reservation.vesselBeamM ?? linkedVessel?.beamM ?? null;
+
+          const constraintValidation = await validateReservationConstraintsAndOverrides({
+            crane,
+            landZoneId: reservation.landZoneId,
+            scheduledStart: input.scheduledStart,
+            scheduledEnd: input.scheduledEnd,
+            operationCategory: serviceType?.operationCategory || "other",
+            vesselWeightTons: effectiveWeightTons,
+            vesselBeamM: effectiveBeamM,
+            overrideConfirmed: !!input.overrideTeamCapacity,
+            overrideReason: input.overrideReason,
+            requireReasonOnOverride: false,
+            teamCapacityCheck: teamCap,
+          });
+
+          if (!constraintValidation.allowed) {
+            throw new TRPCError({
+              code: constraintValidation.code || "BAD_REQUEST",
+              message: constraintValidation.message || "Premještanje krši ograničenja sustava.",
+            });
           }
+
+          hasOverride = constraintValidation.hasOverride;
+          formattedOverrideReason = constraintValidation.formattedOverrideReason;
         }
 
         const db = await getDb();
@@ -3491,6 +3573,8 @@ export const appRouter = router({
               scheduledEnd: input.scheduledEnd,
               durationMin: Math.max(30, Math.round((input.scheduledEnd.getTime() - input.scheduledStart.getTime()) / 60000)),
               craneId: targetCraneId,
+              teamOverride: hasOverride,
+              teamOverrideReason: formattedOverrideReason,
               updatedAt: new Date(),
             })
             .where(eq(reservations.id, input.id));
@@ -3775,6 +3859,7 @@ export const appRouter = router({
           landZoneId: z.string().uuid().nullable().optional(),
           durationMin: z.number().int().min(15).max(480).optional(),
           overrideTeamCapacity: z.boolean().optional(),
+          overrideReason: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -3825,28 +3910,35 @@ export const appRouter = router({
         };
 
         const targetDuration = input.durationMin || reservation.durationMin || 30;
+        const serviceType = reservation.serviceTypeId
+          ? await getServiceTypeById(reservation.serviceTypeId)
+          : null;
 
         // Forbid lift_from_sea if vessel is already on land
-        if (reservation.serviceTypeId) {
-          const st = await getServiceTypeById(reservation.serviceTypeId);
-          if (st?.operationCategory === "lift_from_sea") {
-            const { onLand, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
-              reservation.vesselId,
-              input.vesselRegistration || reservation.vesselRegistration
-            );
-            if (onLand) {
-              const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
-              throw new TRPCError({
-                code: "BAD_REQUEST",
-                message: `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
-              });
-            }
+        if (serviceType?.operationCategory === "lift_from_sea") {
+          const { onLand, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
+            reservation.vesselId,
+            input.vesselRegistration || reservation.vesselRegistration
+          );
+          if (onLand) {
+            const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
+            });
           }
         }
 
-        if (input.craneId || input.scheduledStart) {
+        if (
+          input.craneId ||
+          input.scheduledStart ||
+          input.landZoneId !== undefined ||
+          input.durationMin !== undefined
+        ) {
           const targetCraneId = input.craneId || reservation.craneId;
-          const targetStart = input.scheduledStart || (reservation.scheduledStart ? new Date(reservation.scheduledStart) : undefined);
+          const targetStart =
+            input.scheduledStart ||
+            (reservation.scheduledStart ? new Date(reservation.scheduledStart) : undefined);
 
           if (targetCraneId && targetStart) {
             const crane = await getCraneById(targetCraneId);
@@ -3874,33 +3966,49 @@ export const appRouter = router({
               });
             }
 
-            if (!input.overrideTeamCapacity) {
-              const teamCap = await checkTeamCapacity(
-                targetStart,
-                targetEnd,
-                targetCraneId,
-                input.id,
-                Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
-              );
-              if (!teamCap.hasCapacity) {
-                throw new TRPCError({
-                  code: "CONFLICT",
-                  message: `U ovom terminu već rade 2 dizalice (${teamCap.busyCranesNames.join(" i ")}). Potreban je override za preklapanje timova.`,
-                });
-              }
+            const teamCap = await checkTeamCapacity(
+              targetStart,
+              targetEnd,
+              targetCraneId,
+              input.id,
+              Number(sysSettings.maxConcurrentCraneTeams || "2") || 2
+            );
+
+            const linkedVessel = reservation.vesselId
+              ? await getVesselById(reservation.vesselId)
+              : null;
+            const effectiveWeightTons =
+              reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null;
+            const effectiveBeamM =
+              reservation.vesselBeamM ?? linkedVessel?.beamM ?? null;
+
+            const constraintValidation = await validateReservationConstraintsAndOverrides({
+              crane,
+              landZoneId: updates.landZoneId,
+              scheduledStart: targetStart,
+              scheduledEnd: targetEnd,
+              operationCategory: serviceType?.operationCategory || "other",
+              vesselWeightTons: effectiveWeightTons,
+              vesselBeamM: effectiveBeamM,
+              overrideConfirmed: !!input.overrideTeamCapacity,
+              overrideReason: input.overrideReason,
+              requireReasonOnOverride: true,
+              teamCapacityCheck: teamCap,
+            });
+
+            if (!constraintValidation.allowed) {
+              throw new TRPCError({
+                code: constraintValidation.code || "BAD_REQUEST",
+                message: constraintValidation.message || "Promjena krši ograničenja sustava.",
+              });
             }
 
             updates.craneId = targetCraneId;
             updates.scheduledStart = targetStart;
             updates.scheduledEnd = targetEnd;
             updates.durationMin = targetDuration;
-          }
-        } else if (input.durationMin !== undefined && input.durationMin !== reservation.durationMin) {
-          updates.durationMin = input.durationMin;
-          if (reservation.scheduledStart) {
-            updates.scheduledEnd = new Date(
-              new Date(reservation.scheduledStart).getTime() + input.durationMin * 60000
-            );
+            updates.teamOverride = constraintValidation.hasOverride;
+            updates.teamOverrideReason = constraintValidation.formattedOverrideReason;
           }
         }
 

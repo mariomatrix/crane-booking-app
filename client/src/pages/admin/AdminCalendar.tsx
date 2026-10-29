@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AdminReservationForm } from "@/components/AdminReservationForm";
+import { ReservationScheduleModal } from "@/components/ReservationScheduleModal";
 import { WorkOrderExecutionDialog } from "@/components/WorkOrderExecutionDialog";
 import { addDays, addMonths, addWeeks, startOfDay, endOfDay, startOfWeek, endOfWeek, format, parseISO, setHours, setMinutes } from "date-fns";
 import { hr, enUS } from "date-fns/locale";
@@ -712,18 +713,23 @@ export default function AdminCalendar() {
             const newStart = fromZagreb(targetDateStr, timeStr);
             const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
-            const performDrop = (override = false) => {
+            const performDrop = (override = false, reason?: string) => {
                 rescheduleMutation.mutate({
                     id,
                     scheduledStart: newStart,
                     scheduledEnd: newEnd,
                     craneId: info.event.extendedProps.craneId,
                     overrideTeamCapacity: override || undefined,
+                    overrideReason: reason || undefined,
                 }, {
                     onError: (err: any) => {
                         if (!override && (err.message?.includes("2 dizalice") || err.message?.includes("tim") || err.message?.includes("override"))) {
-                            if (confirm(`${err.message}\n\nŽelite li dopustiti termin unatoč popunjenosti timova (ručni override)?`)) {
-                                performDrop(true);
+                            const enteredReason = window.prompt(
+                                `${err.message}\n\nAko želite svjesno potvrditi dispečerski override, unesite razlog (najmanje 3 znaka):`,
+                                "Preraspodjela osoblja na terenu"
+                            );
+                            if (enteredReason && enteredReason.trim().length >= 3) {
+                                performDrop(true, enteredReason.trim());
                                 return;
                             }
                         }
@@ -755,18 +761,23 @@ export default function AdminCalendar() {
         const newStart = fromZagreb(dateStr, zgOffset.timeStr);
         const newEnd = new Date(newStart.getTime() + durationMin * 60000);
 
-        const performMasterDrop = (override = false) => {
+        const performMasterDrop = (override = false, reason?: string) => {
             rescheduleMutation.mutate({
                 id,
                 scheduledStart: newStart,
                 scheduledEnd: newEnd,
                 craneId: newTargetCrane.id,
                 overrideTeamCapacity: override || undefined,
+                overrideReason: reason || undefined,
             }, {
                 onError: (err: any) => {
                     if (!override && (err.message?.includes("2 dizalice") || err.message?.includes("tim") || err.message?.includes("override"))) {
-                        if (confirm(`${err.message}\n\nŽelite li dopustiti termin unatoč popunjenosti timova (ručni override)?`)) {
-                            performMasterDrop(true);
+                        const enteredReason = window.prompt(
+                            `${err.message}\n\nAko želite svjesno potvrditi dispečerski override, unesite razlog (najmanje 3 znaka):`,
+                            "Preraspodjela osoblja na terenu"
+                        );
+                        if (enteredReason && enteredReason.trim().length >= 3) {
+                            performMasterDrop(true, enteredReason.trim());
                             return;
                         }
                     }
@@ -1035,154 +1046,22 @@ export default function AdminCalendar() {
                             </form>
                         </DialogContent>
                     </Dialog>
-                    <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-                        <DialogContent className="max-w-md overflow-hidden p-0">
-                            <form onSubmit={handleUpdateRes}>
-                                <div
-                                    className="px-6 py-4 text-white"
-                                    style={{ backgroundColor: editingRes ? (STATUS_COLORS[editingRes.status] ?? '#6b7280') : '#6b7280' }}
-                                >
-                                    <DialogHeader className="text-white">
-                                        <DialogTitle className="text-white flex items-center gap-2">
-                                            Uredi rezervaciju
-                                            <span className="inline-block text-[11px] font-bold uppercase px-2 py-0.5 rounded bg-white/25 leading-none">
-                                                {editingRes ? (STATUS_LABELS[editingRes.status] || editingRes.status) : ''}
-                                            </span>
-                                        </DialogTitle>
-                                        <DialogDescription className="text-white/80">
-                                            {editingRes?.reservationNumber || `#${editingRes?.id?.slice(0, 8)}`} — {editingRes?.vesselRegistration} ({editingRes?.user?.name})
-                                        </DialogDescription>
-                                    </DialogHeader>
-                                </div>
-                                <div className="px-6 pb-6">
-                                    <div className="grid gap-5 py-6 min-w-0">
-                                        <div className="grid gap-2">
-                                            <Label>Datum</Label>
-                                            <Popover>
-                                                <PopoverTrigger asChild>
-                                                    <Button
-                                                        variant={"outline"}
-                                                        className={cn(
-                                                            "w-[200px] justify-start text-left font-normal",
-                                                            !editDate && "text-muted-foreground"
-                                                        )}
-                                                    >
-                                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {editDate ? formatAppDate(editDate, lang as any) : <span>Odaberi datum</span>}
-                                                    </Button>
-                                                </PopoverTrigger>
-                                                <PopoverContent className="w-auto p-0" align="start">
-                                                    <Calendar
-                                                        mode="single"
-                                                        selected={editDate}
-                                                        onSelect={setEditDate}
-                                                        initialFocus
-                                                    />
-                                                </PopoverContent>
-                                            </Popover>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="grid gap-2">
-                                                <Label>Vrijeme početka</Label>
-                                                <Select value={editStart} onValueChange={setEditStart}>
-                                                    <SelectTrigger><SelectValue placeholder="Odaberi" /></SelectTrigger>
-                                                    <SelectContent className="max-h-52">
-                                                        {editAvailableSlots.startSlots.map((val) => (
-                                                            <SelectItem key={val} value={val}>{val}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                            <div className="grid gap-2">
-                                                <Label>Vrijeme završetka</Label>
-                                                <Select value={editEnd} onValueChange={setEditEnd}>
-                                                    <SelectTrigger><SelectValue placeholder="Odaberi" /></SelectTrigger>
-                                                    <SelectContent className="max-h-52">
-                                                        {editAvailableSlots.endSlots.map((val) => (
-                                                            <SelectItem key={val} value={val}>{val}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        </div>
-                                        {editSeasonWorkingHours && (
-                                            <div className="text-[11px] text-primary/90 font-medium flex flex-wrap items-center gap-1.5 bg-primary/5 px-2.5 py-1.5 rounded border border-primary/10 w-fit max-w-full leading-tight">
-                                                <span>🕒 Radno vrijeme sezone ({editSeasonWorkingHours.seasonName}):</span>
-                                                <span className="font-bold">{editSeasonWorkingHours.from} — {editSeasonWorkingHours.to}h</span>
-                                            </div>
-                                        )}
-                                        <div className="grid gap-2">
-                                            <Label>Dizalica</Label>
-                                            <Select value={editCraneId} onValueChange={setEditCraneId} required>
-                                                <SelectTrigger><SelectValue placeholder="Odaberi dizalicu" /></SelectTrigger>
-                                                <SelectContent>
-                                                    {cranesList.map((c: any) => (
-                                                        <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                        <div className="grid gap-2">
-                                            <Label>Kopnena zona (Mjesto na kopnu)</Label>
-                                            <Select value={editLandZoneId} onValueChange={setEditLandZoneId}>
-                                                <SelectTrigger><SelectValue placeholder="Odaberi zonu (opcionalno)" /></SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="none">Nije odabrano</SelectItem>
-                                                    {landZones.map((lz: any) => (
-                                                        <SelectItem key={lz.id} value={String(lz.id)}>{lz.name} ({lz.code})</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
-                                    <DialogFooter className="px-6 pb-6 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            {editingRes && (editingRes.status === "approved" || editingRes.status === "in_progress") && (
-                                                <Button
-                                                    type="button"
-                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
-                                                    onClick={() => {
-                                                        const target = editingRes;
-                                                        setIsEditOpen(false);
-                                                        setWorkOrderRes(target);
-                                                    }}
-                                                >
-                                                    <ClipboardList className="h-4 w-4" />
-                                                    Radni nalog
-                                                </Button>
-                                            )}
-                                            {editingRes && (editingRes.status === "approved" || editingRes.status === "pending") && (
-                                                <Button
-                                                    type="button"
-                                                    variant="outline"
-                                                    className="text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5"
-                                                    onClick={() => {
-                                                        if (confirm("Jeste li sigurni da želite otkazati ovu rezervaciju? Termin će se odmah osloboditi na kalendaru.")) {
-                                                            cancelMutation.mutate({
-                                                                id: editingRes.id,
-                                                                cancelReason: "Otkazano telefonom / preko kalendara",
-                                                            });
-                                                        }
-                                                    }}
-                                                    disabled={cancelMutation.isPending}
-                                                >
-                                                    {cancelMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
-                                                    Otkaži termin
-                                                </Button>
-                                            )}
-                                        </div>
-                                        <div className="flex gap-2 justify-end w-full sm:w-auto">
-                                            <Button variant="outline" type="button" onClick={() => setIsEditOpen(false)}>Odustani</Button>
-                                            <Button type="submit" disabled={rescheduleMutation.isPending}>
-                                                {rescheduleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                                Spremi promjene
-                                            </Button>
-                                        </div>
-                                    </DialogFooter>
-                                </div>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
+                    <ReservationScheduleModal
+                        open={isEditOpen}
+                        onOpenChange={setIsEditOpen}
+                        mode={editingRes?.status === "pending" ? "approve" : "edit"}
+                        reservation={editingRes}
+                        onOpenWorkOrder={(target) => setWorkOrderRes(target)}
+                        onCancelReservation={(target) => {
+                            if (confirm("Jeste li sigurni da želite otkazati ovu rezervaciju? Termin će se odmah osloboditi na kalendaru.")) {
+                                cancelMutation.mutate({
+                                    id: target.id,
+                                    cancelReason: "Otkazano telefonom / preko kalendara",
+                                });
+                            }
+                        }}
+                        isCancelling={cancelMutation.isPending}
+                    />
                     <Dialog open={isWaitingEditOpen} onOpenChange={setIsWaitingEditOpen}>
                         <DialogContent className="max-w-5xl w-[95vw] max-h-[92vh] overflow-y-auto overflow-x-hidden p-6 sm:p-8">
                             <DialogHeader>

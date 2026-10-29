@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { calculateZoneCapacitySnapshots } from "./capacity";
-import { checkFeasibility } from "./feasibility";
+import { checkFeasibility, validateReservationConstraintsAndOverrides } from "./feasibility";
 import { computeRecommendationScore } from "./scoring";
 
 describe("Land Dispatch Engine v3.2 Tests", () => {
@@ -359,6 +359,80 @@ describe("Land Dispatch Engine v3.2 Tests", () => {
       expect(res.finalScore).toBe(95);
       expect(res.explanations.some((e) => e.includes("primarni izbor"))).toBe(true);
       expect(res.explanations.some((e) => e.includes("potpuno miran"))).toBe(true);
+    });
+  });
+
+  // ─── 6. Edit / Move Constraints & Conscious Override (10% Tolerance) ───
+  describe("Edit / Reschedule Constraint Validation & Conscious Override", () => {
+    const crane5T = {
+      id: "crane-5t",
+      name: "Stacionarna dizalica 5T",
+      maxCapacityKN: 50, // ~5.10 t nominal, ~5.61 t with +10% tolerance
+      maxPoolWidth: null,
+      craneStatus: "active",
+    };
+
+    it("requires conscious override with reason when vessel weight is between 100% and 110% of crane capacity", async () => {
+      // 5.4 t is ~52.95 kN -> +5.9% over 50 kN (within +10% tolerance)
+      const withoutOverride = await validateReservationConstraintsAndOverrides({
+        crane: crane5T,
+        scheduledStart: new Date("2026-10-06T08:00:00Z"),
+        scheduledEnd: new Date("2026-10-06T08:30:00Z"),
+        vesselWeightTons: 5.4,
+        overrideConfirmed: false,
+        requireReasonOnOverride: true,
+      });
+
+      expect(withoutOverride.allowed).toBe(false);
+      expect(withoutOverride.code).toBe("CONFLICT");
+      expect(withoutOverride.hasOverride).toBe(true);
+      expect(withoutOverride.overrideReasons.some((r) => r.includes("unutar +10% tolerancije"))).toBe(true);
+
+      // Confirmed override but missing reason
+      const withoutReason = await validateReservationConstraintsAndOverrides({
+        crane: crane5T,
+        scheduledStart: new Date("2026-10-06T08:00:00Z"),
+        scheduledEnd: new Date("2026-10-06T08:30:00Z"),
+        vesselWeightTons: 5.4,
+        overrideConfirmed: true,
+        overrideReason: "",
+        requireReasonOnOverride: true,
+      });
+
+      expect(withoutReason.allowed).toBe(false);
+      expect(withoutReason.code).toBe("BAD_REQUEST");
+
+      // Confirmed override with valid reason
+      const withReason = await validateReservationConstraintsAndOverrides({
+        crane: crane5T,
+        scheduledStart: new Date("2026-10-06T08:00:00Z"),
+        scheduledEnd: new Date("2026-10-06T08:30:00Z"),
+        vesselWeightTons: 5.4,
+        overrideConfirmed: true,
+        overrideReason: "Tolerancija nosivosti uz nadzor voditelja",
+        requireReasonOnOverride: true,
+      });
+
+      expect(withReason.allowed).toBe(true);
+      expect(withReason.hasOverride).toBe(true);
+      expect(withReason.formattedOverrideReason).toContain("Tolerancija nosivosti uz nadzor voditelja");
+    });
+
+    it("hard-blocks operation even with overrideConfirmed when vessel weight exceeds +10% tolerance", async () => {
+      // 6.2 t is ~60.8 kN -> +21.6% over 50 kN (exceeds +10% limit)
+      const result = await validateReservationConstraintsAndOverrides({
+        crane: crane5T,
+        scheduledStart: new Date("2026-10-06T08:00:00Z"),
+        scheduledEnd: new Date("2026-10-06T08:30:00Z"),
+        vesselWeightTons: 6.2,
+        overrideConfirmed: true,
+        overrideReason: "Pokušaj nedozvoljenog overridea",
+        requireReasonOnOverride: true,
+      });
+
+      expect(result.allowed).toBe(false);
+      expect(result.code).toBe("BAD_REQUEST");
+      expect(result.message).toContain("Tvrda zabrana");
     });
   });
 });

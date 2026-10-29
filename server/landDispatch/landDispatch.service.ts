@@ -177,11 +177,16 @@ export class LandDispatchService {
         userEmail: users.email,
         vesselId: reservations.vesselId,
         vesselName: reservations.vesselName,
+        vName: vessels.name,
         vesselRegistration: vessels.registration,
+        resRegistration: reservations.vesselRegistration,
         vesselType: reservations.vesselType,
         vesselWeightTons: reservations.vesselWeightTons,
+        vWeightTons: vessels.weightTons,
         vesselBeamM: reservations.vesselBeamM,
+        vBeamM: vessels.beamM,
         vesselLengthM: reservations.vesselLengthM,
+        vLengthM: vessels.lengthM,
         serviceTypeId: reservations.serviceTypeId,
         serviceTypeName: serviceTypes.name,
         operationCategory: serviceTypes.operationCategory,
@@ -227,11 +232,11 @@ export class LandDispatchService {
     const allReservations = allReservationsRaw.map((r) => ({
       ...r,
       userName: r.userName || "Korisnik",
-      vesselName: r.vesselName || "Plovilo",
-      vesselRegistration: r.vesselRegistration || null,
-      vesselWeightTons: r.vesselWeightTons ? Number(r.vesselWeightTons) : null,
-      vesselBeamM: r.vesselBeamM ? Number(r.vesselBeamM) : null,
-      vesselLengthM: r.vesselLengthM ? Number(r.vesselLengthM) : null,
+      vesselName: r.vesselName || r.vName || "Plovilo",
+      vesselRegistration: r.resRegistration || r.vesselRegistration || null,
+      vesselWeightTons: r.vesselWeightTons ? Number(r.vesselWeightTons) : (r.vWeightTons ? Number(r.vWeightTons) : null),
+      vesselBeamM: r.vesselBeamM ? Number(r.vesselBeamM) : (r.vBeamM ? Number(r.vBeamM) : null),
+      vesselLengthM: r.vesselLengthM ? Number(r.vesselLengthM) : (r.vLengthM ? Number(r.vLengthM) : null),
       serviceTypeName: r.serviceTypeName || "Usluga",
       operationCategory: (r.operationCategory as OperationCategory) || "other",
       durationMin: Number(r.durationMin) || 30,
@@ -378,7 +383,7 @@ export class LandDispatchService {
         // Quick check: has allowed crane?
         const hasAllowedCrane = dbCranes.some((c) => {
           const weightKN = vesselWeight * 9.80665;
-          const fitsWeight = c.maxCapacityKN >= weightKN;
+          const fitsWeight = c.maxCapacityKN * 1.10 >= weightKN;
           const fitsBeam = !c.maxPoolWidth || vesselBeam <= c.maxPoolWidth;
           return fitsWeight && fitsBeam;
         });
@@ -462,7 +467,7 @@ export class LandDispatchService {
       const vesselBeam = wl.vesselBeamM ? Number(wl.vesselBeamM) : 0;
       const hasAllowedCrane = dbCranes.some((c) => {
         const weightKN = vesselWeight * 9.80665;
-        const fitsWeight = c.maxCapacityKN >= weightKN;
+        const fitsWeight = c.maxCapacityKN * 1.10 >= weightKN;
         const fitsBeam = !c.maxPoolWidth || vesselBeam <= c.maxPoolWidth;
         return fitsWeight && fitsBeam;
       });
@@ -577,17 +582,22 @@ export class LandDispatchService {
       .select({
         id: reservations.id,
         vesselName: reservations.vesselName,
+        vName: vessels.name,
         vesselWeightTons: reservations.vesselWeightTons,
+        vWeightTons: vessels.weightTons,
         vesselBeamM: reservations.vesselBeamM,
+        vBeamM: vessels.beamM,
         vesselLengthM: reservations.vesselLengthM,
+        vLengthM: vessels.lengthM,
         operationCategory: serviceTypes.operationCategory,
         opServiceTypeName: serviceTypes.name,
         defaultDurationMin: serviceTypes.defaultDurationMin,
         durationMin: reservations.durationMin,
         requestedZoneId: reservations.requestedZoneId,
-
+        landZoneId: reservations.landZoneId,
       })
       .from(reservations)
+      .leftJoin(vessels, eq(reservations.vesselId, vessels.id))
       .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
       .where(eq(reservations.id, params.reservationId));
 
@@ -595,14 +605,28 @@ export class LandDispatchService {
 
     const res = {
       ...resRaw,
-      vesselWeightTons: resRaw.vesselWeightTons ? Number(resRaw.vesselWeightTons) : null,
-      vesselBeamM: resRaw.vesselBeamM ? Number(resRaw.vesselBeamM) : null,
-      vesselLengthM: resRaw.vesselLengthM ? Number(resRaw.vesselLengthM) : null,
+      vesselName: resRaw.vesselName || resRaw.vName || "Plovilo",
+      vesselWeightTons: resRaw.vesselWeightTons
+        ? Number(resRaw.vesselWeightTons)
+        : resRaw.vWeightTons
+          ? Number(resRaw.vWeightTons)
+          : null,
+      vesselBeamM: resRaw.vesselBeamM
+        ? Number(resRaw.vesselBeamM)
+        : resRaw.vBeamM
+          ? Number(resRaw.vBeamM)
+          : null,
+      vesselLengthM: resRaw.vesselLengthM
+        ? Number(resRaw.vesselLengthM)
+        : resRaw.vLengthM
+          ? Number(resRaw.vLengthM)
+          : null,
     };
 
     const overview = await this.getDailyDispatchOverview(params.dateStr);
     const affinities = await db.select().from(craneZoneAffinities);
-    const targetZoneId = params.preferredZoneId || res.requestedZoneId || overview.zones[0]?.zoneId;
+    const targetZoneId =
+      params.preferredZoneId || res.landZoneId || res.requestedZoneId || overview.zones[0]?.zoneId;
 
     const targetZone = overview.zones.find((z) => z.zoneId === targetZoneId) || overview.zones[0];
     if (!targetZone) throw new Error("Zone not found");
@@ -613,12 +637,9 @@ export class LandDispatchService {
       const affinity = affinities.find((a) => a.craneId === crane.id && a.zoneId === targetZone.zoneId);
 
       for (const slot of overview.timeSlots) {
-        const [hStr, mStr] = slot.split(":");
         const slotStart = fromZagreb(params.dateStr, slot);
         const reqDurMin = Number(res.durationMin) || Number(res.defaultDurationMin) || 30;
         const slotEnd = new Date(slotStart.getTime() + reqDurMin * 60 * 1000);
-        const endHourStr = slotEnd.getUTCHours().toString().padStart(2, "0");
-        const endMinStr = slotEnd.getUTCMinutes().toString().padStart(2, "0");
         const endSlotStr = toZagreb(slotEnd).timeStr;
 
         const zoneTimelineItem = targetZone.hourlyTimeline.find((t) => t.time === slot);
@@ -656,16 +677,18 @@ export class LandDispatchService {
           slotStart,
           slotEnd,
           activeStoppages: overview.activeStoppages,
-          existingReservations: overview.scheduledOperations.map((o) => ({
-            id: o.id,
-            craneId: o.craneId,
-            landZoneId: o.landZoneId,
-            operationCategory: o.operationCategory,
-            scheduledStart: o.scheduledStart,
-            scheduledEnd: o.scheduledEnd,
-            status: o.status,
-            vesselName: o.vesselName,
-          })),
+          existingReservations: overview.scheduledOperations
+            .filter((o) => o.id !== params.reservationId)
+            .map((o) => ({
+              id: o.id,
+              craneId: o.craneId,
+              landZoneId: o.landZoneId,
+              operationCategory: o.operationCategory,
+              scheduledStart: o.scheduledStart,
+              scheduledEnd: o.scheduledEnd,
+              status: o.status,
+              vesselName: o.vesselName,
+            })),
           currentZoneFreeAtSlot: freeAtSlot,
           maxConcurrentTeams: 2,
           teamOverride: false,
@@ -814,7 +837,6 @@ export class LandDispatchService {
         durationMin: reservations.durationMin,
         scheduledStart: reservations.scheduledStart,
         scheduledEnd: reservations.scheduledEnd,
-
       })
       .from(reservations)
       .leftJoin(serviceTypes, eq(reservations.serviceTypeId, serviceTypes.id))
