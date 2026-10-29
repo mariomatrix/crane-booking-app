@@ -26,6 +26,36 @@ async function runMigration() {
         console.warn("reservations timestamptz verification warning:", e?.message || e);
     }
 
+    // ─── btree_gist Extension & Exclusion Constraint: Prevent Double Bookings ───
+    try {
+        await migrationClient`CREATE EXTENSION IF NOT EXISTS btree_gist;`;
+        const existingConstraint = await migrationClient`
+            SELECT conname FROM pg_constraint WHERE conname = 'no_crane_double_booking'
+        `;
+        if (existingConstraint.length === 0) {
+            await migrationClient.unsafe(`
+                ALTER TABLE "reservations"
+                ADD CONSTRAINT "no_crane_double_booking"
+                EXCLUDE USING gist (
+                    crane_id WITH =,
+                    tstzrange(scheduled_start, scheduled_end, '[)') WITH &&
+                )
+                WHERE (
+                    status IN ('approved', 'completed')
+                    AND scheduled_start IS NOT NULL
+                    AND scheduled_end IS NOT NULL
+                    AND scheduled_start < scheduled_end
+                    AND crane_id IS NOT NULL
+                );
+            `);
+            console.log("no_crane_double_booking exclusion constraint created (btree_gist).");
+        } else {
+            console.log("no_crane_double_booking exclusion constraint verified.");
+        }
+    } catch (e: any) {
+        console.warn("btree_gist exclusion constraint warning:", e?.message || e);
+    }
+
     try {
         await migrationClient`
             ALTER TABLE "maintenance_blocks" 

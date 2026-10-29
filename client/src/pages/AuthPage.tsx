@@ -101,6 +101,8 @@ export default function AuthPage() {
     if (urlError) {
       const errorMessages: Record<string, string> = {
         google_auth_failed: "Google prijava nije uspjela. Pokušajte ponovno.",
+        google_not_configured:
+          "Google prijava još nije konfigurirana u postavkama poslužitelja (potrebno je postaviti GOOGLE_CLIENT_ID u .env datoteku).",
         google_invalid_state:
           "Sigurnosna provjera (CSRF state) nije uspjela. Pokušajte ponovno.",
         google_missing_info: "Google račun nema potvrđenu email adresu.",

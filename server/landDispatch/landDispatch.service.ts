@@ -1141,6 +1141,14 @@ export class LandDispatchService {
       })
       .where(eq(landWaitingList.id, params.waitingListId));
 
+    // Schedule automatic expiration job in pg-boss
+    try {
+      const { scheduleOfferExpiration } = await import("../jobs/queue");
+      await scheduleOfferExpiration(offer.id, expiresAt);
+    } catch (e) {
+      console.warn("[LandDispatch] Failed to schedule offer expiration job:", e);
+    }
+
     return offer;
   }
 

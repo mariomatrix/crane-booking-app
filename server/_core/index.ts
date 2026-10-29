@@ -131,11 +131,36 @@ async function startServer() {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
 
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(`Server running on http://localhost:${port}/`);
-    // Phase 2: Start background services
-    import("../services/notifications").then(m => m.startNotificationCron()).catch(console.error);
+    
+    // Start pg-boss queue service (handles emails, sms, reminders, waiting list expirations, member sync)
+    try {
+      const { startQueueService } = await import("../jobs/queue");
+      await startQueueService();
+    } catch (err) {
+      console.error("[Startup] Neuspješno pokretanje pg-boss reda, koristim fallback tajmere:", err);
+      import("../services/notifications").then(m => m.startNotificationCron()).catch(console.error);
+    }
   });
+
+  // Graceful shutdown
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`Primljen signal ${signal}, zatvaram server i red poslova...`);
+    try {
+      const { stopQueueService } = await import("../jobs/queue");
+      await stopQueueService();
+    } catch (e) {
+      console.warn("Greška pri gašenju reda poslova:", e);
+    }
+    server.close(() => {
+      console.log("HTTP poslužitelj je zaustavljen.");
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
 startServer().catch(console.error);

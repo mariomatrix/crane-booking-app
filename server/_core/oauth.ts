@@ -82,10 +82,7 @@ export function registerOAuthRoutes(app: Express) {
     const { clientId, callbackUrl } = getGoogleConfig();
 
     if (!clientId) {
-      res.status(500).json({
-        error:
-          "Google OAuth nije konfiguriran. Postavite GOOGLE_CLIENT_ID u .env.",
-      });
+      res.redirect("/auth?error=google_not_configured");
       return;
     }
 
