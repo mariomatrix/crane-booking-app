@@ -248,13 +248,26 @@ export function ReservationScheduleModal({
     return allSlots.find((s: any) => s.time === selectedTime);
   }, [allSlots, selectedTime]);
 
-  // Auto-select first free slot when freeSlots changes if needed (only in create/approve or if invalid)
+  // Auto-select first free slot when freeSlots changes if needed (in create/approve or if selected time is not in slots)
   useEffect(() => {
-    if (open && !isEdit) {
+    if (!open) return;
+    if (allSlots.length === 0) return;
+
+    const existsInSlots = allSlots.some((s: any) => s.time === selectedTime);
+    if (!isEdit) {
       const isValid = allSlots.some((s: any) => s.time === selectedTime && (s.available || s.canOverride));
       if (!selectedTime || !isValid) {
         if (freeSlots.length > 0) {
           setSelectedTime(freeSlots[0]);
+        }
+      }
+    } else {
+      // In edit mode: if current selectedTime does not exist in the crane/date slots at all, pick first available or first slot
+      if (!selectedTime || !existsInSlots) {
+        if (freeSlots.length > 0) {
+          setSelectedTime(freeSlots[0]);
+        } else if (allSlots.length > 0) {
+          setSelectedTime(allSlots[0].time);
         }
       }
     }
@@ -772,6 +785,14 @@ export function ReservationScheduleModal({
     utils.landDispatch.getSlotRecommendations.invalidate();
   };
 
+  const handleMutationError = (err: any) => {
+    if (err?.message === "Failed to fetch" || err?.message?.toLowerCase().includes("fetch")) {
+      toast.error("Greška u povezivanju s poslužiteljem. Provjerite radi li poslužitelj i internetska veza.");
+    } else {
+      toast.error(err?.message || "Došlo je do greške pri spremanju.");
+    }
+  };
+
   const approveMutation = trpc.reservation.approve.useMutation({
     onSuccess: () => {
       toast.success("Rezervacija je uspješno odobrena.");
@@ -779,7 +800,7 @@ export function ReservationScheduleModal({
       onSuccess?.();
       onOpenChange(false);
     },
-    onError: (err) => toast.error(err.message),
+    onError: handleMutationError,
   });
 
   const updateDetailsMutation = trpc.reservation.updateDetails.useMutation({
@@ -789,7 +810,7 @@ export function ReservationScheduleModal({
       onSuccess?.();
       onOpenChange(false);
     },
-    onError: (err) => toast.error(err.message),
+    onError: handleMutationError,
   });
 
   const createMutation = trpc.reservation.create.useMutation({
@@ -799,7 +820,7 @@ export function ReservationScheduleModal({
       onSuccess?.();
       onOpenChange(false);
     },
-    onError: (err) => toast.error(err.message),
+    onError: handleMutationError,
   });
 
   const isSubmitting =
@@ -1315,8 +1336,10 @@ export function ReservationScheduleModal({
                 )}
               </div>
               <Select value={selectedTime} onValueChange={setSelectedTime} disabled={!craneId || !selectedDate}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="Odaberite sat" />
+                <SelectTrigger className="w-full rounded-xl">
+                  <SelectValue placeholder="Odaberite sat">
+                    {selectedTime ? selectedTime : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="max-h-56">
                   {!isWorkingDay ? (
@@ -1370,7 +1393,7 @@ export function ReservationScheduleModal({
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Trajanje termina *</Label>
               <Select value={durationMin} onValueChange={setDurationMin}>
-                <SelectTrigger className="rounded-xl">
+                <SelectTrigger className="w-full rounded-xl">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
