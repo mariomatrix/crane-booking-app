@@ -11,7 +11,7 @@ import {
   getAllSettings,
   createAuditEntry,
 } from "../db";
-import { completeReservationOperation } from "../workOrders.router";
+import { completeReservationOperation } from "../services/workOrderService";
 import {
   cranes,
   landZones,

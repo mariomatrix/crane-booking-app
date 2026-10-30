@@ -21,7 +21,15 @@ import {
 import { z } from "zod";
 import { isValidOib } from "../shared/oib";
 import { reportsRouter } from "./reports.router";
-import { workOrdersRouter, completeReservationOperation } from "./workOrders.router";
+import { workOrdersRouter } from "./workOrders.router";
+import { completeReservationOperation } from "./services/workOrderService";
+import { generateReservationNumber } from "./services/numberingService";
+import { issueTokenPairCookies as issueTokenPair } from "./services/authPolicyService";
+import {
+  parseHHMM,
+  validateSlotAgainstSettings,
+  validateReservationConstraintsAndOverrides,
+} from "./services/reservationSchedulingService";
 import { userCardRouter } from "./userCard.router";
 import { priceListRouter } from "./priceList.router";
 import { memberSyncRouter } from "./memberSync/memberSync.router";
@@ -30,7 +38,6 @@ import { invoicesRouter } from "./invoices.router";
 import { resourcesRouter } from "./resources.router";
 import { landFlowRouter } from "./landFlow.router";
 import { landDispatchRouter } from "./landDispatch/landDispatch.router";
-import { validateReservationConstraintsAndOverrides } from "./landDispatch/feasibility";
 import { optimizationRouter } from "./optimization/optimization.router";
 import {
   generateReservationToken,
@@ -181,136 +188,6 @@ import {
 } from "./_core/sms";
 import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
-
-// ─── Helper: issue token pair ────────────────────────────────────────
-async function issueTokenPair(userId: string, role: string, ctx: any) {
-  const accessToken = await new SignJWT({ sub: userId, role })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime(`${ACCESS_TOKEN_EXPIRY_MS / 1000}s`)
-    .setIssuedAt()
-    .sign(getJwtSecret());
-
-  const refreshToken = await new SignJWT({ sub: userId })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime(`${REFRESH_TOKEN_EXPIRY_MS / 1000}s`)
-    .setIssuedAt()
-    .sign(getRefreshSecret());
-
-  const sessionOpts = getSessionCookieOptions(ctx.req);
-  const refreshOpts = getRefreshCookieOptions(ctx.req);
-
-  ctx.res.cookie(COOKIE_NAME, accessToken, {
-    ...sessionOpts,
-    maxAge: ACCESS_TOKEN_EXPIRY_MS,
-  });
-  ctx.res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
-    ...refreshOpts,
-    maxAge: REFRESH_TOKEN_EXPIRY_MS,
-  });
-}
-
-// ─── Helper: parse working hours ─────────────────────────────────────
-function parseHHMM(timeStr: string): { h: number; m: number } {
-  const [h, m] = timeStr.split(":").map(Number);
-  return { h: h ?? 8, m: m ?? 0 };
-}
-
-// ─── Helper: slot validation ─────────────────────────────────────────
-async function validateSlotAgainstSettings(
-  startDate: Date,
-  endDate: Date,
-  sysSettings: Record<string, string>
-) {
-  const zgStart = toZagreb(startDate);
-  const zgEnd = toZagreb(endDate);
-  const zgNow = toZagreb(new Date());
-
-  // 1. Past date check (No past dates allowed - compare against start of today in Zagreb)
-  const startOfToday = fromZagreb(zgNow.dateStr, "00:00");
-  if (startDate < startOfToday) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "Rezervaciju nije moguće ugovoriti ili odobriti za datum u prošlosti. Najraniji datum je današnji dan.",
-    });
-  }
-
-  // 2. Active Season & Working Hours check
-  const dateStr = zgStart.dateStr;
-
-  const dateIsHoliday = await isHoliday(dateStr);
-  if (dateIsHoliday) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Odabrani datum je praznik ili neradni dan.",
-    });
-  }
-
-  const activeSeason = await getActiveSeason(dateStr);
-  if (!activeSeason) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Odabrani datum je izvan sezone rada.",
-    });
-  }
-
-  let workStartStr = sysSettings.workdayStart ?? "08:00";
-  let workEndStr = sysSettings.workdayEnd ?? "18:00";
-
-  if (
-    activeSeason?.workingHours &&
-    typeof activeSeason.workingHours === "object"
-  ) {
-    const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-    const dayKey = dayKeys[zgStart.dayOfWeek];
-    const dayHours = (activeSeason.workingHours as any)?.[dayKey];
-    if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Odabrani dan nije radni dan prema rasporedu radnog vremena sezone.",
-      });
-    }
-    workStartStr = dayHours.from;
-    workEndStr = dayHours.to;
-  }
-
-  const { h: wsH, m: wsM } = parseHHMM(workStartStr);
-  const { h: weH, m: weM } = parseHHMM(workEndStr);
-
-  const startH = zgStart.hours * 60 + zgStart.minutes;
-  const endH = zgEnd.hours * 60 + zgEnd.minutes;
-  const workStart = wsH * 60 + wsM;
-  const workEnd = weH * 60 + weM;
-
-  if (startH < workStart || endH > workEnd) {
-    const startFormatted = zgStart.timeStr;
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Odabrani termin (${startFormatted}) je izvan radnog vremena za taj dan (${workStartStr} - ${workEndStr}).`,
-    });
-  }
-
-  // Strictly 30-minute interval slots (XX:00 or XX:30)
-  if (zgStart.minutes % 30 !== 0 || zgStart.seconds !== 0) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "Termini moraju početi na svakih 30 minuta (npr. 08:00 ili 08:30).",
-    });
-  }
-
-  // Duration must be a multiple of 30 minutes (minimum 30 min)
-  const durationMin = (endDate.getTime() - startDate.getTime()) / 60000;
-  if (durationMin < 30 || durationMin % 30 !== 0) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message:
-        "Trajanje mora biti najmanje 30 minuta i višekratnik od 30 minuta (30, 60, 90 min...).",
-    });
-  }
-
-  return { bufferMin: 0 };
-}
 
 // ─── Main Router ──────────────────────────────────────────────────────
 export const appRouter = router({
@@ -2297,12 +2174,7 @@ export const appRouter = router({
         }
 
         // 4. Generate reservation number
-        const year = new Date().getFullYear().toString().slice(-2);
-        const randomStr = Math.random()
-          .toString(36)
-          .substring(2, 6)
-          .toUpperCase();
-        const reservationNumber = `REZ-${year}-${randomStr}`;
+        const reservationNumber = generateReservationNumber();
 
         // 5. Create reservation (status: pending, no crane yet)
         const db = await getDb();
@@ -6089,7 +5961,7 @@ export const appRouter = router({
           const allSt = await db.select().from(serviceTypes);
           const stLift = allSt.find(s => s.operationCategory === "lift_from_sea") || allSt[0];
           const userObj = await getUserById(entry.userId);
-          const resNumber = `REZ-${new Date().getFullYear()}-${Math.floor(10000 + Math.random() * 90000)}`;
+          const resNumber = generateReservationNumber();
 
           const [newRes] = await db
             .insert(reservations)
