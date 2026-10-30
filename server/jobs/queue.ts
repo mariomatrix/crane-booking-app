@@ -4,7 +4,13 @@ import { waitingOffers, landWaitingList, users, vessels, landZones } from "../..
 import { eq, and, lte } from "drizzle-orm";
 import { sendEmail, type EmailPayload } from "../_core/email";
 import { sendSms } from "../_core/sms";
-import { processReminders, processWaitingListExpiry } from "../services/notifications";
+import {
+    processReminders,
+    processWaitingListExpiry,
+    startNotificationCron,
+    stopNotificationCron,
+    isFallbackCronRunning,
+} from "../services/notifications";
 import { triggerScheduledSync } from "../memberSync/scheduler";
 
 export const QUEUES = {
@@ -29,8 +35,20 @@ export interface WaitingOfferExpireJobData {
     offerId: string;
 }
 
+export type QueueRuntimeMode = "pg-boss" | "degraded-fallback" | "stopped";
+
+export interface QueueHealthStatus {
+    mode: QueueRuntimeMode;
+    isRunning: boolean;
+    fallbackActive: boolean;
+    lastError: string | null;
+    startedAt: string | null;
+}
+
 let bossInstance: PgBoss | null = null;
 let isStarted = false;
+let lastStartupError: string | null = null;
+let startedAtIso: string | null = null;
 
 export function getBoss(): PgBoss | null {
     return bossInstance;
@@ -40,48 +58,77 @@ export function isQueueRunning(): boolean {
     return isStarted && bossInstance !== null;
 }
 
+export function getQueueHealthStatus(): QueueHealthStatus {
+    const running = isQueueRunning();
+    const fallback = isFallbackCronRunning();
+    const mode: QueueRuntimeMode = running
+        ? "pg-boss"
+        : fallback
+        ? "degraded-fallback"
+        : "stopped";
+
+    return {
+        mode,
+        isRunning: running,
+        fallbackActive: fallback,
+        lastError: lastStartupError,
+        startedAt: startedAtIso,
+    };
+}
+
 /**
- * Pokreće pg-boss instancu i registrira radnike i periodičke rasporede
+ * Pokreće pg-boss instancu i registrira radnike i periodičke rasporede.
+ * U slučaju greške pri inicijalizaciji čisti djelomično stanje, bilježi grešku
+ * i automatski aktivira degradirani fallback timer režim (osim ako je eksplicitno isključeno).
  */
-export async function startQueueService(): Promise<PgBoss | null> {
+export async function startQueueService(options?: {
+    connectionString?: string;
+    enableFallbackOnError?: boolean;
+}): Promise<PgBoss | null> {
     if (isStarted && bossInstance) {
         return bossInstance;
     }
 
-    const connectionString = process.env.DATABASE_URL;
+    const enableFallback = options?.enableFallbackOnError ?? true;
+    const connectionString = options?.connectionString ?? process.env.DATABASE_URL;
+
     if (!connectionString) {
-        console.warn("[Queue] DATABASE_URL missing, pg-boss queue service will not start.");
+        lastStartupError = "DATABASE_URL missing";
+        console.warn("[Queue][ALERT] DATABASE_URL nije postavljen — pg-boss se ne može pokrenuti.");
+        if (enableFallback) {
+            startNotificationCron();
+        }
         return null;
     }
 
+    let candidateBoss: PgBoss | null = null;
     try {
         console.log("[Queue] Inicijalizacija pg-boss servisa...");
-        bossInstance = new PgBoss({
+        candidateBoss = new PgBoss({
             connectionString,
             application_name: "crane_booking_pg_boss",
             schema: "pgboss",
         });
 
-        bossInstance.on("error", (error) => {
+        candidateBoss.on("error", (error) => {
             console.error("[Queue] pg-boss greška:", error);
         });
 
-        await bossInstance.start();
-        isStarted = true;
+        await candidateBoss.start();
         console.log("[Queue] pg-boss servis uspješno pokrenut (shema: pgboss).");
 
         // ─── 0. Eksplicitno kreiranje svih redova (zahtjev pg-boss v12) ───
         const queueNames = Object.values(QUEUES);
         for (const q of queueNames) {
             try {
-                await bossInstance.createQueue(q);
+                await candidateBoss.createQueue(q);
             } catch (e: any) {
                 // Već postoji
             }
         }
 
         // ─── 1. Registracija radnika za e-mailove s automatskim retryjem ───
-        await bossInstance.work<EmailJobData>(QUEUES.SEND_EMAIL, async (jobs) => {
+        await candidateBoss.work<EmailJobData>(QUEUES.SEND_EMAIL, async (jobs) => {
             for (const job of jobs) {
                 const { to, subject, html } = job.data;
                 const ok = await sendEmail({ to, subject, html });
@@ -92,7 +139,7 @@ export async function startQueueService(): Promise<PgBoss | null> {
         });
 
         // ─── 2. Registracija radnika za SMS poruke ───
-        await bossInstance.work<SmsJobData>(QUEUES.SEND_SMS, async (jobs) => {
+        await candidateBoss.work<SmsJobData>(QUEUES.SEND_SMS, async (jobs) => {
             for (const job of jobs) {
                 const { phone, message } = job.data;
                 const ok = await sendSms(phone, message);
@@ -103,7 +150,7 @@ export async function startQueueService(): Promise<PgBoss | null> {
         });
 
         // ─── 3. Istek ponude na listi čekanja (točno u sekundu isteka) ───
-        await bossInstance.work<WaitingOfferExpireJobData>(QUEUES.WAITING_OFFER_EXPIRE, async (jobs) => {
+        await candidateBoss.work<WaitingOfferExpireJobData>(QUEUES.WAITING_OFFER_EXPIRE, async (jobs) => {
             const db = await getDb();
             if (!db) return;
 
@@ -166,46 +213,72 @@ export async function startQueueService(): Promise<PgBoss | null> {
         });
 
         // ─── 4. Cron: Podsjetnici za rezervacije (svaki sat) ───
-        await bossInstance.work(QUEUES.RESERVATION_REMINDERS, async () => {
+        await candidateBoss.work(QUEUES.RESERVATION_REMINDERS, async () => {
             await processReminders();
         });
 
         // ─── 5. Cron: Provjera isteka starih prijava na listi čekanja (svakih 15 min) ───
-        await bossInstance.work(QUEUES.WAITING_LIST_EXPIRY, async () => {
+        await candidateBoss.work(QUEUES.WAITING_LIST_EXPIRY, async () => {
             await processWaitingListExpiry();
         });
 
         // ─── 6. Cron: MSSQL sinkronizacija članova (svakih 30 min s mutexom) ───
-        await bossInstance.work(QUEUES.MSSQL_MEMBER_SYNC, async () => {
+        await candidateBoss.work(QUEUES.MSSQL_MEMBER_SYNC, async () => {
             await triggerScheduledSync("boss-cron");
         });
 
         // ─── Registracija ponavljajućih cron poslova u bazi ───
-        await bossInstance.schedule(QUEUES.RESERVATION_REMINDERS, "0 * * * *", null, {
+        await candidateBoss.schedule(QUEUES.RESERVATION_REMINDERS, "0 * * * *", null, {
             singletonKey: "schedule-reservation-reminders",
         });
 
-        await bossInstance.schedule(QUEUES.WAITING_LIST_EXPIRY, "*/15 * * * *", null, {
+        await candidateBoss.schedule(QUEUES.WAITING_LIST_EXPIRY, "*/15 * * * *", null, {
             singletonKey: "schedule-waiting-list-expiry",
         });
 
-        await bossInstance.schedule(QUEUES.MSSQL_MEMBER_SYNC, "*/30 * * * *", null, {
+        await candidateBoss.schedule(QUEUES.MSSQL_MEMBER_SYNC, "*/30 * * * *", null, {
             singletonKey: "schedule-mssql-member-sync",
         });
 
         console.log("[Queue] Svi pg-boss cron rasporedi uspješno registrirani u bazi.");
 
+        // Svi koraci su uspjeli — postavi aktivno stanje i isključi eventualni fallback
+        stopNotificationCron();
+        bossInstance = candidateBoss;
+        isStarted = true;
+        lastStartupError = null;
+        startedAtIso = new Date().toISOString();
+
         return bossInstance;
-    } catch (err) {
-        console.error("[Queue] Neuspješno pokretanje pg-boss servisa:", err);
+    } catch (err: any) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        lastStartupError = errMsg;
+        isStarted = false;
+        bossInstance = null;
+
+        if (candidateBoss) {
+            try {
+                await candidateBoss.stop({ graceful: false, timeout: 1000 });
+            } catch {
+                // Ignore cleanup error on failed instance
+            }
+        }
+
+        console.error(
+            `[Queue][ALERT] Neuspješno pokretanje pg-boss servisa (${errMsg}). Sustav prelazi u DEGRADIRANI FALLBACK način rada.`
+        );
+        if (enableFallback) {
+            startNotificationCron();
+        }
         return null;
     }
 }
 
 /**
- * Zaustavlja pg-boss servis
+ * Zaustavlja pg-boss servis i eventualne fallback tajmere
  */
 export async function stopQueueService(): Promise<void> {
+    stopNotificationCron();
     if (bossInstance && isStarted) {
         console.log("[Queue] Zaustavljanje pg-boss servisa...");
         try {
@@ -217,6 +290,9 @@ export async function stopQueueService(): Promise<void> {
             bossInstance = null;
             isStarted = false;
         }
+    } else {
+        bossInstance = null;
+        isStarted = false;
     }
 }
 
@@ -292,7 +368,15 @@ export async function scheduleOfferExpiration(
             console.error(`[Queue] Neuspješno zakazivanje isteka ponude ${offerId}:`, err);
         }
     }
-    return null;
+
+    // Fallback: osiguraj da su fallback tajmeri aktivni i zakaži in-memory okidač za expiresAt
+    startNotificationCron();
+    const delayMs = Math.max(1000, Math.min(expiresAt.getTime() - Date.now(), 2_147_483_647));
+    const t = setTimeout(() => {
+        processWaitingListExpiry().catch(console.error);
+    }, delayMs);
+    if (t.unref) t.unref();
+    return "fallback-scheduled";
 }
 
 /**

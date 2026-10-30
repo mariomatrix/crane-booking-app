@@ -1,12 +1,15 @@
 import "dotenv/config";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll } from "vitest";
 import { LandFlowService } from "./services/landFlow.service";
-import { getDb } from "./db";
-import { landZones, landSpots, craneZoneAffinities, cranes, reservations } from "../drizzle/schema";
-import { eq } from "drizzle-orm";
+import { landZones, reservations } from "../drizzle/schema";
+import { requireTestDb, ensureBaseTestFixtures } from "./testUtils/dbTestHarness";
 
 describe("LandFlowService & Dispečerski centar", () => {
     const service = new LandFlowService();
+
+    beforeAll(async () => {
+        await ensureBaseTestFixtures();
+    });
 
     it("should fetch daily balance for today with valid structure", async () => {
         const todayStr = new Date().toISOString().split("T")[0];
@@ -33,11 +36,10 @@ describe("LandFlowService & Dispečerski centar", () => {
     });
 
     it("should return spots by zone with dimensions and occupancy status", async () => {
-        const db = await getDb();
-        if (!db) return;
+        const db = await requireTestDb();
 
         const zones = await db.select().from(landZones).limit(1);
-        if (zones.length === 0) return;
+        expect(zones.length).toBeGreaterThan(0);
 
         const zoneId = zones[0].id;
         const spots = await service.getSpotsByZone(zoneId);
@@ -90,8 +92,7 @@ describe("LandFlowService & Dispečerski centar", () => {
     });
 
     it("should recommend spots based on reservation if reservations exist", async () => {
-        const db = await getDb();
-        if (!db) return;
+        const db = await requireTestDb();
 
         const resList = await db.select().from(reservations).limit(1);
         if (resList.length > 0) {

@@ -817,6 +817,7 @@ export class LandDispatchService {
       operationCategory: serviceType?.operationCategory || "other",
       vesselWeightTons: reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null,
       vesselBeamM: reservation.vesselBeamM ?? linkedVessel?.beamM ?? null,
+      vesselLengthM: reservation.vesselLengthM ?? linkedVessel?.lengthM ?? null,
       overrideConfirmed: !!teamOverride,
       overrideReason: teamOverrideReason,
       requireReasonOnOverride: false,

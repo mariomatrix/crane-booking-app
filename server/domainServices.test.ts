@@ -11,7 +11,12 @@ import {
   verifyRefreshToken,
   issueMobileOperatorToken,
 } from "./services/authPolicyService";
-import { parseHHMM } from "./services/reservationSchedulingService";
+import {
+  parseHHMM,
+  estimateMinWeightTonsFromLength,
+  validateSlotAgainstSettings,
+} from "./services/reservationSchedulingService";
+import { checkFeasibility } from "./landDispatch/feasibility";
 
 describe("Domain Services — Numbering, Auth Policy & Scheduling Helpers", () => {
   beforeAll(() => {
@@ -79,5 +84,72 @@ describe("Domain Services — Numbering, Auth Policy & Scheduling Helpers", () =
   it("parses HH:MM working hours strings accurately", () => {
     expect(parseHHMM("08:30")).toEqual({ h: 8, m: 30 });
     expect(parseHHMM("16:00")).toEqual({ h: 16, m: 0 });
+  });
+
+  it("flags 1.5t crane as requiring override when vessel >= 5.5m has no weightTons (e.g. BALERINA 7.15m)", () => {
+    expect(estimateMinWeightTonsFromLength(4.8)).toBe(0);
+    expect(estimateMinWeightTonsFromLength(7.15)).toBeGreaterThan(1.5);
+    expect(estimateMinWeightTonsFromLength(10.2)).toBeGreaterThanOrEqual(3.5);
+
+    const slotStart = new Date("2026-10-30T06:00:00Z");
+    const slotEnd = new Date("2026-10-30T07:30:00Z");
+
+    const feas15t = checkFeasibility({
+      crane: {
+        id: "crane-15t",
+        name: "DIZALICA 1,5 T",
+        maxCapacityKN: 15, // ~1.53t
+        maxPoolWidth: null,
+        craneStatus: "active",
+      },
+      zone: { id: "z-a3", code: "A3", name: "Arla 3", totalSpots: 35 },
+      vessel: { name: "BALERINA", weightTons: null, beamM: 2.5, lengthM: 7.15 },
+      operationCategory: "lift_from_sea",
+      slotStart,
+      slotEnd,
+      activeStoppages: [],
+      existingReservations: [],
+      currentZoneFreeAtSlot: 19,
+    });
+
+    expect(feas15t.requiresOverride).toBe(true);
+    expect(feas15t.isFeasible).toBe(false);
+    expect(feas15t.overrideReasons.some((r) => r.includes("7.15m"))).toBe(true);
+
+    const feas9t = checkFeasibility({
+      crane: {
+        id: "crane-9t",
+        name: "DIZALICA 9 T",
+        maxCapacityKN: 90, // ~9.18t
+        maxPoolWidth: null,
+        craneStatus: "active",
+      },
+      zone: { id: "z-a3", code: "A3", name: "Arla 3", totalSpots: 35 },
+      vessel: { name: "BALERINA", weightTons: null, beamM: 2.5, lengthM: 7.15 },
+      operationCategory: "lift_from_sea",
+      slotStart,
+      slotEnd,
+      activeStoppages: [],
+      existingReservations: [],
+      currentZoneFreeAtSlot: 19,
+    });
+
+    expect(feas9t.requiresOverride).toBe(false);
+    expect(feas9t.isFeasible).toBe(true);
+  });
+
+  it("blocks past dates for regular users but allows past dates when allowPastDates is true", async () => {
+    const pastStart = new Date("2025-05-12T08:00:00Z"); // 10:00 Europe/Zagreb
+    const pastEnd = new Date("2025-05-12T09:00:00Z");
+    const sysSettings = { workdayStart: "07:00", workdayEnd: "18:00" };
+
+    await expect(
+      validateSlotAgainstSettings(pastStart, pastEnd, sysSettings)
+    ).rejects.toThrow(/prošlosti/);
+
+    const allowed = await validateSlotAgainstSettings(pastStart, pastEnd, sysSettings, {
+      allowPastDates: true,
+    });
+    expect(allowed).toEqual({ bufferMin: 0 });
   });
 });

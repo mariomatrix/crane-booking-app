@@ -16,13 +16,13 @@ import { toZagreb } from "@shared/timezone";
 import { fetchActiveStoppagesForDate } from "./stoppage";
 
 export const landDispatchRouter = router({
-  getDailyOverview: protectedProcedure
+  getDailyOverview: operatorProcedure
     .input(z.object({ dateStr: z.string() }))
     .query(async ({ input }) => {
       return await landDispatchService.getDailyDispatchOverview(input.dateStr);
     }),
 
-  getSlotRecommendations: protectedProcedure
+  getSlotRecommendations: operatorProcedure
     .input(
       z.object({
         reservationId: z.string().uuid(),

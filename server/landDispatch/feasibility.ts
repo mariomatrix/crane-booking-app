@@ -122,6 +122,13 @@ export function checkFeasibility(params: FeasibilityCheckParams): FeasibilityRes
         hardBlockReasons.push(msg);
       }
     }
+  } else if (vessel.lengthM && vessel.lengthM >= 5.5 && crane.maxCapacityKN > 0) {
+    const nominalTons = crane.maxCapacityKN / 9.80665;
+    if (nominalTons <= 2.0) {
+      const msg = `Za plovilo dužine ${vessel.lengthM}m bez upisane mase procjenjuje se masa veća od nosivosti dizalice ${crane.name} (${nominalTons.toFixed(1)} t).`;
+      overrideReasons.push(msg);
+      warnings.push(`${msg} Zahtijeva provjeru mase ili svjesni dispečerski override.`);
+    }
   }
 
   // 3. Crane Pool Width (Travelift)
@@ -277,6 +284,7 @@ export async function validateReservationConstraintsAndOverrides(params: {
   operationCategory?: string | null;
   vesselWeightTons?: number | string | null;
   vesselBeamM?: number | string | null;
+  vesselLengthM?: number | string | null;
   overrideConfirmed?: boolean;
   overrideReason?: string | null;
   requireReasonOnOverride?: boolean;
@@ -301,6 +309,7 @@ export async function validateReservationConstraintsAndOverrides(params: {
     operationCategory,
     vesselWeightTons,
     vesselBeamM,
+    vesselLengthM,
     overrideConfirmed = false,
     overrideReason,
     requireReasonOnOverride = false,
@@ -313,6 +322,7 @@ export async function validateReservationConstraintsAndOverrides(params: {
 
   // 1. Crane weight capacity & pool width
   const weightTons = vesselWeightTons != null ? Number(vesselWeightTons) : 0;
+  const lengthM = vesselLengthM != null ? Number(vesselLengthM) : 0;
   const maxCapKN = Number(crane.maxCapacityKN) || 0;
 
   if (weightTons > 0 && maxCapKN > 0) {
@@ -329,6 +339,13 @@ export async function validateReservationConstraintsAndOverrides(params: {
       const exceedPct = ((vesselWeightKN - maxCapKN) / maxCapKN) * 100;
       overrideReasons.push(
         `Prekoračenje nosivosti dizalice ${crane.name} za +${exceedPct.toFixed(1)}% (${weightTons.toFixed(1)} t > ${nominalTons.toFixed(1)} t, unutar +${weightTolerancePercent}% tolerancije)`
+      );
+    }
+  } else if (weightTons <= 0 && lengthM >= 5.5 && maxCapKN > 0) {
+    const nominalTons = maxCapKN / 9.80665;
+    if (nominalTons <= 2.0) {
+      overrideReasons.push(
+        `Za plovilo dužine ${lengthM}m bez upisane mase procjenjuje se masa > ${nominalTons.toFixed(1)}t (${crane.name})`
       );
     }
   }

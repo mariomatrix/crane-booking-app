@@ -11,21 +11,35 @@ export function parseHHMM(timeStr: string): { h: number; m: number } {
 }
 
 /**
+ * Estimates a conservative minimum vessel weight (in tons) from length (in meters)
+ * when explicit weightTons is missing (0 or null), preventing small cranes (<= 2t)
+ * from being recommended as optimal for medium/large vessels (>= 5.5m).
+ */
+export function estimateMinWeightTonsFromLength(lengthM?: number | string | null): number {
+  const len = lengthM != null ? Number(lengthM) : 0;
+  if (!Number.isFinite(len) || len < 5.5) return 0;
+  if (len >= 9) return 3.5;
+  return 1.65; // >= 5.5m: above 1.5t nominal crane capacity
+}
+
+/**
  * Validates that a scheduled slot [startDate, endDate] falls on a working day,
  * within active season working hours, and starts/ends on a 30-minute boundary.
  */
 export async function validateSlotAgainstSettings(
   startDate: Date,
   endDate: Date,
-  sysSettings: Record<string, string>
+  sysSettings: Record<string, string>,
+  options?: { allowPastDates?: boolean }
 ) {
   const zgStart = toZagreb(startDate);
   const zgEnd = toZagreb(endDate);
   const zgNow = toZagreb(new Date());
+  const allowPastDates = options?.allowPastDates ?? false;
 
-  // 1. Past date check (compare against start of today in Zagreb)
+  // 1. Past date check (compare against start of today in Zagreb, unless staff retroactive entry)
   const startOfToday = fromZagreb(zgNow.dateStr, "00:00");
-  if (startDate < startOfToday) {
+  if (!allowPastDates && startDate < startOfToday) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message:
@@ -37,7 +51,7 @@ export async function validateSlotAgainstSettings(
   const dateStr = zgStart.dateStr;
 
   const dateIsHoliday = await isHoliday(dateStr);
-  if (dateIsHoliday) {
+  if (dateIsHoliday && !allowPastDates) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Odabrani datum je praznik ili neradni dan.",
@@ -45,14 +59,14 @@ export async function validateSlotAgainstSettings(
   }
 
   const activeSeason = await getActiveSeason(dateStr);
-  if (!activeSeason) {
+  if (!activeSeason && !allowPastDates) {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: "Odabrani datum je izvan sezone rada.",
     });
   }
 
-  let workStartStr = sysSettings.workdayStart ?? "08:00";
+  let workStartStr = sysSettings.workdayStart ?? "07:00";
   let workEndStr = sysSettings.workdayEnd ?? "18:00";
 
   if (
@@ -68,13 +82,16 @@ export async function validateSlotAgainstSettings(
       dayHours.from.trim() === "" ||
       dayHours.to.trim() === ""
     ) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Odabrani dan nije radni dan prema rasporedu radnog vremena sezone.",
-      });
+      if (!allowPastDates) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Odabrani dan nije radni dan prema rasporedu radnog vremena sezone.",
+        });
+      }
+    } else {
+      workStartStr = dayHours.from;
+      workEndStr = dayHours.to;
     }
-    workStartStr = dayHours.from;
-    workEndStr = dayHours.to;
   }
 
   const { h: wsH, m: wsM } = parseHHMM(workStartStr);

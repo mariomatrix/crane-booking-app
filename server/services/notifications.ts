@@ -1,7 +1,7 @@
 import { getDb } from "../db";
-import { reservations, users, cranes } from "../../drizzle/schema";
-import { eq, and, gte, lt } from "drizzle-orm";
-import { sendReservationConfirmation, sendReservationRejection, sendWaitingListNotification } from "../_core/email";
+import { reservations, users, cranes, waitingOffers, landWaitingList, vessels, landZones } from "../../drizzle/schema";
+import { eq, and, gte, lt, lte } from "drizzle-orm";
+import { sendReservationConfirmation, sendReservationRejection, sendWaitingListNotification, sendEmail } from "../_core/email";
 import { sendReservationConfirmationSms, sendReservationRejectionSms, sendSms } from "../_core/sms";
 
 export async function processReminders() {
@@ -195,17 +195,96 @@ export async function processWaitingListExpiry() {
         if (expired.length > 0) {
             console.log(`[WaitingList] Processed ${expired.length} expired entries`);
         }
+
+        // Also sweep expired waitingOffers (land waiting list offers) when running in fallback mode
+        const now = new Date();
+        const expiredOffers = await db
+            .select({
+                offer: waitingOffers,
+                waitingEntry: landWaitingList,
+                user: users,
+                vessel: vessels,
+                zone: landZones,
+            })
+            .from(waitingOffers)
+            .innerJoin(landWaitingList, eq(waitingOffers.waitingListId, landWaitingList.id))
+            .innerJoin(users, eq(landWaitingList.userId, users.id))
+            .innerJoin(vessels, eq(waitingOffers.vesselId, vessels.id))
+            .innerJoin(landZones, eq(waitingOffers.zoneId, landZones.id))
+            .where(
+                and(
+                    eq(waitingOffers.status, "pending"),
+                    lte(waitingOffers.expiresAt, now)
+                )
+            );
+
+        for (const item of expiredOffers) {
+            await db
+                .update(waitingOffers)
+                .set({
+                    status: "expired",
+                    declineReason: "Automatski isteklo - korisnik nije prihvatio u roku",
+                    updatedAt: now,
+                })
+                .where(eq(waitingOffers.id, item.offer.id));
+
+            if (item.user.email) {
+                await sendEmail({
+                    to: item.user.email,
+                    subject: "Istekla ponuda za suhi vez - PŠD Špinut",
+                    html: `
+                        <p>Poštovani ${item.user.name || item.user.firstName || ""},</p>
+                        <p>Vaša ponuda za termin na suhom vezu u zoni <strong>${item.zone.name}</strong> za plovilo <strong>${item.vessel.name}</strong> je istekla jer nije potvrđena na vrijeme.</p>
+                    `,
+                }).catch(console.warn);
+            }
+
+            if (item.user.phone) {
+                await sendSms(
+                    item.user.phone,
+                    `MARINA: Vaša ponuda za suhi vez (${item.zone.name}) za plovilo ${item.vessel.name} je istekla.`
+                ).catch(console.warn);
+            }
+        }
     } catch (error) {
         console.error("Failed to process waiting list expiry:", error);
     }
 }
 
+let reminderTimer: ReturnType<typeof setInterval> | null = null;
+let waitingListTimer: ReturnType<typeof setInterval> | null = null;
+
+export function isFallbackCronRunning(): boolean {
+    return reminderTimer !== null || waitingListTimer !== null;
+}
+
 export function startNotificationCron() {
-    console.log("Notification service started (reminders hourly, waiting list every 30min)");
+    if (isFallbackCronRunning()) {
+        return;
+    }
+    console.log("[FallbackCron] Degradirani fallback tajmeri pokrenuti (podsjetnici 60 min, lista čekanja 15 min)");
     // Reminders: every hour
-    processReminders();
-    setInterval(processReminders, 60 * 60 * 1000);
-    // Waiting list expiry: every 30 minutes
-    processWaitingListExpiry();
-    setInterval(processWaitingListExpiry, 30 * 60 * 1000);
+    processReminders().catch(console.error);
+    reminderTimer = setInterval(() => {
+        processReminders().catch(console.error);
+    }, 60 * 60 * 1000);
+    if (reminderTimer.unref) reminderTimer.unref();
+
+    // Waiting list & offer expiry: every 15 minutes
+    processWaitingListExpiry().catch(console.error);
+    waitingListTimer = setInterval(() => {
+        processWaitingListExpiry().catch(console.error);
+    }, 15 * 60 * 1000);
+    if (waitingListTimer.unref) waitingListTimer.unref();
+}
+
+export function stopNotificationCron() {
+    if (reminderTimer) {
+        clearInterval(reminderTimer);
+        reminderTimer = null;
+    }
+    if (waitingListTimer) {
+        clearInterval(waitingListTimer);
+        waitingListTimer = null;
+    }
 }

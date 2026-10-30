@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
+import { getQueueHealthStatus } from "../jobs/queue";
 
 export const systemRouter = router({
   health: publicProcedure
@@ -9,9 +10,14 @@ export const systemRouter = router({
         timestamp: z.number().min(0, "timestamp cannot be negative"),
       })
     )
-    .query(() => ({
-      ok: true,
-    })),
+    .query(() => {
+      const queue = getQueueHealthStatus();
+      return {
+        ok: true,
+        degraded: queue.mode === "degraded-fallback",
+        queue,
+      };
+    }),
 
   notifyOwner: adminProcedure
     .input(

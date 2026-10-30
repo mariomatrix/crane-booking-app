@@ -3,94 +3,37 @@ import { describe, expect, it, beforeAll, beforeEach } from "vitest";
 import { like, eq, inArray } from "drizzle-orm";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { getDb, checkTeamCapacity, isVesselCurrentlyOnLand } from "./db";
+import { checkTeamCapacity, isVesselCurrentlyOnLand } from "./db";
 import {
-  users,
   cranes,
   reservations,
-  auditLog,
   landZones,
   landOccupancies,
-  landWaitingList,
-  craneOperationLog,
-  memberLinks,
-  memberMemberships,
-  userCardEntries,
-  workOrders,
-  memberStatutoryRights,
-  syncConflicts,
-  operatorCranes,
   vessels,
-  seasons,
   serviceTypes,
+  users,
+  workOrders,
+  userCardEntries,
+  craneOperationLog,
 } from "../drizzle/schema";
+import {
+  requireTestDb,
+  ensureBaseTestFixtures,
+  TEST_USER_IDS,
+  TEST_CRANE_IDS,
+} from "./testUtils/dbTestHarness";
+import {
+  issueMobileOperatorToken,
+  verifyMobileOperatorSession,
+  resolveActiveUserById,
+} from "./services/authPolicyService";
+import {
+  startReservationWorkOrder,
+  completeReservationOperation,
+} from "./services/workOrderService";
 
 beforeAll(async () => {
-  const db = await getDb();
-  if (db) {
-    // Clean up referencing tables first to avoid foreign key violations
-    await db.delete(auditLog).catch(() => {});
-    await db.delete(syncConflicts).catch(() => {});
-    await db.delete(userCardEntries).catch(() => {});
-    await db.delete(workOrders).catch(() => {});
-    await db.delete(memberLinks).catch(() => {});
-    await db.delete(memberMemberships).catch(() => {});
-    await db.delete(memberStatutoryRights).catch(() => {});
-    await db.delete(landWaitingList).catch(() => {});
-    await db.delete(landOccupancies).catch(() => {});
-    await db.delete(landZones).catch(() => {});
-    await db.delete(craneOperationLog).catch(() => {});
-    await db.delete(reservations).catch(() => {});
-    await db.delete(operatorCranes).catch(() => {});
-    await db.delete(vessels).catch(() => {});
-    await db.delete(cranes).catch(() => {});
-    await db.delete(users).catch(() => {});
-
-    // Seed mock users (use onConflictDoNothing if already present in DB)
-    await db.insert(users).values([
-      {
-        id: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
-        email: "user@example.com",
-        name: "Test User",
-        role: "user",
-        loginMethod: "manus",
-        userStatus: "active",
-      },
-      {
-        id: "8a6042db-bb2b-42b7-a3f2-8924b130cf61",
-        email: "admin@example.com",
-        name: "Admin User",
-        role: "admin",
-        loginMethod: "manus",
-        userStatus: "active",
-      },
-      {
-        id: "785df6a2-cf29-4700-a54c-5cb1f181be92",
-        email: "operator@example.com",
-        name: "Operator User",
-        role: "operator",
-        loginMethod: "manus",
-        userStatus: "active",
-      }
-    ]).onConflictDoNothing();
-
-    // Seed an active season for tests
-    await db.insert(seasons).values({
-      name: "Test Season 2026",
-      startDate: "2026-01-01",
-      endDate: "2026-12-31",
-      workingHours: {
-        mon: { from: "07:00", to: "17:00" },
-        tue: { from: "07:00", to: "17:00" },
-        wed: { from: "07:00", to: "17:00" },
-        thu: { from: "07:00", to: "17:00" },
-        fri: { from: "07:00", to: "17:00" },
-        sat: { from: "07:00", to: "14:00" },
-        sun: { from: "08:00", to: "12:00" },
-      },
-      isActive: true,
-    }).onConflictDoNothing();
-  }
+  await ensureBaseTestFixtures();
 });
 
 // ─── Test Helpers ────────────────────────────────────────────────────
@@ -99,13 +42,32 @@ type AuthenticatedUser = NonNullable<TrpcContext["user"]>;
 
 function createMockUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
   return {
-    id: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
-    openId: "test-user-1",
+    id: TEST_USER_IDS.user,
     email: "user@example.com",
+    passwordHash: null,
+    googleId: null,
+    firstName: "Test",
+    lastName: "User",
     name: "Test User",
-    loginMethod: "manus",
+    phone: null,
+    oib: null,
+    jmbgHash: null,
+    isLegalEntity: false,
+    companyName: null,
+    contactPerson: null,
+    address: null,
+    city: "Split",
+    postalCode: "21000",
+    clientCategory: "member",
     role: "user",
+    userStatus: "active",
+    emailVerified: true,
     emailVerifiedAt: new Date(),
+    image: null,
+    anonymizedAt: null,
+    mustChangePassword: false,
+    loginMethod: "manus",
+    pinCode: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     lastSignedIn: new Date(),
@@ -115,8 +77,7 @@ function createMockUser(overrides?: Partial<AuthenticatedUser>): AuthenticatedUs
 
 function createMockAdmin(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
   return createMockUser({
-    id: "8a6042db-bb2b-42b7-a3f2-8924b130cf61",
-    openId: "admin-1",
+    id: TEST_USER_IDS.admin,
     email: "admin@example.com",
     name: "Admin User",
     role: "admin",
@@ -126,8 +87,7 @@ function createMockAdmin(overrides?: Partial<AuthenticatedUser>): AuthenticatedU
 
 function createMockOperator(overrides?: Partial<AuthenticatedUser>): AuthenticatedUser {
   return createMockUser({
-    id: "785df6a2-cf29-4700-a54c-5cb1f181be92",
-    openId: "operator-1",
+    id: TEST_USER_IDS.operator,
     email: "operator@example.com",
     name: "Operator User",
     role: "operator",
@@ -225,10 +185,8 @@ describe("crane.create", () => {
     expect(result).toHaveProperty("id");
     expect(typeof result.id).toBe("string");
     // Clean up created test crane immediately so DB is not polluted
-    const db = await getDb();
-    if (db) {
-      await db.delete(cranes).where(eq(cranes.id, result.id));
-    }
+    const db = await requireTestDb();
+    await db.delete(cranes).where(eq(cranes.id, result.id));
   });
 });
 
@@ -384,26 +342,23 @@ describe("audit.list", () => {
 
 describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
   beforeEach(async () => {
-    const db = await getDb();
-    if (db) {
-      await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
-    }
+    const db = await requireTestDb();
+    await db.delete(reservations).where(like(reservations.vesselRegistration, "BOAT-%"));
   });
 
   it("allows moving a reservation from Crane 1 to Crane 3 when 2 cranes are booked at the same time", async () => {
-    const db = await getDb();
-    if (!db) return;
+    const db = await requireTestDb();
 
-    // Use the 3 active marina cranes
-    const crane1Id = "7ad0d658-71a1-49cf-a96d-e38e914fbaa1";
-    const crane2Id = "e487c8cc-b5a5-4c21-a201-68b79212d3ba";
-    const crane3Id = "ee85e94d-8490-4d61-9c42-a4375f6382e6";
+    // Use the 3 controlled test cranes
+    const crane1Id = TEST_CRANE_IDS.crane1;
+    const crane2Id = TEST_CRANE_IDS.crane2;
+    const crane3Id = TEST_CRANE_IDS.crane3;
 
     const start = new Date("2026-11-10T09:00:00Z");
     const end = new Date("2026-11-10T09:30:00Z");
 
     const [resA] = await db.insert(reservations).values({
-      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      userId: TEST_USER_IDS.user,
       craneId: crane1Id,
       scheduledStart: start,
       scheduledEnd: end,
@@ -412,7 +367,7 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     }).returning();
 
     const [resB] = await db.insert(reservations).values({
-      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      userId: TEST_USER_IDS.user,
       craneId: crane2Id,
       scheduledStart: start,
       scheduledEnd: end,
@@ -447,13 +402,12 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
   });
 
   it("does not let next-slot appointment bleed into current slot capacity", async () => {
-    const db = await getDb();
-    if (!db) return;
+    const db = await requireTestDb();
 
-    // Use the 3 active marina cranes
-    const crane1Id = "7ad0d658-71a1-49cf-a96d-e38e914fbaa1";
-    const crane2Id = "e487c8cc-b5a5-4c21-a201-68b79212d3ba";
-    const crane3Id = "ee85e94d-8490-4d61-9c42-a4375f6382e6";
+    // Use the 3 controlled test cranes
+    const crane1Id = TEST_CRANE_IDS.crane1;
+    const crane2Id = TEST_CRANE_IDS.crane2;
+    const crane3Id = TEST_CRANE_IDS.crane3;
 
     const start = new Date("2026-11-10T09:00:00Z");
     const end = new Date("2026-11-10T09:30:00Z");
@@ -461,7 +415,7 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     const nextEnd = new Date("2026-11-10T10:00:00Z");
 
     const [resA] = await db.insert(reservations).values({
-      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      userId: TEST_USER_IDS.user,
       craneId: crane1Id,
       scheduledStart: start,
       scheduledEnd: end,
@@ -470,7 +424,7 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     }).returning();
 
     const [resB] = await db.insert(reservations).values({
-      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      userId: TEST_USER_IDS.user,
       craneId: crane2Id,
       scheduledStart: start,
       scheduledEnd: end,
@@ -480,7 +434,7 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
 
     // Next boat on crane 1 starting at 09:30
     const [resC] = await db.insert(reservations).values({
-      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      userId: TEST_USER_IDS.user,
       craneId: crane1Id,
       scheduledStart: nextStart,
       scheduledEnd: nextEnd,
@@ -509,20 +463,19 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
   });
 
   it("blocks booking a 3rd concurrent crane without override and allows it with override", async () => {
-    const db = await getDb();
-    if (!db) return;
+    const db = await requireTestDb();
 
-    // Use the 3 active marina cranes
-    const crane1Id = "7ad0d658-71a1-49cf-a96d-e38e914fbaa1";
-    const crane2Id = "e487c8cc-b5a5-4c21-a201-68b79212d3ba";
-    const crane3Id = "ee85e94d-8490-4d61-9c42-a4375f6382e6";
+    // Use the 3 controlled test cranes
+    const crane1Id = TEST_CRANE_IDS.crane1;
+    const crane2Id = TEST_CRANE_IDS.crane2;
+    const crane3Id = TEST_CRANE_IDS.crane3;
 
     const start = new Date("2026-11-10T09:00:00Z");
     const end = new Date("2026-11-10T09:30:00Z");
 
     await db.insert(reservations).values([
       {
-        userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        userId: TEST_USER_IDS.user,
         craneId: crane1Id,
         scheduledStart: start,
         scheduledEnd: end,
@@ -530,7 +483,7 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
         vesselRegistration: "BOAT-1",
       },
       {
-        userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        userId: TEST_USER_IDS.user,
         craneId: crane2Id,
         scheduledStart: start,
         scheduledEnd: end,
@@ -546,7 +499,7 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
 
     // Create a 3rd reservation at an earlier time
     const [res3] = await db.insert(reservations).values({
-      userId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+      userId: TEST_USER_IDS.user,
       craneId: crane3Id,
       scheduledStart: new Date("2026-11-10T08:00:00Z"),
       scheduledEnd: new Date("2026-11-10T08:30:00Z"),
@@ -583,24 +536,24 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
 
   describe("Vessel on land restriction (lift_from_sea)", () => {
     it("correctly detects if a vessel is on land via ID or registration", async () => {
-      const db = await getDb();
-      if (!db) return;
+      const db = await requireTestDb();
 
       const uid = Date.now();
+      const shortUid = String(uid).slice(-6);
       const reg = `TLAND-A-${uid}`;
 
       const [zone] = await db.insert(landZones).values({
         name: `Zona Test ${uid}`,
-        code: `Z-${uid}`.slice(0, 20),
-        capacity: 10,
-        occupiedSpots: 1,
+        code: `ZA-${shortUid}`,
+        totalSpots: 10,
+        manualOccupiedSpots: 1,
         isActive: true,
       }).returning();
 
       const [vessel] = await db.insert(vessels).values({
         name: "Brod Na Kopnu",
         registration: reg,
-        ownerId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        ownerId: TEST_USER_IDS.user,
         type: "jedrilica",
       }).returning();
 
@@ -637,24 +590,24 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
     });
 
     it("blocks reservation creation for lift_from_sea if vessel is on land, but allows lower_to_sea", async () => {
-      const db = await getDb();
-      if (!db) return;
+      const db = await requireTestDb();
 
       const uid = Date.now();
+      const shortUid = String(uid).slice(-6);
       const reg = `TLAND-B-${uid}`;
 
       const [zone] = await db.insert(landZones).values({
         name: `Zona Test B ${uid}`,
-        code: `ZB-${uid}`.slice(0, 20),
-        capacity: 10,
-        occupiedSpots: 1,
+        code: `ZB-${shortUid}`,
+        totalSpots: 10,
+        manualOccupiedSpots: 1,
         isActive: true,
       }).returning();
 
       const [vessel] = await db.insert(vessels).values({
         name: "Brod Na Kopnu 2",
         registration: reg,
-        ownerId: "1e29e924-4f05-4c60-a010-e7f53a479ff1",
+        ownerId: TEST_USER_IDS.user,
         type: "jedrilica",
       }).returning();
 
@@ -743,6 +696,132 @@ describe("Team Capacity & Crane Moving (3 cranes - 2 teams)", () => {
       }
     });
   });
+
+  describe("Negative Auth & End-to-End Work Order Domain Flow", () => {
+    it("rejects regular member on operator/admin procedures (calendar.events, workOrders, landDispatch)", async () => {
+      const member = createMockUser();
+      const caller = appRouter.createCaller(createContext(member));
+
+      await expect(caller.calendar.events()).rejects.toThrow();
+      await expect(
+        caller.workOrders.startFromReservation({
+          reservationId: "00000000-0000-0000-0000-000000000001",
+          craneId: TEST_CRANE_IDS.crane1,
+        })
+      ).rejects.toThrow();
+      await expect(
+        caller.landDispatch.getDailyOverview({ dateStr: "2026-11-10" })
+      ).rejects.toThrow();
+    });
+
+    it("rejects anonymized or downgraded operator in live mobile auth policy check", async () => {
+      const db = await requireTestDb();
+      const tempUserId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+
+      await db
+        .insert(users)
+        .values({
+          id: tempUserId,
+          email: "temp-op@example.com",
+          name: "Temp Operator",
+          role: "operator",
+          userStatus: "active",
+        })
+        .onConflictDoNothing();
+
+      try {
+        process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret-key-for-unit-tests-12345";
+        const token = await issueMobileOperatorToken({
+          id: tempUserId,
+          email: "temp-op@example.com",
+          name: "Temp Operator",
+          role: "operator",
+        });
+
+        // Initially valid
+        const validSession = await verifyMobileOperatorSession(`Bearer ${token}`);
+        expect(validSession).not.toBeNull();
+        expect(validSession?.id).toBe(tempUserId);
+
+        // Downgrade role to regular user -> mobile session must be rejected immediately
+        await db.update(users).set({ role: "user" }).where(eq(users.id, tempUserId));
+        const afterDowngrade = await verifyMobileOperatorSession(`Bearer ${token}`);
+        expect(afterDowngrade).toBeNull();
+
+        // Anonymize user -> resolveActiveUserById & mobile session must return null
+        await db
+          .update(users)
+          .set({ role: "operator", anonymizedAt: new Date() })
+          .where(eq(users.id, tempUserId));
+        const activeCheck = await resolveActiveUserById(tempUserId);
+        expect(activeCheck).toBeNull();
+        const afterAnonymize = await verifyMobileOperatorSession(`Bearer ${token}`);
+        expect(afterAnonymize).toBeNull();
+      } finally {
+        await db.delete(users).where(eq(users.id, tempUserId)).catch(() => {});
+      }
+    });
+
+    it("executes full E2E work order start -> complete lifecycle and records card entry", async () => {
+      const db = await requireTestDb();
+      const uid = Date.now();
+      let resId: string | null = null;
+      let woId: string | null = null;
+
+      // Schedule on an unbooked past date (2024-03-15) so work order can be started immediately without colliding with 2026 schedule
+      const startSlot = new Date("2024-03-15T10:00:00Z");
+      const endSlot = new Date("2024-03-15T11:00:00Z");
+
+      try {
+        const [res] = await db
+          .insert(reservations)
+          .values({
+            reservationNumber: `E2E-${String(uid).slice(-8)}`,
+            userId: TEST_USER_IDS.user,
+            craneId: TEST_CRANE_IDS.crane1,
+            scheduledStart: startSlot,
+            scheduledEnd: endSlot,
+            durationMin: 60,
+            status: "approved",
+            vesselRegistration: `BOAT-E2E-${uid}`,
+            vesselLengthM: "10.00",
+          })
+          .returning();
+        resId = res.id;
+
+        const started = await startReservationWorkOrder({
+          reservationId: res.id,
+          craneId: TEST_CRANE_IDS.crane1,
+          operatorId: TEST_USER_IDS.operator,
+          operatorNotes: "E2E Start",
+        });
+        expect(started.workOrder.orderNumber).toMatch(/^RN-\d{4}-\d{5}$/);
+        woId = started.workOrder.id;
+
+        const completed = await completeReservationOperation({
+          reservationId: res.id,
+          operatorId: TEST_USER_IDS.operator,
+          actualDurationMin: 45,
+          operatorNotes: "E2E Complete",
+        });
+        expect(completed.workOrder?.id).toBe(woId);
+        expect(completed.workOrder?.orderNumber).toBe(started.workOrder.orderNumber);
+
+        const [updatedRes] = await db
+          .select()
+          .from(reservations)
+          .where(eq(reservations.id, res.id));
+        expect(updatedRes.status).toBe("completed");
+      } finally {
+        if (woId) {
+          await db.delete(userCardEntries).where(eq(userCardEntries.workOrderId, woId)).catch(() => {});
+          await db.delete(workOrders).where(eq(workOrders.id, woId)).catch(() => {});
+        }
+        if (resId) {
+          await db.delete(craneOperationLog).where(eq(craneOperationLog.reservationId, resId)).catch(() => {});
+          await db.delete(reservations).where(eq(reservations.id, resId)).catch(() => {});
+        }
+      }
+    });
+  });
 });
-
-

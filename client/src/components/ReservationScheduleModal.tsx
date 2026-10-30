@@ -54,6 +54,7 @@ export interface ReservationScheduleModalProps {
 }
 
 const QUICK_OVERRIDE_REASONS = [
+  "Retroaktivno evidentiranje izvršenog dizanja",
   "Preraspodjela osoblja na terenu",
   "Privremeni smještaj uz nadzor",
   "Tolerancija nosivosti (+10%) uz nadzor",
@@ -198,6 +199,9 @@ export function ReservationScheduleModal({
     }
   );
   const isVesselOnLand = !!activeOccupancy;
+  const todayStr = toZagreb(new Date()).dateStr;
+  const isPastDate = !!dateStr && dateStr < todayStr;
+  const isRetroactiveEntry = isPastDate || (isLiftFromSea && isVesselOnLand);
 
   // Available slots query for crane, date, duration
   const slotsQuery = trpc.calendar.availableSlots.useQuery(
@@ -270,10 +274,6 @@ export function ReservationScheduleModal({
       setOverrideConfirmed(!!reservation.teamOverride);
       setOverrideReason(reservation.teamOverrideReason || "");
 
-      // Date & time initialization
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-
       if (reservation.scheduledStart) {
         const d = new Date(reservation.scheduledStart);
         setSelectedDate(d);
@@ -284,7 +284,7 @@ export function ReservationScheduleModal({
           typeof reservation.requestedDate === "string"
             ? parseISO(reservation.requestedDate)
             : new Date(reservation.requestedDate);
-        setSelectedDate(reqD < startOfToday ? new Date() : reqD);
+        setSelectedDate(reqD);
         setSelectedTime("08:00");
       } else {
         setSelectedDate(new Date());
@@ -323,7 +323,7 @@ export function ReservationScheduleModal({
     }
   }, [open, reservation, initialData]);
 
-  // Helper: evaluate crane weight & beam compatibility
+  // Helper: evaluate crane weight & beam compatibility (including length-based safeguard when weight is missing)
   const craneCompatibilityMap = useMemo(() => {
     const map = new Map<
       string,
@@ -332,6 +332,7 @@ export function ReservationScheduleModal({
         maxToleranceTons: number;
         exceedsHardLimit: boolean;
         exceedsNominalInTolerance: boolean;
+        exceedsLengthEstimatedWeight: boolean;
         exceedPct: number;
         exceedsPoolWidth: boolean;
         maxPoolWidth: number | null;
@@ -346,6 +347,7 @@ export function ReservationScheduleModal({
 
       let exceedsHardLimit = false;
       let exceedsNominalInTolerance = false;
+      let exceedsLengthEstimatedWeight = false;
       let exceedPct = 0;
 
       if (currentWeightTons > 0 && nominalTons > 0) {
@@ -356,6 +358,9 @@ export function ReservationScheduleModal({
           exceedsNominalInTolerance = true;
           exceedPct = ((currentWeightTons - nominalTons) / nominalTons) * 100;
         }
+      } else if (currentWeightTons <= 0 && currentLength >= 5.5 && nominalTons > 0 && nominalTons <= 2.0) {
+        // Vessel >= 5.5m without explicit weight should not default to <= 2t crane (e.g. DIZALICA 1,5 T)
+        exceedsLengthEstimatedWeight = true;
       }
 
       const exceedsPoolWidth = !!(maxPoolWidth && currentBeam > 0 && currentBeam > maxPoolWidth);
@@ -365,13 +370,14 @@ export function ReservationScheduleModal({
         maxToleranceTons,
         exceedsHardLimit,
         exceedsNominalInTolerance,
+        exceedsLengthEstimatedWeight,
         exceedPct,
         exceedsPoolWidth,
         maxPoolWidth,
       });
     }
     return map;
-  }, [activeCranes, currentWeightTons, currentBeam]);
+  }, [activeCranes, currentWeightTons, currentBeam, currentLength]);
 
   // Helper: zone compatibility & free spots for the currently selected crane & time
   const zoneInfoMap = useMemo(() => {
@@ -414,8 +420,9 @@ export function ReservationScheduleModal({
     return map;
   }, [landZones, affinitiesMatrix, craneId, dailyOverview, selectedTime]);
 
-  // Smart Top Recommendations (computed from dailyOverview + affinitiesMatrix, excluding current reservation)
+  // Smart Top Recommendations (disabled during retroactive entry; computed from dailyOverview + affinitiesMatrix)
   const topRecommendations = useMemo(() => {
+    if (isRetroactiveEntry) return [];
     if (!dailyOverview || !dateStr || activeCranes.length === 0) return [];
 
     const durNum = Number(durationMin) || 30;
@@ -445,7 +452,13 @@ export function ReservationScheduleModal({
 
     for (const crane of activeCranes) {
       const compat = craneCompatibilityMap.get(crane.id);
-      if (compat?.exceedsHardLimit || compat?.exceedsPoolWidth) continue;
+      if (
+        compat?.exceedsHardLimit ||
+        compat?.exceedsPoolWidth ||
+        compat?.exceedsLengthEstimatedWeight
+      ) {
+        continue;
+      }
 
       for (const slot of dailyOverview.timeSlots) {
         const slotStart = fromZagreb(dateStr, slot);
@@ -511,9 +524,13 @@ export function ReservationScheduleModal({
             score -= 20;
           }
 
-          // Length recommendation bonus (9-15m -> largest crane)
-          if (currentLength >= 9 && largestCrane && crane.id === largestCrane.id) {
-            score += 10;
+          // Length recommendation bonus/penalty (9-15m -> largest crane / Travelift)
+          if (currentLength >= 9 && largestCrane) {
+            if (crane.id === largestCrane.id) {
+              score += 15;
+            } else {
+              score -= 20;
+            }
           } else if (currentLength > 0 && currentLength < 9 && largestCrane && crane.id !== largestCrane.id) {
             score += 5;
           }
@@ -539,18 +556,28 @@ export function ReservationScheduleModal({
 
     candidates.sort((a, b) => {
       if (a.requiresOverride !== b.requiresOverride) return a.requiresOverride ? 1 : -1;
-      return b.score - a.score;
+      if (b.score !== a.score) return b.score - a.score;
+      // Tie-breaker at equal score (e.g. 100 vs 100): prefer largestCrane for >= 9m vessels
+      if (currentLength >= 9 && largestCrane) {
+        if (a.craneId === largestCrane.id && b.craneId !== largestCrane.id) return -1;
+        if (b.craneId === largestCrane.id && a.craneId !== largestCrane.id) return 1;
+      } else if (currentLength > 0 && currentLength < 9 && largestCrane) {
+        if (a.craneId !== largestCrane.id && b.craneId === largestCrane.id) return -1;
+        if (b.craneId !== largestCrane.id && a.craneId === largestCrane.id) return 1;
+      }
+      return 0;
     });
 
     // Deduplicate to show diverse crane/zone/time options (up to 4)
+    const distinctFeasibleCranes = new Set(candidates.map((c) => c.craneId)).size;
     const picked: typeof candidates = [];
     const seenKeys = new Set<string>();
     for (const c of candidates) {
       const key = `${c.craneId}-${c.zoneId}-${c.time}`;
       if (seenKeys.has(key)) continue;
-      // Avoid 4 identical crane+zone with adjacent times unless needed
-      const craneZoneCount = picked.filter((p) => p.craneId === c.craneId && p.zoneId === c.zoneId).length;
-      if (craneZoneCount >= 2) continue;
+      // Avoid a single crane monopolizing all 4 recommendation cards when multiple cranes are feasible
+      const sameCraneCount = picked.filter((p) => p.craneId === c.craneId).length;
+      if (distinctFeasibleCranes > 1 && sameCraneCount >= 2) continue;
       seenKeys.add(key);
       picked.push(c);
       if (picked.length >= 4) break;
@@ -558,6 +585,7 @@ export function ReservationScheduleModal({
 
     return picked;
   }, [
+    isRetroactiveEntry,
     dailyOverview,
     dateStr,
     activeCranes,
@@ -586,9 +614,15 @@ export function ReservationScheduleModal({
 
     // 1. Vessel already on land check
     if (isLiftFromSea && isVesselOnLand) {
-      hardBlocks.push(
-        `Plovilo se već nalazi na kopnu (${activeOccupancy?.zone?.name || "Suhi vez"}). Vađenje iz mora nije dozvoljeno.`
-      );
+      if (isEdit) {
+        infoNotes.push(
+          `Plovilo je trenutno evidentirano na kopnu (${activeOccupancy?.zone?.name || "Suhi vez"}) — uređujete postojeću operaciju.`
+        );
+      } else {
+        overrideReasons.push(
+          `Plovilo se već nalazi na kopnu (${activeOccupancy?.zone?.name || "Suhi vez"}). Potvrdite svjesni override ako naknadno (retroaktivno) evidentirate operaciju vađenja iz mora.`
+        );
+      }
     }
 
     // 2. Non-working day
@@ -605,6 +639,10 @@ export function ReservationScheduleModal({
       } else if (craneCompat.exceedsNominalInTolerance) {
         overrideReasons.push(
           `Prekoračenje nosivosti dizalice ${selectedCrane.name} za +${craneCompat.exceedPct.toFixed(1)}% (${currentWeightTons.toFixed(1)} t > nominalno ${craneCompat.nominalTons.toFixed(1)} t, unutar +10% tolerancije).`
+        );
+      } else if (craneCompat.exceedsLengthEstimatedWeight) {
+        overrideReasons.push(
+          `Za plovilo dužine ${currentLength}m bez upisane mase procjenjuje se masa veća od nosivosti dizalice ${selectedCrane.name} (${craneCompat.nominalTons.toFixed(1)} t). Preporučena je veća dizalica.`
         );
       }
 
@@ -708,6 +746,7 @@ export function ReservationScheduleModal({
     craneCompatibilityMap,
     isLiftFromSea,
     isVesselOnLand,
+    isEdit,
     activeOccupancy,
     isWorkingDay,
     currentWeightTons,
@@ -859,6 +898,7 @@ export function ReservationScheduleModal({
         isAutoApprove: true,
         adminNote: adminNote || undefined,
         overrideTeamCapacity: (requiresConsciousOverride && overrideConfirmed) || undefined,
+        overrideReason: requiresConsciousOverride ? overrideReason.trim() : undefined,
       });
     }
   };
@@ -1024,16 +1064,16 @@ export function ReservationScheduleModal({
                   <SelectContent>
                     {(serviceTypes as any[]).map((st: any) => {
                       const isLift = st.operationCategory === "lift_from_sea";
-                      const isDisabled = isVesselOnLand && isLift;
+                      const requiresLandOverride = isVesselOnLand && isLift;
                       return (
-                        <SelectItem key={st.id} value={st.id} disabled={isDisabled}>
+                        <SelectItem key={st.id} value={st.id}>
                           {st.name}{" "}
                           {st.operationCategory === "lift_from_sea"
                             ? "⬆️ (Dizanje)"
                             : st.operationCategory === "lower_to_sea"
                               ? "⬇️ (Spuštanje)"
                               : ""}
-                          {isDisabled ? " (Zabranjeno - brod je na kopnu)" : ""}
+                          {requiresLandOverride ? " ⚠️ (Na kopnu - uz override)" : ""}
                         </SelectItem>
                       );
                     })}
@@ -1132,9 +1172,13 @@ export function ReservationScheduleModal({
                   <span className="text-[10px] text-indigo-600 font-semibold">
                     Masa plovila: {currentWeightTons}t
                   </span>
-                ) : currentLength >= 9 && currentLength <= 15 && largestCrane ? (
+                ) : !isRetroactiveEntry && topRecommendations.length > 0 ? (
                   <span className="text-[10px] text-amber-600 font-semibold">
-                    Preporuka: {largestCrane.name}
+                    Preporuka: {topRecommendations[0].craneName}
+                  </span>
+                ) : !isRetroactiveEntry && currentLength >= 5.5 ? (
+                  <span className="text-[10px] text-amber-600 font-semibold">
+                    Bez upisane mase (L:{currentLength}m)
                   </span>
                 ) : null}
               </div>
@@ -1147,7 +1191,8 @@ export function ReservationScheduleModal({
                     const compat = craneCompatibilityMap.get(c.id);
                     const isTop = largestCrane && c.id === largestCrane.id;
                     const isHardExceeded = compat?.exceedsHardLimit || compat?.exceedsPoolWidth;
-                    const isSoftTolerance = compat?.exceedsNominalInTolerance;
+                    const isSoftTolerance =
+                      compat?.exceedsNominalInTolerance || compat?.exceedsLengthEstimatedWeight;
 
                     let statusSuffix = "";
                     if (compat) {
@@ -1155,8 +1200,10 @@ export function ReservationScheduleModal({
                         statusSuffix = ` ⛔ Preteško (max ${compat.maxToleranceTons.toFixed(1)}t s +10%)`;
                       } else if (compat.exceedsPoolWidth) {
                         statusSuffix = ` ⛔ Preširoko (bazen ${compat.maxPoolWidth}m)`;
-                      } else if (isSoftTolerance) {
+                      } else if (compat.exceedsNominalInTolerance) {
                         statusSuffix = ` ⚠️ +${compat.exceedPct.toFixed(1)}% (u 10% toleranciji - override)`;
+                      } else if (compat.exceedsLengthEstimatedWeight) {
+                        statusSuffix = ` ⚠️ Procjena L:${currentLength}m > ${compat.nominalTons.toFixed(1)}t (override)`;
                       } else {
                         statusSuffix = ` (do ${compat.nominalTons.toFixed(1)}t)${isTop ? " ⭐" : ""}`;
                       }
@@ -1246,8 +1293,13 @@ export function ReservationScheduleModal({
                 date={selectedDate}
                 onChange={setSelectedDate}
                 placeholder="Odaberi datum"
-                disablePastDates={isApprove}
+                disablePastDates={false}
               />
+              {dateStr && dateStr < toZagreb(new Date()).dateStr && (
+                <p className="text-[10px] text-amber-700 dark:text-amber-300 font-medium">
+                  ⏪ Retroaktivni unos (datum u prošlosti)
+                </p>
+              )}
             </div>
 
             <div className="space-y-1">

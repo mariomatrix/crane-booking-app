@@ -1992,10 +1992,11 @@ export const appRouter = router({
           }
         }
 
-        // 2. Check date is not in the past
+        // 2. Check date is not in the past (regular users only; operators/admins can record retroactive operations)
         const now = new Date();
         const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-        if (input.requestedDate < todayStr) {
+        const isRetroactiveStaffEntry = isAdminOrOperator && input.requestedDate < todayStr;
+        if (!isAdminOrOperator && input.requestedDate < todayStr) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message:
@@ -2005,7 +2006,7 @@ export const appRouter = router({
 
         // 3. Check date is not a holiday or outside season
         const dateIsHoliday = await isHoliday(input.requestedDate);
-        if (dateIsHoliday) {
+        if (dateIsHoliday && !isRetroactiveStaffEntry) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message: "Odabrani datum je praznik ili neradni dan.",
@@ -2013,7 +2014,7 @@ export const appRouter = router({
         }
 
         const activeSeason = await getActiveSeason(input.requestedDate);
-        if (!activeSeason) {
+        if (!activeSeason && !isRetroactiveStaffEntry) {
           throw new TRPCError({
             code: "BAD_REQUEST",
             message:
@@ -2030,13 +2031,16 @@ export const appRouter = router({
           const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
           const dayKey = dayKeys[reqDate.getDay()];
           const dayHours = (activeSeason.workingHours as any)?.[dayKey];
-          if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
+          if (
+            (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") &&
+            !isRetroactiveStaffEntry
+          ) {
             throw new TRPCError({
               code: "BAD_REQUEST",
               message: "Odabrani datum je neradni dan prema rasporedu radnog vremena sezone.",
             });
           }
-          if (input.requestedTimeSlot === "poslijepodne") {
+          if (dayHours?.to && input.requestedTimeSlot === "poslijepodne") {
             const { h: weH } = parseHHMM(dayHours.to);
             if (weH <= 12) {
               throw new TRPCError({
@@ -2115,11 +2119,15 @@ export const appRouter = router({
               input.vesselId,
               input.vesselRegistration
             );
-            if (onLand) {
+            const staffOverrideOnLand =
+              isAdminOrOperator && !!(input.overrideTeamCapacity || input.overrideCapacityCheck);
+            if (onLand && !staffOverrideOnLand) {
               const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
               throw new TRPCError({
                 code: "BAD_REQUEST",
-                message: `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
+                message: isAdminOrOperator
+                  ? `Plovilo se već nalazi na kopnu${locationStr}. Za naknadno (retroaktivno) evidentiranje operacije vađenja iz mora potvrdite svjesni dispečerski override.`
+                  : `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
               });
             }
           }
@@ -2245,12 +2253,13 @@ export const appRouter = router({
             input.scheduledStart.getTime() + input.durationMin * 60000
           );
 
-          // Strictly validate slot against season working hours
+          // Strictly validate slot against season working hours (allow past dates for staff retroactive entry)
           const sysSettings = await getAllSettings();
           await validateSlotAgainstSettings(
             input.scheduledStart,
             finalScheduledEnd,
-            sysSettings
+            sysSettings,
+            { allowPastDates: true }
           );
 
           const hasOverlap = await checkOverlap(
@@ -2280,6 +2289,7 @@ export const appRouter = router({
             operationCategory: serviceType?.operationCategory || "other",
             vesselWeightTons: vesselSnapshot.vesselWeightTons ?? null,
             vesselBeamM: vesselSnapshot.vesselBeamM ?? null,
+            vesselLengthM: vesselSnapshot.vesselLengthM ?? null,
             overrideConfirmed: !!(input.overrideTeamCapacity || input.overrideCapacityCheck),
             overrideReason: input.overrideReason,
             requireReasonOnOverride: false,
@@ -3044,7 +3054,7 @@ export const appRouter = router({
           }
         }
 
-        // Forbid lift_from_sea if vessel is already on land
+        // Forbid lift_from_sea if vessel is already on land unless staff consciously overrides (e.g. retroactive recording)
         if (reservation.serviceTypeId) {
           const st = await getServiceTypeById(reservation.serviceTypeId);
           if (st?.operationCategory === "lift_from_sea") {
@@ -3052,11 +3062,12 @@ export const appRouter = router({
               reservation.vesselId,
               reservation.vesselRegistration
             );
-            if (onLand) {
+            const staffOverrideOnLand = !!(input.overrideTeamCapacity || input.ignoreNoSpace);
+            if (onLand && !staffOverrideOnLand) {
               const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
               throw new TRPCError({
                 code: "BAD_REQUEST",
-                message: `Plovilo se već nalazi na kopnu${locationStr}. Nije moguće odobriti vađenje iz mora dok se plovilo ne spusti u more.`,
+                message: `Plovilo se već nalazi na kopnu${locationStr}. Za naknadno (retroaktivno) odobravanje vađenja iz mora potvrdite svjesni dispečerski override.`,
               });
             }
           }
@@ -3076,12 +3087,13 @@ export const appRouter = router({
           input.scheduledStart.getTime() + input.durationMin * 60000
         );
 
-        // Validate slot date and working hours against active season
+        // Validate slot date and working hours against active season (allow past dates for staff)
         const sysSettings = await getAllSettings();
         await validateSlotAgainstSettings(
           input.scheduledStart,
           scheduledEnd,
-          sysSettings
+          sysSettings,
+          { allowPastDates: true }
         );
 
         // Overlap check
@@ -3105,6 +3117,8 @@ export const appRouter = router({
           reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null;
         const effectiveBeamM =
           reservation.vesselBeamM ?? linkedVessel?.beamM ?? null;
+        const effectiveLengthM =
+          reservation.vesselLengthM ?? linkedVessel?.lengthM ?? null;
 
         const teamCap = await checkTeamCapacity(
           input.scheduledStart,
@@ -3122,6 +3136,7 @@ export const appRouter = router({
           operationCategory: serviceType?.operationCategory || "other",
           vesselWeightTons: effectiveWeightTons,
           vesselBeamM: effectiveBeamM,
+          vesselLengthM: effectiveLengthM,
           overrideConfirmed: !!(input.overrideTeamCapacity || input.ignoreNoSpace),
           overrideReason: input.overrideReason,
           requireReasonOnOverride: false,
@@ -3398,7 +3413,8 @@ export const appRouter = router({
         await validateSlotAgainstSettings(
           input.scheduledStart,
           input.scheduledEnd,
-          sysSettings
+          sysSettings,
+          { allowPastDates: true }
         );
 
         let hasOverride = false;
@@ -3443,6 +3459,8 @@ export const appRouter = router({
             reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null;
           const effectiveBeamM =
             reservation.vesselBeamM ?? linkedVessel?.beamM ?? null;
+          const effectiveLengthM =
+            reservation.vesselLengthM ?? linkedVessel?.lengthM ?? null;
 
           const constraintValidation = await validateReservationConstraintsAndOverrides({
             crane,
@@ -3452,6 +3470,7 @@ export const appRouter = router({
             operationCategory: serviceType?.operationCategory || "other",
             vesselWeightTons: effectiveWeightTons,
             vesselBeamM: effectiveBeamM,
+            vesselLengthM: effectiveLengthM,
             overrideConfirmed: !!input.overrideTeamCapacity,
             overrideReason: input.overrideReason,
             requireReasonOnOverride: false,
@@ -3717,20 +3736,8 @@ export const appRouter = router({
           ? await getServiceTypeById(reservation.serviceTypeId)
           : null;
 
-        // Forbid lift_from_sea if vessel is already on land
-        if (serviceType?.operationCategory === "lift_from_sea") {
-          const { onLand, zoneName, spotNumber } = await isVesselCurrentlyOnLand(
-            reservation.vesselId,
-            input.vesselRegistration || reservation.vesselRegistration
-          );
-          if (onLand) {
-            const locationStr = zoneName ? ` (Zona: ${zoneName}${spotNumber ? `, Mjesto: ${spotNumber}` : ""})` : "";
-            throw new TRPCError({
-              code: "BAD_REQUEST",
-              message: `Plovilo se već nalazi na kopnu${locationStr}. Operacija vađenja iz mora nije dozvoljena dok se plovilo ne spusti u more.`,
-            });
-          }
-        }
+        // Note: editing an existing reservation (updateDetails) is intentionally allowed
+        // even when the vessel is currently recorded on land (e.g. fixing crane/time/zone on a lift reservation).
 
         if (
           input.craneId ||
@@ -3754,7 +3761,9 @@ export const appRouter = router({
 
             const targetEnd = new Date(targetStart.getTime() + targetDuration * 60000);
             const sysSettings = await getAllSettings();
-            await validateSlotAgainstSettings(targetStart, targetEnd, sysSettings);
+            await validateSlotAgainstSettings(targetStart, targetEnd, sysSettings, {
+              allowPastDates: true,
+            });
 
             const hasOverlap = await checkOverlap(
               targetCraneId,
@@ -3784,6 +3793,8 @@ export const appRouter = router({
               reservation.vesselWeightTons ?? linkedVessel?.weightTons ?? null;
             const effectiveBeamM =
               reservation.vesselBeamM ?? linkedVessel?.beamM ?? null;
+            const effectiveLengthM =
+              reservation.vesselLengthM ?? linkedVessel?.lengthM ?? null;
 
             const constraintValidation = await validateReservationConstraintsAndOverrides({
               crane,
@@ -3793,6 +3804,7 @@ export const appRouter = router({
               operationCategory: serviceType?.operationCategory || "other",
               vesselWeightTons: effectiveWeightTons,
               vesselBeamM: effectiveBeamM,
+              vesselLengthM: effectiveLengthM,
               overrideConfirmed: !!input.overrideTeamCapacity,
               overrideReason: input.overrideReason,
               requireReasonOnOverride: true,
@@ -4147,12 +4159,16 @@ export const appRouter = router({
           excludeReservationId: z.string().uuid().optional(),
         })
       )
-      .query(async ({ input }) => {
+      .query(async ({ input, ctx }) => {
         const dayStart = fromZagreb(input.date, "00:00");
         const dayEnd = new Date(fromZagreb(input.date, "23:59").getTime() + 59999);
+        const todayStr = toZagreb(new Date()).dateStr;
+        const isRetroactiveStaffQuery =
+          (ctx.user?.role === "admin" || ctx.user?.role === "operator") &&
+          input.date < todayStr;
 
         const holiday = await isHoliday(input.date);
-        if (holiday) {
+        if (holiday && !isRetroactiveStaffQuery) {
           return {
             isWorkingDay: false,
             reason: "Odabrani datum je praznik ili neradni dan.",
@@ -4165,7 +4181,7 @@ export const appRouter = router({
         }
 
         const activeSeason = await getActiveSeason(input.date);
-        if (!activeSeason) {
+        if (!activeSeason && !isRetroactiveStaffQuery) {
           return {
             isWorkingDay: false,
             reason: "Odabrani datum je izvan aktivne sezone rada.",
@@ -4178,11 +4194,11 @@ export const appRouter = router({
         }
 
         const sysSettings = await getAllSettings();
-        let workStartStr = sysSettings.workdayStart ?? "08:00";
-        let workEndStr = sysSettings.workdayEnd ?? "16:00";
+        let workStartStr = sysSettings.workdayStart ?? "07:00";
+        let workEndStr = sysSettings.workdayEnd ?? "15:00";
 
         if (
-          activeSeason.workingHours &&
+          activeSeason?.workingHours &&
           typeof activeSeason.workingHours === "object"
         ) {
           const dayKeys = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -4190,18 +4206,21 @@ export const appRouter = router({
           const dayKey = dayKeys[zgDay];
           const dayHours = (activeSeason.workingHours as any)?.[dayKey];
           if (!dayHours?.from || !dayHours?.to || dayHours.from.trim() === "" || dayHours.to.trim() === "") {
-            return {
-              isWorkingDay: false,
-              reason: "Neradni dan prema rasporedu sezone.",
-              workingHours: null,
-              seasonName: activeSeason.name,
-              slots: [],
-              availableSlots: [],
-              otherCranesSummary: [],
-            };
+            if (!isRetroactiveStaffQuery) {
+              return {
+                isWorkingDay: false,
+                reason: "Neradni dan prema rasporedu sezone.",
+                workingHours: null,
+                seasonName: activeSeason.name,
+                slots: [],
+                availableSlots: [],
+                otherCranesSummary: [],
+              };
+            }
+          } else {
+            workStartStr = dayHours.from;
+            workEndStr = dayHours.to;
           }
-          workStartStr = dayHours.from;
-          workEndStr = dayHours.to;
         }
 
         const { h: wsH, m: wsM } = parseHHMM(workStartStr);
@@ -4391,7 +4410,7 @@ export const appRouter = router({
 
         return {
           isWorkingDay: true,
-          seasonName: activeSeason.name,
+          seasonName: activeSeason?.name ?? "Retroaktivni unos",
           workingHours: { from: workStartStr, to: workEndStr },
           slots,
           availableSlots,

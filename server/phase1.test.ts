@@ -1,12 +1,23 @@
 import "dotenv/config";
 import { describe, expect, it, afterAll, beforeAll } from "vitest";
-import { QUEUES, startQueueService, stopQueueService, enqueueEmail, enqueueSms, scheduleOfferExpiration, isQueueRunning } from "./jobs/queue";
+import {
+  QUEUES,
+  startQueueService,
+  stopQueueService,
+  enqueueEmail,
+  enqueueSms,
+  scheduleOfferExpiration,
+  isQueueRunning,
+  getQueueHealthStatus,
+} from "./jobs/queue";
+import { ensureBaseTestFixtures } from "./testUtils/dbTestHarness";
 import postgres from "postgres";
 
 describe("Phase 1: pg-boss & btree_gist Exclusion Constraint", () => {
   let sql: postgres.Sql;
 
-  beforeAll(() => {
+  beforeAll(async () => {
+    await ensureBaseTestFixtures();
     sql = postgres(process.env.DATABASE_URL!);
   });
 
@@ -171,5 +182,40 @@ describe("Phase 1: pg-boss & btree_gist Exclusion Constraint", () => {
       expect(jobId).toBeDefined();
       expect(typeof jobId).toBe("string");
     });
+
+    it("activates degraded fallback mode when pg-boss startup fails and recovers cleanly", async () => {
+      await stopQueueService();
+      expect(isQueueRunning()).toBe(false);
+
+      // Induce pg-boss startup failure (invalid connection string)
+      const failedBoss = await startQueueService({
+        connectionString: "postgres://invalid:invalid@127.0.0.1:1/nonexistent_db",
+        enableFallbackOnError: true,
+      });
+      expect(failedBoss).toBeNull();
+      expect(isQueueRunning()).toBe(false);
+
+      const degradedHealth = getQueueHealthStatus();
+      expect(degradedHealth.mode).toBe("degraded-fallback");
+      expect(degradedHealth.fallbackActive).toBe(true);
+      expect(degradedHealth.lastError).toBeTruthy();
+
+      // In degraded mode, scheduleOfferExpiration must still return fallback-scheduled
+      const fallbackOfferJob = await scheduleOfferExpiration(
+        "00000000-0000-0000-0000-000000000098",
+        new Date(Date.now() + 60_000)
+      );
+      expect(fallbackOfferJob).toBe("fallback-scheduled");
+
+      // Recover with valid DATABASE_URL
+      const recoveredBoss = await startQueueService();
+      expect(recoveredBoss).not.toBeNull();
+      expect(isQueueRunning()).toBe(true);
+
+      const healthyStatus = getQueueHealthStatus();
+      expect(healthyStatus.mode).toBe("pg-boss");
+      expect(healthyStatus.fallbackActive).toBe(false);
+      expect(healthyStatus.lastError).toBeNull();
+    }, 20000);
   });
 });

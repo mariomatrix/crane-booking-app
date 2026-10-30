@@ -11,6 +11,7 @@ import {
 } from "./utils";
 import { getMemberSyncStatus } from "./scheduler";
 import { isMssqlConfigured } from "./mssqlClient";
+import type { LegacyClan03Row } from "./types";
 
 describe("MemberSync — Utils & Validators", () => {
     describe("validateOIB", () => {
@@ -144,7 +145,7 @@ describe("MemberSync — Utils & Validators", () => {
     describe("Sync Engine — processClan03Rows payload ingestion", () => {
         it("processes mock CLAN03 payload correctly", async () => {
             const { processClan03Rows } = await import("./syncEngine");
-            const mockRows = [
+            const mockRows: LegacyClan03Row[] = [
                 {
                     MAT_BROJ: "M-9991",
                     VRSTA_C: "U",
@@ -170,6 +171,14 @@ describe("MemberSync — Utils & Validators", () => {
                     KLUB: "1",
                     Klub2: "2",
                     NAPOMENA: "Test član",
+                    GAT: null,
+                    VEZ_BROJ: null,
+                    VEZ_TIP: null,
+                    UGOVOR: null,
+                    DUG: null,
+                    PLAC_DO: null,
+                    KOPNO: null,
+                    KOPNOPIS: null,
                 },
             ];
 

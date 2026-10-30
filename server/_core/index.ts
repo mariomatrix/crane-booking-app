@@ -103,6 +103,31 @@ async function startServer() {
   const icalRouter = (await import("../routes/icalRoutes")).default;
   app.use("/api/calendar", icalRouter);
 
+  // Health & Readiness Endpoint (checks DB + pg-boss / fallback status)
+  app.get(["/api/health", "/api/ready"], async (_req, res) => {
+    try {
+      const { getDb } = await import("../db");
+      const { getQueueHealthStatus } = await import("../jobs/queue");
+      const db = await getDb();
+      const queue = getQueueHealthStatus();
+      const dbConnected = Boolean(db);
+      const ready = dbConnected && (queue.mode === "pg-boss" || queue.mode === "degraded-fallback");
+      res.status(ready ? 200 : 503).json({
+        ok: ready,
+        degraded: queue.mode === "degraded-fallback",
+        dbConnected,
+        queue,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(503).json({
+        ok: false,
+        error: err?.message || "Health check failed",
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   // SSE Real-time Calendar Sync Stream
   app.get("/api/events/calendar-stream", async (req, res) => {
     res.setHeader("Content-Type", "text/event-stream");
@@ -140,10 +165,20 @@ async function startServer() {
     
     // Start pg-boss queue service (handles emails, sms, reminders, waiting list expirations, member sync)
     try {
-      const { startQueueService } = await import("../jobs/queue");
-      await startQueueService();
+      const { startQueueService, getQueueHealthStatus } = await import("../jobs/queue");
+      const boss = await startQueueService();
+      if (!boss) {
+        const status = getQueueHealthStatus();
+        console.error(
+          `[Startup][ALERT] pg-boss red poslova nije pokrenut (mode=${status.mode}, error=${status.lastError}). Fallback tajmeri aktivni=${status.fallbackActive}.`
+        );
+        if (!status.fallbackActive) {
+          const { startNotificationCron } = await import("../services/notifications");
+          startNotificationCron();
+        }
+      }
     } catch (err) {
-      console.error("[Startup] Neuspješno pokretanje pg-boss reda, koristim fallback tajmere:", err);
+      console.error("[Startup][ALERT] Iznimka pri pokretanju pg-boss reda, aktiviram fallback tajmere:", err);
       import("../services/notifications").then(m => m.startNotificationCron()).catch(console.error);
     }
   });
