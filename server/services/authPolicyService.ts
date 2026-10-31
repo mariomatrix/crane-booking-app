@@ -97,11 +97,11 @@ export async function issueTokenPairCookies(userId: string, role: string, ctx: {
 }
 
 /**
- * Resolves a fresh user record from DB and ensures the account has not been anonymized/deleted.
+ * Resolves a fresh user record from DB and ensures the account has not been anonymized, deleted, or suspended.
  */
 export async function resolveActiveUserById(userId: string): Promise<User | null> {
   const user = (await db.getUserById(userId)) ?? null;
-  if (!user || user.anonymizedAt) return null;
+  if (!user || user.anonymizedAt || user.userStatus !== "active") return null;
   return user;
 }
 

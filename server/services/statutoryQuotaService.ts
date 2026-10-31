@@ -1,5 +1,12 @@
-import { eq } from "drizzle-orm";
-import { memberStatutoryRights, priceListItems, cranes, serviceTypes } from "../../drizzle/schema";
+import { eq, and } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
+import {
+  memberStatutoryRights,
+  memberMemberships,
+  priceListItems,
+  cranes,
+  serviceTypes,
+} from "../../drizzle/schema";
 
 export interface QuotaOperationEvaluation {
   quotaOperationType: "lift" | "lower" | "none";
@@ -59,7 +66,7 @@ export async function evaluateQuotaOperationType(
  * 1. 1 lift + 1 lower per annual membership cycle.
  * 2. Valid for 2 years (current year + next year, until 31.12. N+1).
  * 3. Non-cumulative: rights never accumulate to 2 lifts or 2 lowers.
- * 4. Year rollover: if quota was used in year N-1, year N grants fresh annual quota.
+ * 4. Year rollover: if quota was used in year N-1, year N grants fresh annual quota provided membership dues are active.
  *    If quota from N-2 expired on 31.12. N-1, old quota is retired and year N quota is granted.
  */
 export async function ensureMemberStatutoryRights(
@@ -70,6 +77,16 @@ export async function ensureMemberStatutoryRights(
   const year = currentYear ?? new Date().getFullYear();
   const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
   const defaultExpiresAt = `${year + 1}-12-31`;
+
+  // Verify membership payment / active status if recorded
+  const [membership] = await db
+    .select({ activeMember: memberMemberships.activeMember })
+    .from(memberMemberships)
+    .where(eq(memberMemberships.userId, userId))
+    .limit(1);
+
+  // If a membership record is recorded and activeMember === false (unpaid dues), renewal is blocked
+  const isDuesPaid = membership ? membership.activeMember : true;
 
   let [rights] = await db
     .select()
@@ -82,15 +99,20 @@ export async function ensureMemberStatutoryRights(
       .insert(memberStatutoryRights)
       .values({
         userId,
-        liftAvailable: true,
+        liftAvailable: isDuesPaid,
         liftAcquiredYear: year,
         liftExpiresAt: defaultExpiresAt,
-        lowerAvailable: true,
+        lowerAvailable: isDuesPaid,
         lowerAcquiredYear: year,
         lowerExpiresAt: defaultExpiresAt,
         pendingFeeAdjustmentsCount: 0,
       })
       .returning();
+    return rights;
+  }
+
+  // If member dues are unpaid, do not grant new quota
+  if (!isDuesPaid) {
     return rights;
   }
 
@@ -100,7 +122,7 @@ export async function ensureMemberStatutoryRights(
   // --- LIFT LOGIC ---
   if (!rights.liftAvailable) {
     // If lift was already used in a previous year (acquiredYear < currentYear),
-    // the member has acquired a new annual membership quota for current year.
+    // the member acquires their new annual membership quota for current year.
     if (rights.liftAcquiredYear < year) {
       updates.liftAvailable = true;
       updates.liftAcquiredYear = year;
@@ -123,7 +145,7 @@ export async function ensureMemberStatutoryRights(
   // --- LOWER LOGIC ---
   if (!rights.lowerAvailable) {
     // If lower was already used in a previous year (acquiredYear < currentYear),
-    // the member has acquired a new annual membership quota for current year.
+    // the member acquires their new annual membership quota for current year.
     if (rights.lowerAcquiredYear < year) {
       updates.lowerAvailable = true;
       updates.lowerAcquiredYear = year;
@@ -189,7 +211,7 @@ export async function determineMemberFeeAdjustmentItem(
   const [priceItem] = await db
     .select()
     .from(priceListItems)
-    .where(eq(priceListItems.code, preferredCode))
+    .where(and(eq(priceListItems.code, preferredCode), eq(priceListItems.isActive, true)))
     .limit(1);
 
   if (priceItem?.code) {
@@ -211,6 +233,7 @@ export async function determineMemberFeeAdjustmentItem(
 
 /**
  * Commercial calculation for external / non-member vessels based on length in meters.
+ * Validates that length is strictly positive and applies active price list item and configured VAT rate.
  */
 export async function calculateCommercialPricing(
   db: any,
@@ -221,26 +244,34 @@ export async function calculateCommercialPricing(
   vesselLengthM: string;
   chargeItemCode: string;
   chargeItemName: string;
+  vatRate: string;
 }> {
+  const parsedLen = typeof vesselLengthM === "number" ? vesselLengthM : parseFloat(String(vesselLengthM ?? "").trim());
+  if (isNaN(parsedLen) || parsedLen <= 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Duljina plovila mora biti valjani pozitivni broj veći od 0 metara za komercijalni obračun (uneseno: "${vesselLengthM ?? ""}").`,
+    });
+  }
+
   const [priceItem] = await db
     .select()
     .from(priceListItems)
-    .where(eq(priceListItems.code, "USL-VANJSKI-M"))
+    .where(and(eq(priceListItems.code, "USL-VANJSKI-M"), eq(priceListItems.isActive, true)))
     .limit(1);
 
   const rate = priceItem?.pricePerMeterEur ? Number(priceItem.pricePerMeterEur) : 12.0;
   const vatRate = priceItem?.vatRate ? Number(priceItem.vatRate) : 25.0;
-  const rawLen = Number(vesselLengthM) || 8.0;
-  const safeLength = Math.max(0, rawLen);
 
-  const baseAmount = safeLength * rate;
+  const baseAmount = parsedLen * rate;
   const total = baseAmount * (1 + vatRate / 100);
 
   return {
     ratePerMeter: rate.toFixed(2),
     totalWithVat: total.toFixed(2),
-    vesselLengthM: safeLength.toFixed(2),
+    vesselLengthM: parsedLen.toFixed(2),
     chargeItemCode: priceItem?.code || "USL-VANJSKI-M",
     chargeItemName: priceItem?.name || "Komercijalno korištenje dizalice (po metru duljine)",
+    vatRate: vatRate.toFixed(2),
   };
 }

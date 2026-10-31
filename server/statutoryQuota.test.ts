@@ -15,9 +15,13 @@ import {
   workOrders,
   userCardEntries,
   memberStatutoryRights,
+  memberMemberships,
+  invoices,
+  invoiceItems,
   serviceTypes,
   priceListItems,
   landOccupancies,
+  landZones,
   craneOperationLog,
   cranes,
 } from "../drizzle/schema";
@@ -31,6 +35,8 @@ import {
   startReservationWorkOrder,
   completeReservationOperation,
 } from "./services/workOrderService";
+import { resolveActiveUserById } from "./services/authPolicyService";
+import { appRouter } from "./routers";
 
 describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
   beforeAll(async () => {
@@ -95,7 +101,7 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       expect(resStationary.name).toContain("9T");
     });
 
-    it("calculates commercial pricing accurately per meter + VAT (25%)", async () => {
+    it("calculates commercial pricing accurately per meter + VAT and strictly validates length", async () => {
       const mockDb = {
         select: () => ({
           from: () => ({
@@ -116,15 +122,37 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       expect(p10.ratePerMeter).toBe("12.00");
       expect(p10.vesselLengthM).toBe("10.00");
       expect(p10.totalWithVat).toBe("150.00");
+      expect(p10.vatRate).toBe("25.00");
 
       // 8.50 meters: 8.5 * 12 = 102.00 base, 102 * 1.25 = 127.50 EUR total
       const p85 = await calculateCommercialPricing(mockDb, "8.50");
       expect(p85.totalWithVat).toBe("127.50");
 
-      // Zero or missing length falls back safely
-      const pDef = await calculateCommercialPricing(mockDb, null);
-      expect(pDef.vesselLengthM).toBe("8.00");
-      expect(pDef.totalWithVat).toBe("120.00");
+      // Dynamic VAT rate (e.g. 13% rate)
+      const mockDb13 = {
+        select: () => ({
+          from: () => ({
+            where: () => ({
+              limit: async () => [{
+                code: "USL-VANJSKI-M",
+                name: "Dizanje/spuštanje za vanjske korisnike",
+                pricePerMeterEur: "12.00",
+                vatRate: "13.00",
+              }],
+            }),
+          }),
+        }),
+      };
+      const p13 = await calculateCommercialPricing(mockDb13, "10.00");
+      expect(p13.vatRate).toBe("13.00");
+      // 10 * 12 = 120; 120 * 1.13 = 135.60
+      expect(p13.totalWithVat).toBe("135.60");
+
+      // Zero, missing, negative, or invalid length MUST throw BAD_REQUEST
+      await expect(calculateCommercialPricing(mockDb, null)).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
+      await expect(calculateCommercialPricing(mockDb, "0")).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
+      await expect(calculateCommercialPricing(mockDb, -5)).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
+      await expect(calculateCommercialPricing(mockDb, "neispravno")).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
     });
 
     it("evaluates quota operation type from service type and textual fallbacks", async () => {
@@ -203,30 +231,42 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
   });
 
   describe("Integration Tests — Database Quota Execution & Accounting", () => {
-    const uniqueMemberId = "a1111111-2222-3333-4444-555555555555";
-    const uniqueCommercialId = "b1111111-2222-3333-4444-555555555555";
-    const testVesselMemberId = "c1111111-2222-3333-4444-555555555555";
-    const testVesselCommId = "d1111111-2222-3333-4444-555555555555";
+    const uniqueMemberId = "a1111111-2222-4333-a444-555555555555";
+    const uniqueCommercialId = "b1111111-2222-4333-a444-555555555555";
+    const uniqueSuspendedOperatorId = "e1111111-2222-4333-a444-555555555555";
+    const uniqueDuesUnpaidMemberId = "f1111111-2222-4333-a444-555555555555";
+    const testVesselMemberId = "c1111111-2222-4333-a444-555555555555";
+    const testVesselCommId = "d1111111-2222-4333-a444-555555555555";
 
     let stLiftId: string;
     let stLowerId: string;
 
     const cleanupTestData = async () => {
       const db = await requireTestDb();
+      await db.delete(invoices).where(eq(invoices.userId, uniqueMemberId));
+      await db.delete(invoices).where(eq(invoices.userId, uniqueCommercialId));
       await db.delete(landOccupancies).where(eq(landOccupancies.userId, uniqueMemberId));
       await db.delete(landOccupancies).where(eq(landOccupancies.userId, uniqueCommercialId));
       await db.delete(craneOperationLog).where(eq(craneOperationLog.operatorId, TEST_USER_IDS.operator));
       await db.delete(userCardEntries).where(eq(userCardEntries.userId, uniqueMemberId));
       await db.delete(userCardEntries).where(eq(userCardEntries.userId, uniqueCommercialId));
+      await db.delete(userCardEntries).where(eq(userCardEntries.userId, uniqueDuesUnpaidMemberId));
       await db.delete(memberStatutoryRights).where(eq(memberStatutoryRights.userId, uniqueMemberId));
+      await db.delete(memberStatutoryRights).where(eq(memberStatutoryRights.userId, uniqueDuesUnpaidMemberId));
+      await db.delete(memberMemberships).where(eq(memberMemberships.userId, uniqueMemberId));
+      await db.delete(memberMemberships).where(eq(memberMemberships.userId, uniqueDuesUnpaidMemberId));
       await db.delete(workOrders).where(eq(workOrders.userId, uniqueMemberId));
       await db.delete(workOrders).where(eq(workOrders.userId, uniqueCommercialId));
+      await db.delete(workOrders).where(eq(workOrders.userId, uniqueDuesUnpaidMemberId));
       await db.delete(reservations).where(eq(reservations.userId, uniqueMemberId));
       await db.delete(reservations).where(eq(reservations.userId, uniqueCommercialId));
+      await db.delete(reservations).where(eq(reservations.userId, uniqueDuesUnpaidMemberId));
       await db.delete(vessels).where(eq(vessels.id, testVesselMemberId));
       await db.delete(vessels).where(eq(vessels.id, testVesselCommId));
       await db.delete(users).where(eq(users.id, uniqueMemberId));
       await db.delete(users).where(eq(users.id, uniqueCommercialId));
+      await db.delete(users).where(eq(users.id, uniqueSuspendedOperatorId));
+      await db.delete(users).where(eq(users.id, uniqueDuesUnpaidMemberId));
     };
 
     beforeAll(async () => {
@@ -678,6 +718,416 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       expect(refreshed.lowerAvailable).toBe(true);
       expect(refreshed.lowerAcquiredYear).toBe(currentYear);
       expect(String(refreshed.lowerExpiresAt)).toBe(`${currentYear + 1}-12-31`);
+    });
+
+    it("Point 3: Suspended operator is rejected by resolveActiveUserById", async () => {
+      const db = await requireTestDb();
+      await db.insert(users).values({
+        id: uniqueSuspendedOperatorId,
+        email: "suspended.operator@spinut.hr",
+        name: "Suspendirani Operater",
+        role: "operator",
+        userStatus: "suspended",
+        loginMethod: "manus",
+      });
+
+      // Suspended operator must return null
+      const suspendedUser = await resolveActiveUserById(uniqueSuspendedOperatorId);
+      expect(suspendedUser).toBeNull();
+
+      // Active operator returns valid user
+      const activeUser = await resolveActiveUserById(TEST_USER_IDS.operator);
+      expect(activeUser).not.toBeNull();
+      expect(activeUser?.id).toBe(TEST_USER_IDS.operator);
+      expect(activeUser?.userStatus).toBe("active");
+    });
+
+    it("Point 4: Carried-over quota consumed in current year prevents second free lift in same year", async () => {
+      const db = await requireTestDb();
+      const currentYear = new Date().getFullYear();
+      const pastYear = currentYear - 1;
+
+      // Setup member with an unexpired carried-over right from past year (e.g. 2025 right carried into 2026)
+      await db
+        .update(memberStatutoryRights)
+        .set({
+          liftAvailable: true,
+          liftAcquiredYear: pastYear,
+          liftExpiresAt: `${currentYear}-12-31`,
+          lowerAvailable: true,
+          lowerAcquiredYear: pastYear,
+          lowerExpiresAt: `${currentYear}-12-31`,
+          pendingFeeAdjustmentsCount: 0,
+        })
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+
+      // Member uses this carried-over lift in current year
+      const [carriedRes] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      const completion = await completeReservationOperation({
+        reservationId: carriedRes.id,
+        operatorId: TEST_USER_IDS.operator,
+        craneId: TEST_CRANE_IDS.crane2,
+        actualDurationMin: 45,
+        operatorNotes: "Trošenje prenesenog prava iz prošle godine",
+        allowFutureDate: true,
+      });
+
+      expect(completion.success).toBe(true);
+      expect(completion.workOrder?.isStatutoryCovered).toBe(true);
+
+      // Verify that liftAcquiredYear was stamped as currentYear to lock out duplicate free lift
+      const [rightsAfterUsage] = await db
+        .select()
+        .from(memberStatutoryRights)
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+
+      expect(rightsAfterUsage.liftAvailable).toBe(false);
+      expect(rightsAfterUsage.liftAcquiredYear).toBe(currentYear);
+
+      // Calling ensureMemberStatutoryRights in currentYear MUST NOT grant a second free lift in the same year!
+      const rightsCheckedAgain = await ensureMemberStatutoryRights(db, uniqueMemberId, currentYear);
+      expect(rightsCheckedAgain.liftAvailable).toBe(false);
+    });
+
+    it("Point 4b: Member with unpaid annual dues (activeMember: false) is blocked from statutory quota renewal", async () => {
+      const db = await requireTestDb();
+      const currentYear = new Date().getFullYear();
+
+      // Create member with unpaid membership record
+      await db.insert(users).values({
+        id: uniqueDuesUnpaidMemberId,
+        email: "neplacena.clanarina@spinut.hr",
+        name: "Član Bez Uplaćene Članarine",
+        role: "user",
+        clientCategory: "member",
+        loginMethod: "manus",
+        userStatus: "active",
+      });
+
+      await db.insert(memberMemberships).values({
+        userId: uniqueDuesUnpaidMemberId,
+        legacyMatBroj: "998877",
+        activeMember: false, // Dues unpaid!
+      });
+
+      // ensureMemberStatutoryRights should NOT grant available rights
+      const rights = await ensureMemberStatutoryRights(db, uniqueDuesUnpaidMemberId, currentYear);
+      expect(rights.liftAvailable).toBe(false);
+      expect(rights.lowerAvailable).toBe(false);
+    });
+
+    it("Points 1 & 2: Concurrent completions on same reservation are locked; exactly one succeeds and one reports alreadyCompleted", async () => {
+      const db = await requireTestDb();
+
+      const [concurrentRes] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      const [rightsBefore] = await db
+        .select()
+        .from(memberStatutoryRights)
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+
+      // Trigger two simultaneous complete calls
+      const [resA, resB] = await Promise.all([
+        completeReservationOperation({
+          reservationId: concurrentRes.id,
+          operatorId: TEST_USER_IDS.operator,
+          craneId: TEST_CRANE_IDS.crane2,
+          actualDurationMin: 45,
+          operatorNotes: "Istodobni poziv A",
+          allowFutureDate: true,
+        }),
+        completeReservationOperation({
+          reservationId: concurrentRes.id,
+          operatorId: TEST_USER_IDS.operator,
+          craneId: TEST_CRANE_IDS.crane2,
+          actualDurationMin: 45,
+          operatorNotes: "Istodobni poziv B",
+          allowFutureDate: true,
+        }),
+      ]);
+
+      // Exactly one should be freshly completed, and exactly one should be alreadyCompleted
+      const alreadyCompletedCount = [resA.alreadyCompleted, resB.alreadyCompleted].filter(Boolean).length;
+      expect(alreadyCompletedCount).toBe(1);
+
+      // Verify DB state: exactly 1 work order exists
+      const workOrdersList = await db
+        .select()
+        .from(workOrders)
+        .where(eq(workOrders.reservationId, concurrentRes.id));
+      expect(workOrdersList).toHaveLength(1);
+
+      // Verify DB state: exactly 1 user card entry exists
+      const cardEntriesList = await db
+        .select()
+        .from(userCardEntries)
+        .where(eq(userCardEntries.workOrderId, workOrdersList[0].id));
+      expect(cardEntriesList).toHaveLength(1);
+
+      // Verify reservation is completed
+      const [resDb] = await db
+        .select()
+        .from(reservations)
+        .where(eq(reservations.id, concurrentRes.id));
+      expect(resDb.status).toBe("completed");
+
+      // Verify counter changed at most once
+      const [rightsAfter] = await db
+        .select()
+        .from(memberStatutoryRights)
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+      expect(rightsAfter.pendingFeeAdjustmentsCount - rightsBefore.pendingFeeAdjustmentsCount).toBe(1);
+    });
+
+    it("Point 5: Existing work order is updated with fresh financial fields matching user card entry", async () => {
+      const db = await requireTestDb();
+
+      // Create reservation
+      const [resPre] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      // Pre-create work order in progress without final financial fields
+      const started = await startReservationWorkOrder({
+        reservationId: resPre.id,
+        operatorId: TEST_USER_IDS.operator,
+      });
+      const initialWo = started.workOrder!;
+
+      // Complete operation - quota exceeded so it must become fee adjustment USL-D9T
+      const completion = await completeReservationOperation({
+        reservationId: resPre.id,
+        operatorId: TEST_USER_IDS.operator,
+        craneId: TEST_CRANE_IDS.crane2,
+        actualDurationMin: 55,
+        operatorNotes: "Zaključenje postojećeg radnog naloga",
+        allowFutureDate: true,
+      });
+
+      expect(completion.success).toBe(true);
+
+      // Verify DB work order now has fresh financial fields
+      const [woInDb] = await db
+        .select()
+        .from(workOrders)
+        .where(eq(workOrders.id, initialWo.id));
+
+      expect(woInDb.status).toBe("completed");
+      expect(woInDb.isStatutoryCovered).toBe(false);
+      expect(woInDb.chargeItemCode).toBe("USL-D9T");
+      expect(woInDb.chargeItemName).toContain("9T");
+
+      // Verify user card entry matches work order exactly
+      const [cardInDb] = await db
+        .select()
+        .from(userCardEntries)
+        .where(eq(userCardEntries.workOrderId, initialWo.id));
+
+      expect(cardInDb.serviceItemCode).toBe(woInDb.chargeItemCode);
+      expect(cardInDb.entryType).toBe("fee_adjustment_charge");
+    });
+
+    it("Point 6: getUnifiedCycleSummary and generateUnifiedQuote calculate matching 281.25 € for member with 45-day stay", async () => {
+      const db = await requireTestDb();
+
+      // Clear previous occupancies for this test vessel so the 45-day occupancy is the latest
+      await db.delete(landOccupancies).where(eq(landOccupancies.vesselId, testVesselMemberId));
+
+      // Fetch a valid land zone
+      const [zone] = await db.select().from(landZones).limit(1);
+
+      // Lift 45 days ago, returned exactly 45 days later -> 45 total days, 30 free, 15 billable @ 15 € + 25% VAT = 281.25 €
+      const fortyFiveDaysAgo = new Date();
+      fortyFiveDaysAgo.setDate(fortyFiveDaysAgo.getDate() - 45);
+      const returnedDate = new Date(fortyFiveDaysAgo.getTime() + 45 * 24 * 60 * 60 * 1000);
+
+      const [resLift] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "completed",
+          scheduledStart: fortyFiveDaysAgo,
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      const [resLower] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLowerId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "completed",
+          scheduledStart: returnedDate,
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      const [occupancy] = await db
+        .insert(landOccupancies)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          zoneId: zone.id,
+          spotNumber: 12,
+          reservationId: resLift.id,
+          returnReservationId: resLower.id,
+          liftedAt: fortyFiveDaysAgo,
+          returnedAt: returnedDate,
+        })
+        .returning();
+
+      // Create caller with operator privileges
+      const [operatorUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, TEST_USER_IDS.operator))
+        .limit(1);
+
+      const caller = appRouter.createCaller({
+        user: operatorUser,
+        req: {} as any,
+        res: {} as any,
+      });
+
+      // 1. Check getUnifiedCycleSummary
+      const summary = await caller.workOrders.getUnifiedCycleSummary({
+        vesselId: testVesselMemberId,
+      });
+
+      expect(summary.occupancy?.totalDays).toBe(45);
+      expect(summary.occupancy?.freeDaysAllowed).toBe(30);
+      expect(summary.occupancy?.billableDays).toBe(15);
+      expect(summary.totals.berthCostNet).toBe(225.00); // 15 * 15.00
+      expect(summary.totals.grandTotalNet).toBe(225.00);
+      expect(summary.totals.grandTotalVat).toBe(56.25);  // 225 * 0.25
+      expect(summary.totals.grandTotalGross).toBe(281.25);
+
+      // 2. Check generateUnifiedQuote
+      const quote = await caller.workOrders.generateUnifiedQuote({
+        vesselId: testVesselMemberId,
+        userId: uniqueMemberId,
+        documentType: "proforma",
+        dueDateDays: 15,
+      });
+
+      expect(Number(quote.totalNetAmount)).toBe(225.00);
+      expect(Number(quote.totalVatAmount)).toBe(56.25);
+      expect(Number(quote.totalGrossAmount)).toBe(281.25);
+
+      const items = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, quote.id));
+      expect(items).toHaveLength(1);
+      expect(items[0].productCode).toBe("USL-LEZARINA-DAN");
+      expect(items[0].quantity).toBe("15.00");
+    });
+
+    it("Point 7: Commercial service respects custom VAT rate and ignores deactivated price items", async () => {
+      const db = await requireTestDb();
+
+      // Temporarily deactivate USL-VANJSKI-M and set an extreme price
+      await db
+        .update(priceListItems)
+        .set({ isActive: false, pricePerMeterEur: "99.00" })
+        .where(eq(priceListItems.code, "USL-VANJSKI-M"));
+
+      // calculateCommercialPricing must IGNORE the deactivated item and fall back to default rate 12.00
+      const inactiveRes = await calculateCommercialPricing(db, "10.00");
+      expect(inactiveRes.ratePerMeter).toBe("12.00"); // default fallback, not 99.00!
+
+      // Reactivate with custom 13% VAT and 10.00 EUR rate
+      await db
+        .update(priceListItems)
+        .set({ isActive: true, vatRate: "13.00", pricePerMeterEur: "10.00" })
+        .where(eq(priceListItems.code, "USL-VANJSKI-M"));
+
+      // Commercial reservation with 10.00m vessel
+      const [resComm13] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueCommercialId,
+          vesselId: testVesselCommId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Adria Star (Vanjski)",
+          vesselRegistration: "ZG-9999-VK",
+          vesselLengthM: "10.00",
+        })
+        .returning();
+
+      const completion = await completeReservationOperation({
+        reservationId: resComm13.id,
+        operatorId: TEST_USER_IDS.operator,
+        craneId: TEST_CRANE_IDS.crane2,
+        actualDurationMin: 60,
+        allowFutureDate: true,
+      });
+
+      expect(completion.success).toBe(true);
+      // Rate: 10.00 m * 10.00 EUR = 100.00 EUR net.
+      // VAT 13% = 13.00 EUR -> Total = 113.00 EUR.
+      expect(completion.workOrder?.commercialPricePerMeter).toBe("10.00");
+      expect(completion.workOrder?.commercialTotal).toBe("113.00");
+      expect(completion.workOrder?.vatRate).toBe("13.00"); // Not hardcoded 25.00!
+
+      // Restore active price list item to standard defaults
+      await db
+        .update(priceListItems)
+        .set({ vatRate: "25.00", pricePerMeterEur: "12.00" })
+        .where(eq(priceListItems.code, "USL-VANJSKI-M"));
     });
 
     afterAll(async () => {

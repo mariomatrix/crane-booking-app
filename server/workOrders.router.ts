@@ -509,26 +509,41 @@ export const workOrdersRouter = router({
                 billableDays = totalDays; // Privremeni član plaća sve dane fiksno po danu
             }
 
-            // Fetch price list items
-            const [cranePriceItem] = await db.select().from(priceListItems).where(eq(priceListItems.code, "USL-VANJSKI-M")).limit(1);
-            const [berthPriceItem] = await db.select().from(priceListItems).where(eq(priceListItems.code, "USL-LEZARINA-DAN")).limit(1);
+            // Fetch price list items (active only)
+            const [cranePriceItem] = await db
+                .select()
+                .from(priceListItems)
+                .where(and(eq(priceListItems.code, "USL-VANJSKI-M"), eq(priceListItems.isActive, true)))
+                .limit(1);
+            const [berthPriceItem] = await db
+                .select()
+                .from(priceListItems)
+                .where(and(eq(priceListItems.code, "USL-LEZARINA-DAN"), eq(priceListItems.isActive, true)))
+                .limit(1);
 
             const craneRatePerMeter = cranePriceItem?.pricePerMeterEur ? Number(cranePriceItem.pricePerMeterEur) : 12.00;
             const dailyBerthRate = berthPriceItem?.fixedPriceEur ? Number(berthPriceItem.fixedPriceEur) : 15.00;
+            const craneVatRate = cranePriceItem?.vatRate ? Number(cranePriceItem.vatRate) : 25.00;
+            const berthVatRate = berthPriceItem?.vatRate ? Number(berthPriceItem.vatRate) : 25.00;
 
             const liftCostNet = isMember ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
             const lowerCostNet = isMember ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
-            const berthCostNet = isMember ? 0 : Number((billableDays * dailyBerthRate).toFixed(2));
+            const berthCostNet = Number((billableDays * dailyBerthRate).toFixed(2));
 
             const totalResourcesNet = [...liftResources, ...lowerResources].reduce(
                 (sum, r) => sum + Number(r.totalPriceEur || 0),
                 0
             );
 
+            const liftVat = Number((liftCostNet * (craneVatRate / 100)).toFixed(2));
+            const lowerVat = Number((lowerCostNet * (craneVatRate / 100)).toFixed(2));
+            const berthVat = Number((berthCostNet * (berthVatRate / 100)).toFixed(2));
+            const resourcesVat = Number((totalResourcesNet * 0.25).toFixed(2));
+
             const grandTotalNet = liftCostNet + lowerCostNet + berthCostNet + totalResourcesNet;
-            const vatRate = 25.00;
-            const grandTotalVat = Number((grandTotalNet * (vatRate / 100)).toFixed(2));
+            const grandTotalVat = Number((liftVat + lowerVat + berthVat + resourcesVat).toFixed(2));
             const grandTotalGross = Number((grandTotalNet + grandTotalVat).toFixed(2));
+            const vatRate = 25.00;
 
             // Check if invoice/quote is already generated for this cycle
             const [existingInvoice] = await db
@@ -637,12 +652,22 @@ export const workOrdersRouter = router({
 
             const billableDays = isMember ? Math.max(0, totalDays - 30) : totalDays;
 
-            // Price rates
-            const [cranePriceItem] = await db.select().from(priceListItems).where(eq(priceListItems.code, "USL-VANJSKI-M")).limit(1);
-            const [berthPriceItem] = await db.select().from(priceListItems).where(eq(priceListItems.code, "USL-LEZARINA-DAN")).limit(1);
+            // Price rates (active only)
+            const [cranePriceItem] = await db
+                .select()
+                .from(priceListItems)
+                .where(and(eq(priceListItems.code, "USL-VANJSKI-M"), eq(priceListItems.isActive, true)))
+                .limit(1);
+            const [berthPriceItem] = await db
+                .select()
+                .from(priceListItems)
+                .where(and(eq(priceListItems.code, "USL-LEZARINA-DAN"), eq(priceListItems.isActive, true)))
+                .limit(1);
 
             const craneRatePerMeter = cranePriceItem?.pricePerMeterEur ? Number(cranePriceItem.pricePerMeterEur) : 12.00;
+            const craneVatRate = cranePriceItem?.vatRate ? Number(cranePriceItem.vatRate) : 25.00;
             const dailyBerthRate = berthPriceItem?.fixedPriceEur ? Number(berthPriceItem.fixedPriceEur) : 15.00;
+            const berthVatRate = berthPriceItem?.vatRate ? Number(berthPriceItem.vatRate) : 25.00;
 
             const itemsToInsert: Array<{
                 productCode: string;
@@ -661,14 +686,14 @@ export const workOrdersRouter = router({
             // 1. Vađenje plovila
             if (!isMember) {
                 const liftNet = Number((lengthM * craneRatePerMeter).toFixed(2));
-                const liftVat = Number((liftNet * 0.25).toFixed(2));
+                const liftVat = Number((liftNet * (craneVatRate / 100)).toFixed(2));
                 itemsToInsert.push({
                     productCode: "USL-DIZ-VAD",
                     description: `Vađenje plovila iz mora (${lengthM.toFixed(2)} m)`,
                     quantity: "1",
                     unit: "usl",
                     unitPrice: liftNet.toFixed(2),
-                    vatRate: "25.00",
+                    vatRate: craneVatRate.toFixed(2),
                     netAmount: liftNet.toFixed(2),
                     vatAmount: liftVat.toFixed(2),
                     grossAmount: (liftNet + liftVat).toFixed(2),
@@ -679,14 +704,14 @@ export const workOrdersRouter = router({
             // 2. Korištenje suhog veza (Ležarina)
             if (billableDays > 0) {
                 const berthNet = Number((billableDays * dailyBerthRate).toFixed(2));
-                const berthVat = Number((berthNet * 0.25).toFixed(2));
+                const berthVat = Number((berthNet * (berthVatRate / 100)).toFixed(2));
                 itemsToInsert.push({
                     productCode: "USL-LEZARINA-DAN",
                     description: `Korištenje suhog veza na platou (${billableDays} dana)`,
                     quantity: String(billableDays),
                     unit: "dan",
                     unitPrice: dailyBerthRate.toFixed(2),
-                    vatRate: "25.00",
+                    vatRate: berthVatRate.toFixed(2),
                     netAmount: berthNet.toFixed(2),
                     vatAmount: berthVat.toFixed(2),
                     grossAmount: (berthNet + berthVat).toFixed(2),
@@ -697,14 +722,14 @@ export const workOrdersRouter = router({
             // 3. Spuštanje plovila
             if (!isMember) {
                 const lowerNet = Number((lengthM * craneRatePerMeter).toFixed(2));
-                const lowerVat = Number((lowerNet * 0.25).toFixed(2));
+                const lowerVat = Number((lowerNet * (craneVatRate / 100)).toFixed(2));
                 itemsToInsert.push({
                     productCode: "USL-DIZ-SPU",
                     description: `Spuštanje plovila u more (${lengthM.toFixed(2)} m)`,
                     quantity: "1",
                     unit: "usl",
                     unitPrice: lowerNet.toFixed(2),
-                    vatRate: "25.00",
+                    vatRate: craneVatRate.toFixed(2),
                     netAmount: lowerNet.toFixed(2),
                     vatAmount: lowerVat.toFixed(2),
                     grossAmount: (lowerNet + lowerVat).toFixed(2),
@@ -755,7 +780,7 @@ export const workOrdersRouter = router({
                 }
             }
 
-            const totalVat = Number((totalNet * 0.25).toFixed(2));
+            const totalVat = Number(itemsToInsert.reduce((sum, item) => sum + Number(item.vatAmount), 0).toFixed(2));
             const totalGross = Number((totalNet + totalVat).toFixed(2));
 
             const currentYear = new Date().getFullYear();
