@@ -53,7 +53,7 @@ export function SlotRecommendationDialog({
   const [selectedZoneId, setSelectedZoneId] = useState<string>("");
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number>(0);
   const [teamOverride, setTeamOverride] = useState<boolean>(false);
-  const [teamOverrideReason, setTeamOverrideReason] = useState<string>("Preraspodjela osoblja na terenu");
+  const [teamOverrideReason, setTeamOverrideReason] = useState<string>("Osigurana dodatna ekipa na terenu");
 
   const utils = trpc.useUtils();
 
@@ -101,7 +101,12 @@ export function SlotRecommendationDialog({
     if (!currentOption) return;
 
     if (currentOption.requiresTeamOverride && !teamOverride) {
-      toast.error("Kapacitet timova je popunjen. Potrebno je označiti dispečerski override posade.");
+      toast.error("Kapacitet ekipa je popunjen. Potrebno je odobriti iznimku uz dodatnu ekipu.");
+      return;
+    }
+
+    if (teamOverride && teamOverrideReason.trim().length < 3) {
+      toast.error("Molimo unesite razlog odobravanja iznimke (najmanje 3 znaka).");
       return;
     }
 
@@ -131,7 +136,7 @@ export function SlotRecommendationDialog({
                   Preporuka termina i dizalice
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Automatizirana preporuka prema nosivosti, afinitetu zona i raspoloživosti 2 tima.
+                  Automatizirana preporuka prema nosivosti, afinitetu zona i raspoloživosti ekipa.
                 </DialogDescription>
               </div>
             </div>
@@ -248,7 +253,7 @@ export function SlotRecommendationDialog({
                               variant="destructive"
                               className="text-[9px] px-1 py-0 h-4 font-normal"
                             >
-                              2/2 tima zauzeto
+                              Zauzete ekipe: {opt.concurrentTeamsInSlot} od {opt.maxConcurrentTeams ?? 2}
                             </Badge>
                           )}
                           {opt.rotationalCandidateReservationId && (
@@ -316,15 +321,23 @@ export function SlotRecommendationDialog({
 
                     {/* Team Concurrency Override Box */}
                     {currentOption.requiresTeamOverride && (
-                      <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-200 text-xs space-y-2">
-                        <div className="flex items-center gap-1.5 font-semibold text-amber-600 dark:text-amber-400">
-                          <Users className="w-4 h-4 shrink-0" />
-                          <span>Kapacitet posade je popunjen (2/2)</span>
+                      <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 text-xs space-y-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-400">
+                            <Users className="w-4 h-4 shrink-0" />
+                            <span>Zauzete ekipe: {currentOption.concurrentTeamsInSlot} od {currentOption.maxConcurrentTeams ?? 2}</span>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/30 font-medium">
+                            Potrebno odobrenje iznimke
+                          </Badge>
                         </div>
                         <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          Dvije dizalice već istovremeno rade u ovom terminu. Kao dispečer imate pravo ručno odobriti operaciju ako je osigurana ispomoć na terenu.
+                          Standardni kapacitet raspoloživih operativnih ekipa u ovom terminu je popunjen. Odobravanje ove iznimke omogućuje angažman dodatne ekipe na terenu uz vašu dispečersku potvrdu i obrazloženje.
                         </p>
-                        <div className="pt-1 space-y-1.5 border-t border-amber-500/20">
+                        <div className="text-[10px] text-amber-800/80 dark:text-amber-300/80 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+                          <strong>Napomena o ograničenjima:</strong> Ova iznimka mijenja isključivo kapacitet osoblja. Fizička i tehnička ograničenja dizalice (maksimalna nosivost, širina bazena i obustave rada) ne mogu se zaobići iznimkom.
+                        </div>
+                        <div className="pt-2 space-y-2 border-t border-amber-500/20">
                           <div className="flex items-center gap-2">
                             <input
                               type="checkbox"
@@ -334,16 +347,22 @@ export function SlotRecommendationDialog({
                               className="w-4 h-4 rounded text-primary focus:ring-primary cursor-pointer"
                             />
                             <label htmlFor="dialogTeamOverride" className="text-xs font-semibold cursor-pointer">
-                              Aktiviraj dispečerski override posade
+                              Odobri iznimku uz dodatnu ekipu
                             </label>
                           </div>
                           {teamOverride && (
-                            <Input
-                              value={teamOverrideReason}
-                              onChange={(e) => setTeamOverrideReason(e.target.value)}
-                              placeholder="Kratki razlog (npr. preraspodjela posade)..."
-                              className="h-7 text-xs bg-background"
-                            />
+                            <div className="space-y-1">
+                              <label htmlFor="teamOverrideReasonInput" className="text-[11px] font-medium text-muted-foreground">
+                                Razlog odobravanja iznimke *
+                              </label>
+                              <Input
+                                id="teamOverrideReasonInput"
+                                value={teamOverrideReason}
+                                onChange={(e) => setTeamOverrideReason(e.target.value)}
+                                placeholder="Npr. osigurana dodatna ekipa na terenu, preraspodjela posade..."
+                                className="h-8 text-xs bg-background"
+                              />
+                            </div>
                           )}
                         </div>
                       </div>

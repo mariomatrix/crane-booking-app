@@ -85,7 +85,11 @@ export const hr = {
         noReservations: "Nemate rezervacija.",
         status: {
             pending: "Na čekanju",
+            waitlisted: "Lista čekanja",
             approved: "Odobreno",
+            in_progress: "U tijeku",
+            completed: "Završeno",
+            not_performed: "Nije izvedeno",
             rejected: "Odbijeno",
             cancelled: "Otkazano",
         },

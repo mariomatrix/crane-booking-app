@@ -1028,8 +1028,8 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                 </div>
                 {selectedOperation.teamOverride && (
                   <div className="flex justify-between text-amber-600 font-semibold">
-                    <span>Posada:</span>
-                    <span>Ručni override timova</span>
+                    <span>Operativna ekipa:</span>
+                    <span>Odobrena iznimka uz dodatnu ekipu</span>
                   </div>
                 )}
                 {selectedOperation.isAtRiskOrBroken && (

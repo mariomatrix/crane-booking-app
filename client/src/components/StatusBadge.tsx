@@ -1,47 +1,11 @@
 import { Badge } from "@/components/ui/badge";
+import { getStatusContract } from "@/lib/statusContract";
 
-type Status = "pending" | "approved" | "rejected" | "cancelled" | "completed" | "waitlisted" | "not_performed";
-
-const statusConfig: Record<Status, { label: string; className: string }> = {
-  pending: {
-    label: "Na čekanju",
-    className: "status-badge-pending border-0 font-medium",
-  },
-  waitlisted: {
-    label: "Čeka suhi vez",
-    className: "bg-amber-600 text-white dark:bg-amber-600 dark:text-white border-0 font-medium",
-  },
-  approved: {
-    label: "Odobreno",
-    className: "status-badge-approved border-0 font-medium",
-  },
-  rejected: {
-    label: "Odbijeno",
-    className: "status-badge-rejected border-0 font-medium",
-  },
-  cancelled: {
-    label: "Otkazano",
-    className: "status-badge-cancelled border-0 font-medium",
-  },
-  completed: {
-    label: "Završeno",
-    className: "bg-blue-600 text-white dark:bg-blue-600 dark:text-white border-0 font-medium",
-  },
-  not_performed: {
-    label: "Nije izvedeno",
-    className: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-500/30 font-medium",
-  },
-};
-
-export function StatusBadge({ status }: { status: string }) {
-  const config = statusConfig[status as Status] ?? {
-    label: status,
-    className: "bg-muted text-muted-foreground border-0",
-  };
+export function StatusBadge({ status, className }: { status: string; className?: string }) {
+  const config = getStatusContract(status);
   return (
-    <Badge variant="outline" className={config.className}>
-      {config.label}
+    <Badge variant="outline" className={`${config.badgeClassName} ${className || ""}`.trim()}>
+      {config.badgeLabel}
     </Badge>
   );
 }
-

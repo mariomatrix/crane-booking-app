@@ -112,6 +112,7 @@ export interface SlotRecommendation {
   isPrimary: boolean;
   teamCapacityExceeded: boolean;
   concurrentTeamsInSlot: number;
+  maxConcurrentTeams?: number;
   requiresTeamOverride: boolean;
   isFeasible: boolean;
   hardBlockReasons: string[];

@@ -82,7 +82,11 @@ export const en: Translations = {
         noReservations: "You have no reservations.",
         status: {
             pending: "Pending",
+            waitlisted: "Waitlisted",
             approved: "Approved",
+            in_progress: "In Progress",
+            completed: "Completed",
+            not_performed: "Not Performed",
             rejected: "Rejected",
             cancelled: "Cancelled",
         },

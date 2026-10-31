@@ -202,14 +202,14 @@ export function checkFeasibility(params: FeasibilityCheckParams): FeasibilityRes
   if (concurrentTeamsCount >= maxConcurrentTeams) {
     teamCapacityExceeded = true;
     requiresTeamOverride = true;
-    const teamMsg = `Kapacitet posade je popunjen (${concurrentTeamsCount}/${maxConcurrentTeams} dizalica već radi).`;
+    const teamMsg = `Zauzete ekipe: ${concurrentTeamsCount} od ${maxConcurrentTeams}. Standardni kapacitet operativnih ekipa je popunjen.`;
     overrideReasons.push(teamMsg);
     if (!teamOverride) {
       warnings.push(
-        `${teamMsg} Potreban je dispečerski override.`
+        `${teamMsg} Potreban je dispečerski override (odobrenje iznimke uz dodatnu ekipu).`
       );
     } else {
-      warnings.push(`Aktiviran dispečerski override za posadu (${concurrentTeamsCount + 1}/${maxConcurrentTeams} operacija).`);
+      warnings.push(`Aktiviran dispečerski override za posadu: odobrena iznimka uz dodatnu ekipu (${concurrentTeamsCount + 1}/${maxConcurrentTeams}).`);
     }
   }
 
@@ -428,7 +428,7 @@ export async function validateReservationConstraintsAndOverrides(params: {
   // 3. Team capacity check
   if (teamCapacityCheck && !teamCapacityCheck.hasCapacity) {
     overrideReasons.push(
-      `U ovom terminu već rade 2 dizalice (${teamCapacityCheck.busyCranesNames.join(" i ")})`
+      `Zauzete ekipe: standardni kapacitet ekipa je popunjen (${teamCapacityCheck.busyCranesNames.join(" i ")})`
     );
   }
 

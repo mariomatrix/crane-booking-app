@@ -522,7 +522,8 @@ export class LandDispatchService {
     }
 
     // KPI calculation
-    const maxTeams = 2; // Black box teams
+    const sysSettings = await getAllSettings();
+    const maxTeams = Number(sysSettings.maxConcurrentCraneTeams || "2") || 2;
     let peakConcurrentTeams = 0;
 
     for (const slot of timeSlots) {
@@ -642,6 +643,7 @@ export class LandDispatchService {
     const targetZone = overview.zones.find((z) => z.zoneId === targetZoneId) || overview.zones[0];
     if (!targetZone) throw new Error("Zone not found");
 
+    const maxConcurrentTeamsSetting = overview.kpi.maxTeams || 2;
     const recommendations: SlotRecommendation[] = [];
 
     for (const crane of overview.cranes) {
@@ -701,7 +703,7 @@ export class LandDispatchService {
               vesselName: o.vesselName,
             })),
           currentZoneFreeAtSlot: freeAtSlot,
-          maxConcurrentTeams: 2,
+          maxConcurrentTeams: maxConcurrentTeamsSetting,
           teamOverride: false,
         });
 
@@ -710,7 +712,7 @@ export class LandDispatchService {
           isPrimary: affinity?.isPrimary ?? false,
           penaltySlots: affinity?.penaltySlots ?? 0,
           concurrentTeamsInSlot: feas.concurrentTeamsInSlot,
-          maxConcurrentTeams: 2,
+          maxConcurrentTeams: maxConcurrentTeamsSetting,
           craneName: crane.name,
           zoneCode: targetZone.zoneCode,
           zoneName: targetZone.zoneName,
@@ -733,6 +735,7 @@ export class LandDispatchService {
           isPrimary: affinity?.isPrimary ?? false,
           teamCapacityExceeded: feas.teamCapacityExceeded,
           concurrentTeamsInSlot: feas.concurrentTeamsInSlot,
+          maxConcurrentTeams: maxConcurrentTeamsSetting,
           requiresTeamOverride: feas.requiresTeamOverride,
           isFeasible: feas.isFeasible,
           hardBlockReasons: feas.hardBlockReasons,
