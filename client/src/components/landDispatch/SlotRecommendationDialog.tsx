@@ -28,10 +28,51 @@ import {
   ShieldAlert,
   ArrowRight,
   Info,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { SlotRecommendation, UnassignedRequestItem } from "../../../../server/landDispatch/types";
+
+function formatCroatianDateOnly(dateStr?: string | null): string {
+  if (!dateStr) return "Po dogovoru";
+  try {
+    const raw = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr;
+    const parts = raw.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}.${parts[1]}.${parts[0]}.`;
+    }
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("hr-HR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatCroatianFullDate(dateStr: string): string {
+  if (!dateStr) return "";
+  try {
+    const raw = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr;
+    const parts = raw.split("-");
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      return d.toLocaleDateString("hr-HR", {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      });
+    }
+    return dateStr;
+  } catch {
+    return dateStr;
+  }
+}
 
 interface SlotRecommendationDialogProps {
   open: boolean;
@@ -50,6 +91,9 @@ export function SlotRecommendationDialog({
   zones,
   onSuccess,
 }: SlotRecommendationDialogProps) {
+  const [activeDate, setActiveDate] = useState<string>(
+    request?.requestedDate || dateStr
+  );
   const [selectedZoneId, setSelectedZoneId] = useState<string>("");
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number>(0);
   const [teamOverride, setTeamOverride] = useState<boolean>(false);
@@ -63,17 +107,37 @@ export function SlotRecommendationDialog({
       setSelectedZoneId(request.requestedZoneId || zones[0]?.zoneId || "");
       setSelectedSlotIndex(0);
       setTeamOverride(false);
+      setActiveDate(request.requestedDate || dateStr);
     }
-  }, [request, zones]);
+  }, [request, zones, dateStr]);
+
+  const handlePrevDay = () => {
+    const d = new Date(activeDate);
+    d.setDate(d.getDate() - 1);
+    setActiveDate(d.toISOString().split("T")[0]);
+    setSelectedSlotIndex(0);
+  };
+
+  const handleNextDay = () => {
+    const d = new Date(activeDate);
+    d.setDate(d.getDate() + 1);
+    setActiveDate(d.toISOString().split("T")[0]);
+    setSelectedSlotIndex(0);
+  };
+
+  const handleToday = () => {
+    setActiveDate(new Date().toISOString().split("T")[0]);
+    setSelectedSlotIndex(0);
+  };
 
   const { data: recommendations = [], isLoading } = trpc.landDispatch.getSlotRecommendations.useQuery(
     {
       reservationId: request?.id || "",
-      dateStr,
+      dateStr: activeDate,
       preferredZoneId: selectedZoneId || undefined,
     },
     {
-      enabled: open && !!request?.id,
+      enabled: open && !!request?.id && !!activeDate,
     }
   );
 
@@ -144,48 +208,155 @@ export function SlotRecommendationDialog({
         </DialogHeader>
 
         {/* Vessel & Request Summary Card */}
-        <div className="p-3 rounded-xl bg-muted/40 border text-xs grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+        <div className="p-3 rounded-xl bg-muted/40 border text-xs grid grid-cols-2 sm:grid-cols-5 gap-2 mt-2">
           <div>
-            <span className="text-muted-foreground block">Plovilo:</span>
-            <span className="font-semibold text-foreground">{request.vesselName}</span>
+            <span className="text-muted-foreground block text-[11px]">Plovilo:</span>
+            <span className="font-semibold text-foreground truncate block">{request.vesselName}</span>
           </div>
           <div>
-            <span className="text-muted-foreground block">Gabariti:</span>
+            <span className="text-muted-foreground block text-[11px]">Gabariti:</span>
             <span className="font-semibold text-foreground">
               {request.vesselLengthM ? `${request.vesselLengthM} m` : "—"} /{" "}
               {request.vesselWeightTons ? `${request.vesselWeightTons} t` : "—"}
             </span>
           </div>
           <div>
-            <span className="text-muted-foreground block">Korisnik:</span>
-            <span className="font-semibold text-foreground">{request.userName}</span>
+            <span className="text-muted-foreground block text-[11px]">Korisnik:</span>
+            <span className="font-semibold text-foreground truncate block">{request.userName}</span>
           </div>
           <div>
-            <span className="text-muted-foreground block">Operacija:</span>
+            <span className="text-muted-foreground block text-[11px]">Operacija:</span>
             <Badge
               variant={request.operationCategory === "lift_from_sea" ? "default" : "secondary"}
-              className="text-[10px] h-5 font-medium"
+              className="text-[10px] h-4.5 font-medium"
             >
               {request.operationCategory === "lift_from_sea" ? "↑ Podizanje" : "↓ Spuštanje"}
             </Badge>
           </div>
+          <div>
+            <span className="text-muted-foreground block text-[11px]">Traženi termin:</span>
+            <span className="font-semibold text-primary truncate block">
+              {formatCroatianDateOnly(request.requestedDate)}
+              {request.requestedTimeSlot ? ` (${request.requestedTimeSlot})` : ""}
+            </span>
+          </div>
         </div>
 
-        {/* Filter Zone */}
-        <div className="flex items-center justify-between gap-3 pt-2">
-          <Label className="text-xs font-semibold whitespace-nowrap">Odredišna zona:</Label>
-          <Select value={selectedZoneId} onValueChange={setSelectedZoneId}>
-            <SelectTrigger className="h-8 text-xs max-w-[260px]">
-              <SelectValue placeholder="Odaberite zonu" />
-            </SelectTrigger>
-            <SelectContent>
-              {zones.map((z) => (
-                <SelectItem key={z.zoneId} value={z.zoneId}>
-                  {z.zoneCode} — {z.zoneName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Kontrole: Datum preporuke & Odredišna zona */}
+        <div className="p-2.5 rounded-xl bg-card border shadow-xs space-y-2 mt-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            {/* Datum preporuke s brzim kontrolama */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Label className="text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 text-foreground">
+                <Calendar className="w-3.5 h-3.5 text-primary" />
+                <span>Datum preporuke:</span>
+              </Label>
+
+              <div className="flex items-center rounded-lg border bg-muted/30 p-0.5">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded"
+                  onClick={handlePrevDay}
+                  title="Dan ranije"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <div className="px-1.5 flex items-center">
+                  <input
+                    type="date"
+                    value={activeDate}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        setActiveDate(e.target.value);
+                        setSelectedSlotIndex(0);
+                      }
+                    }}
+                    className="bg-transparent font-medium border-0 focus:outline-none text-foreground cursor-pointer text-xs h-7"
+                  />
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded"
+                  onClick={handleNextDay}
+                  title="Dan kasnije"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToday}
+                className="h-7 text-xs px-2 font-medium"
+              >
+                Danas
+              </Button>
+
+              {request.requestedDate && request.requestedDate !== activeDate && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setActiveDate(request.requestedDate);
+                    setSelectedSlotIndex(0);
+                  }}
+                  className="h-7 text-xs px-2 font-medium text-primary bg-primary/10 hover:bg-primary/20"
+                  title="Vrati na željeni datum korisnika"
+                >
+                  Vrati na željeni ({formatCroatianDateOnly(request.requestedDate)})
+                </Button>
+              )}
+            </div>
+
+            {/* Zona */}
+            <div className="flex items-center gap-2 sm:justify-end">
+              <Label className="text-xs font-semibold whitespace-nowrap text-muted-foreground">
+                Zona:
+              </Label>
+              <Select
+                value={selectedZoneId}
+                onValueChange={(val) => {
+                  setSelectedZoneId(val);
+                  setSelectedSlotIndex(0);
+                }}
+              >
+                <SelectTrigger className="h-7 text-xs w-[180px]">
+                  <SelectValue placeholder="Odaberite zonu" />
+                </SelectTrigger>
+                <SelectContent>
+                  {zones.map((z) => (
+                    <SelectItem key={z.zoneId} value={z.zoneId}>
+                      {z.zoneCode} — {z.zoneName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Informativna traka o trenutnom datumu analize */}
+          <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] pt-1.5 border-t text-muted-foreground">
+            <div className="flex items-center gap-1.5">
+              <span>Prikazuju se opcije za:</span>
+              <Badge variant="outline" className="text-[11px] font-bold text-primary border-primary/30 bg-primary/5 py-0 h-5">
+                {formatCroatianFullDate(activeDate)}
+              </Badge>
+              {request.requestedDate === activeDate && (
+                <span className="text-emerald-600 dark:text-emerald-400 font-semibold text-[10px] flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  (Željeni datum korisnika)
+                </span>
+              )}
+            </div>
+            {request.requestedDate && request.requestedDate !== activeDate && (
+              <span className="text-muted-foreground text-[10px]">
+                Korisnik je tražio: <strong className="text-foreground">{formatCroatianDateOnly(request.requestedDate)}</strong>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Candidates List & Details */}
@@ -278,7 +449,7 @@ export function SlotRecommendationDialog({
                       </span>
                       <div className="flex items-center justify-between mt-0.5">
                         <span className="text-sm font-bold text-foreground">
-                          {currentOption.startTime} – {currentOption.endTime}
+                          {formatCroatianFullDate(activeDate)}, {currentOption.startTime} – {currentOption.endTime}
                         </span>
                         <Badge
                           variant={currentOption.isFeasible ? "default" : "destructive"}
@@ -379,7 +550,9 @@ export function SlotRecommendationDialog({
                     }
                   >
                     <CheckCircle2 className="w-4 h-4" />
-                    {assignMutation.isPending ? "Spremanje..." : "Dodijeli i potvrdi termin"}
+                    {assignMutation.isPending
+                      ? "Spremanje..."
+                      : `Dodijeli i potvrdi termin za ${formatCroatianDateOnly(activeDate)}`}
                   </Button>
                 </div>
               )}

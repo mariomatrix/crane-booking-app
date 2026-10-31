@@ -68,6 +68,7 @@ export interface UnassignedRequestItem {
   reservationNumber: string | null;
   requestedDate: string;
   requestedTimeSlot: string | null;
+  createdAt: string;
   userId: string;
   userName: string;
   userPhone: string | null;

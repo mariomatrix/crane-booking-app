@@ -52,6 +52,56 @@ import {
   ZoneCapacitySnapshot,
 } from "../../../../server/landDispatch/types";
 
+function formatCroatianDate(dateStr?: string | null): string {
+  if (!dateStr) return "Po dogovoru";
+  try {
+    const raw = dateStr.includes("T") ? dateStr.split("T")[0] : dateStr;
+    const parts = raw.split("-");
+    if (parts.length === 3) {
+      return `${parts[2]}.${parts[1]}.${parts[0]}.`;
+    }
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("hr-HR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatCreatedAt(isoStr?: string | null): string {
+  if (!isoStr) return "—";
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleDateString("hr-HR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return isoStr;
+  }
+}
+
+function formatTimeSlotLabel(slot?: string | null): string | null {
+  if (!slot) return null;
+  if (slot === "jutro") return "Jutro";
+  if (slot === "poslijepodne") return "Poslijepodne";
+  if (slot === "po_dogovoru") return "Po dogovoru";
+  return slot;
+}
+
+function getWaitingDays(createdAtStr?: string | null): number {
+  if (!createdAtStr) return 0;
+  try {
+    const created = new Date(createdAtStr).getTime();
+    const now = Date.now();
+    return Math.max(0, Math.floor((now - created) / (1000 * 60 * 60 * 24)));
+  } catch {
+    return 0;
+  }
+}
+
 interface DispatchCenterTabProps {
   selectedDate: string;
   onDateChange: (date: string) => void;
@@ -498,9 +548,46 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                         >
                           {req.operationCategory === "lift_from_sea" ? "↑ Vađenje" : "↓ Spuštanje"}
                         </Badge>
+                      </div>
+                    </div>
+
+                    {/* Datumi: Kada je postavljen zahtjev i željeni termin */}
+                    <div className="bg-muted/40 rounded-lg p-2 space-y-1.5 text-[10px] border border-border/50">
+                      {/* Red 1: Kada je postavljen zahtjev */}
+                      <div className="flex items-center justify-between gap-1 text-muted-foreground">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Clock className="w-3 h-3 text-muted-foreground/80 shrink-0" />
+                          <span>Postavljeno:</span>
+                          <span className="font-semibold text-foreground">
+                            {formatCreatedAt(req.createdAt)}
+                          </span>
+                        </div>
+                        {getWaitingDays(req.createdAt) >= 2 && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] h-4 px-1.5 py-0 font-semibold border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 gap-1 shrink-0"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                            Čeka {getWaitingDays(req.createdAt)} d.
+                          </Badge>
+                        )}
+                      </div>
+
+                      {/* Red 2: Željeni termin i slot */}
+                      <div className="flex items-center justify-between gap-1 pt-1 border-t border-border/40 text-foreground">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Calendar className="w-3 h-3 text-primary shrink-0" />
+                          <span className="text-muted-foreground">Željeni termin:</span>
+                          <span className={`font-semibold ${req.requestedDate === selectedDate ? "text-primary font-bold" : ""}`}>
+                            {formatCroatianDate(req.requestedDate)}
+                          </span>
+                          {req.requestedDate === selectedDate && (
+                            <span className="text-[9px] text-primary/80 font-medium">(odabrano)</span>
+                          )}
+                        </div>
                         {req.requestedTimeSlot && (
-                          <span className="text-[10px] font-mono text-muted-foreground">
-                            {req.requestedTimeSlot}
+                          <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-background border text-muted-foreground shrink-0 font-medium">
+                            {formatTimeSlotLabel(req.requestedTimeSlot)}
                           </span>
                         )}
                       </div>
@@ -928,7 +1015,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
         open={recommendationDialogOpen}
         onOpenChange={setRecommendationDialogOpen}
         request={selectedRequest}
-        dateStr={selectedDate}
+        dateStr={selectedRequest?.requestedDate || selectedDate}
         zones={zones}
       />
 

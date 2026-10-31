@@ -213,6 +213,7 @@ export class LandDispatchService {
         scheduledEnd: reservations.scheduledEnd,
         requestedDate: reservations.requestedDate,
         requestedTimeSlot: reservations.requestedTimeSlot,
+        createdAt: reservations.createdAt,
 
         status: reservations.status,
         teamOverride: reservations.teamOverride,
@@ -408,6 +409,7 @@ export class LandDispatchService {
           reservationNumber: r.reservationNumber,
           requestedDate: r.requestedDate ? String(r.requestedDate) : targetDateStr,
           requestedTimeSlot: r.requestedTimeSlot,
+          createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
           userId: r.userId,
           userName: r.userName,
           userPhone: r.userPhone,
@@ -490,6 +492,7 @@ export class LandDispatchService {
         reservationNumber: null,
         requestedDate: targetDateStr,
         requestedTimeSlot: "po_dogovoru",
+        createdAt: wl.createdAt ? new Date(wl.createdAt).toISOString() : new Date().toISOString(),
         userId: wl.userId,
         userName: wl.userName || "Korisnik",
         userPhone: wl.userPhone || null,
@@ -520,6 +523,11 @@ export class LandDispatchService {
         },
       });
     }
+
+    // Sort unassigned requests FIFO (earliest createdAt first)
+    unassignedRequests.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
 
     // KPI calculation
     const sysSettings = await getAllSettings();
