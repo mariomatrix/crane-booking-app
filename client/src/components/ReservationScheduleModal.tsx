@@ -549,7 +549,8 @@ export function ReservationScheduleModal({
           }
 
           score = Math.max(10, Math.min(100, Math.round(score)));
-          const requiresOverride = busyTeams >= 2 || !!compat?.exceedsNominalInTolerance;
+          const maxTeams = (slotData as any)?.maxConcurrentTeams ?? 2;
+          const requiresOverride = busyTeams >= maxTeams || !!compat?.exceedsNominalInTolerance;
 
           candidates.push({
             craneId: crane.id,
@@ -686,8 +687,10 @@ export function ReservationScheduleModal({
           `Termin ${selectedTime} na dizalici ${selectedCrane?.name || ""} je zauzet (${selectedSlotObj.occupiedBy || "preklapanje termina"}).`
         );
       } else if (selectedSlotObj.teamCapacityWarning || selectedSlotObj.canOverride) {
+        const busy = selectedSlotObj.busyCranesCount ?? 2;
+        const maxTeams = (slotData as any)?.maxConcurrentTeams ?? 2;
         overrideReasons.push(
-          `Kapacitet posade je popunjen: u terminu ${selectedTime} već rade 2 dizalice (${selectedSlotObj.busyCranesNames?.join(" i ") || "2 aktivna tima"}).`
+          `Zauzete ekipe: ${busy} od ${maxTeams} (operacije na: ${selectedSlotObj.busyCranesNames?.join(" i ") || "ostalim dizalicama"}). Odobrenje iznimke zahtijeva angažman dodatne ekipe.`
         );
       }
     }
@@ -847,11 +850,11 @@ export function ReservationScheduleModal({
 
     if (requiresConsciousOverride) {
       if (!overrideConfirmed) {
-        toast.error("Molimo označite potvrdni okvir za svjesni dispečerski override ograničenja.");
+        toast.error("Molimo označite potvrdni okvir za odobrenje iznimke.");
         return;
       }
       if (overrideReason.trim().length < 3) {
-        toast.error("Molimo unesite razlog za dispečerski override (najmanje 3 znaka).");
+        toast.error("Molimo unesite razlog odobravanja iznimke (najmanje 3 znaka).");
         return;
       }
     }
@@ -1094,7 +1097,7 @@ export function ReservationScheduleModal({
                             : st.operationCategory === "lower_to_sea"
                               ? "⬇️ (Spuštanje)"
                               : ""}
-                          {requiresLandOverride ? " ⚠️ (Na kopnu - uz override)" : ""}
+                          {requiresLandOverride ? " ⚠️ (Na kopnu - uz iznimku)" : ""}
                         </SelectItem>
                       );
                     })}
@@ -1222,9 +1225,9 @@ export function ReservationScheduleModal({
                       } else if (compat.exceedsPoolWidth) {
                         statusSuffix = ` ⛔ Preširoko (bazen ${compat.maxPoolWidth}m)`;
                       } else if (compat.exceedsNominalInTolerance) {
-                        statusSuffix = ` ⚠️ +${compat.exceedPct.toFixed(1)}% (u 10% toleranciji - override)`;
+                        statusSuffix = ` ⚠️ +${compat.exceedPct.toFixed(1)}% (u 10% toleranciji - uz iznimku)`;
                       } else if (compat.exceedsLengthEstimatedWeight) {
-                        statusSuffix = ` ⚠️ Procjena L:${currentLength}m > ${compat.nominalTons.toFixed(1)}t (override)`;
+                        statusSuffix = ` ⚠️ Procjena L:${currentLength}m > ${compat.nominalTons.toFixed(1)}t (uz iznimku)`;
                       } else {
                         statusSuffix = ` (do ${compat.nominalTons.toFixed(1)}t)${isTop ? " ⭐" : ""}`;
                       }
@@ -1274,7 +1277,7 @@ export function ReservationScheduleModal({
                     let affinityLabel = "";
                     if (craneId && zInfo) {
                       if (zInfo.isBlocked) {
-                        affinityLabel = "⛔ Blokiran pristup (override) · ";
+                        affinityLabel = "⛔ Blokiran tehnički afinitet (uz iznimku) · ";
                       } else if (zInfo.isPrimary) {
                         affinityLabel = `⭐ Primarna (${zInfo.affinityScore}/100) · `;
                       } else if (zInfo.penaltySlots > 0) {
@@ -1294,7 +1297,7 @@ export function ReservationScheduleModal({
                         )}
                       >
                         {z.name} ({z.code}) — {affinityLabel}
-                        {free > 0 ? `${free} slobodno` : "⚠️ Popunjeno (override)"}
+                        {free > 0 ? `${free} slobodno` : "⚠️ Popunjeno (uz iznimku)"}
                       </SelectItem>
                     );
                   })}
@@ -1370,7 +1373,7 @@ export function ReservationScheduleModal({
                             value={slot.time}
                             className="text-amber-700 font-semibold bg-amber-50/70"
                           >
-                            ⚠️ {slot.time} ({slot.occupiedBy || "Zauzeta 2 tima (uz override)"})
+                            ⚠️ {slot.time} ({slot.occupiedBy || `Zauzete ekipe: ${slot.busyCranesCount ?? 2} od ${(slotData as any)?.maxConcurrentTeams ?? 2} (uz iznimku)`})
                           </SelectItem>
                         );
                       }
@@ -1438,15 +1441,25 @@ export function ReservationScheduleModal({
             <div className="rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50/90 dark:bg-amber-950/40 p-3.5 space-y-3">
               <div className="flex items-start gap-2">
                 <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                <div className="text-xs text-amber-950 dark:text-amber-200 space-y-1 flex-1">
+                <div className="text-xs text-amber-950 dark:text-amber-200 space-y-1.5 flex-1">
                   <p className="font-bold">
-                    Detektirana ograničenja / kolizije — zahtijeva svjesni dispečerski override:
+                    Detektirana operativna ograničenja — zahtijeva odobrenje iznimke:
                   </p>
                   <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900 dark:text-amber-300 font-medium">
                     {liveDiagnostics.overrideReasons.map((reason, idx) => (
                       <li key={idx}>{reason}</li>
                     ))}
                   </ul>
+
+                  {/* Objašnjenje opsega iznimke */}
+                  <div className="p-2 rounded-lg bg-amber-100/70 dark:bg-amber-900/40 text-[11px] text-amber-950 dark:text-amber-200 border border-amber-300/60 dark:border-amber-800">
+                    <p className="font-semibold mb-0.5">Opseg operativne iznimke:</p>
+                    <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
+                      <li><strong>Što se može odobriti iznimkom:</strong> Angažman dodatne operativne ekipe iznad redovnog kapaciteta ili dopušten prolaz u zonu kopna uz dispečerski nadzor.</li>
+                      <li><strong>Što se NE MOŽE zaobići:</strong> Fizičko prekoračenje maksimalne nosivosti dizalice &gt; 10%, širina bazena dizalice te aktivne sigurnosne obustave rada.</li>
+                    </ul>
+                  </div>
+
                   {liveDiagnostics.infoNotes.length > 0 && (
                     <div className="pt-1 text-[11px] text-amber-800 dark:text-amber-300/80">
                       {liveDiagnostics.infoNotes.map((n, i) => (
@@ -1465,19 +1478,19 @@ export function ReservationScheduleModal({
                   className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
                 />
                 <span>
-                  Svjesno potvrđujem dispečerski override navedenih ograničenja
+                  Odobri iznimku uz dodatnu ekipu / posebne operativne uvjete
                 </span>
               </label>
 
               {overrideConfirmed && (
                 <div className="space-y-1.5 pt-0.5">
                   <Label className="text-xs font-bold text-amber-950 dark:text-amber-200">
-                    Obvezan razlog dispečerskog overridea *
+                    Razlog odobravanja iznimke *
                   </Label>
                   <Input
                     value={overrideReason}
                     onChange={(e) => setOverrideReason(e.target.value)}
-                    placeholder="Unesite razlog (npr. Preraspodjela osoblja na terenu)..."
+                    placeholder="Unesite razlog odobravanja iznimke (npr. Preraspodjela osoblja na terenu)..."
                     className="rounded-lg bg-white dark:bg-slate-900 border-amber-300 text-xs"
                   />
                   <div className="flex flex-wrap gap-1 pt-0.5">
@@ -1547,7 +1560,7 @@ export function ReservationScheduleModal({
                 {allSlots.filter((s: any) => s.teamCapacityWarning || s.canOverride).length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 p-2 bg-amber-50/70 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-900/50">
                     <span className="text-[11px] font-semibold text-amber-900 dark:text-amber-300 mr-1 flex items-center gap-1">
-                      ⚠️ Zauzeta 2 tima (uz override):
+                      ⚠️ Popunjene ekipe (uz iznimku):
                     </span>
                     {allSlots
                       .filter((s: any) => s.teamCapacityWarning || s.canOverride)
@@ -1677,8 +1690,8 @@ export function ReservationScheduleModal({
                 {isApprove && <Check className="h-4 w-4 mr-1.5" />}
                 {requiresConsciousOverride
                   ? isApprove
-                    ? "Odobri uz svjesni override"
-                    : "Spremi uz svjesni override"
+                    ? "Odobri uz iznimku"
+                    : "Spremi uz odobrenje iznimke"
                   : isApprove
                     ? "Odobri i zakaži"
                     : isEdit

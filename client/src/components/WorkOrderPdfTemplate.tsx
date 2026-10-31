@@ -272,7 +272,7 @@ export function WorkOrderPdf({ order }: WorkOrderPdfProps) {
                 </View>
 
                 {/* Stavke i obračun */}
-                <Text style={styles.sectionTitle}>Stavke i statutarni/financijski status</Text>
+                <Text style={styles.sectionTitle}>Usluge i obračun</Text>
                 <View style={styles.table}>
                     <View style={styles.tableHeader}>
                         <Text style={styles.col1}>OPIS USLUGE / OPERACIJE</Text>
@@ -286,7 +286,7 @@ export function WorkOrderPdf({ order }: WorkOrderPdfProps) {
                             <Text style={styles.col1}>Statutarno pravo korištenja dizalice (vađenje/spuštanje)</Text>
                             <Text style={styles.col2}>Godišnja kvota</Text>
                             <Text style={styles.col3}>STAT-QUOTA</Text>
-                            <Text style={[styles.col4, { color: "#059669" }]}>0,00 € (Članarina)</Text>
+                            <Text style={[styles.col4, { color: "#059669" }]}>0,00 € (Pokriveno članarinom)</Text>
                         </View>
                     ) : isMember ? (
                         <View style={styles.tableRow}>

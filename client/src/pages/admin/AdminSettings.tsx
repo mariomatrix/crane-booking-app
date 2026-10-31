@@ -110,7 +110,7 @@ export default function AdminSettings() {
                                     </Button>
                                 </div>
                                 <p className="text-xs text-muted-foreground">
-                                    Automatski tampon između rezervacija (priprema, moguća kašnjenja plovila).
+                                    Vrijeme za pripremu i razmak između rezervacija (prihvat plovila, moguća kašnjenja).
                                 </p>
                             </div>
                         </CardContent>

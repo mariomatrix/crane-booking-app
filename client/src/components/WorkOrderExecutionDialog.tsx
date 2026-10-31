@@ -68,7 +68,7 @@ export function WorkOrderExecutionDialog({
     // Mutation for updating notes on a completed or active work order
     const updateNotesMutation = trpc.workOrders.updateNotes.useMutation({
         onSuccess: () => {
-            toast.success("Napomena operatera je uspješno ažurirana!");
+            toast.success("Napomena operatera je ažurirana.");
             refetchOrder();
             utils.reservation.listDailyOperations.invalidate();
             utils.workOrders.list.invalidate();
@@ -222,7 +222,7 @@ export function WorkOrderExecutionDialog({
             if (res.alreadyRunning) {
                 toast.info("Radni nalog je već bio pokrenut.");
             } else {
-                toast.success(`Radni nalog ${res.workOrder.orderNumber} je uspješno pokrenut!`);
+                toast.success(`Radni nalog ${res.workOrder.orderNumber} je pokrenut.`);
             }
             utils.workOrders.getActiveByReservation.invalidate({ reservationId });
             utils.workOrders.list.invalidate();
@@ -235,7 +235,7 @@ export function WorkOrderExecutionDialog({
     // Mutation for completing an already active order
     const completeMutation = trpc.workOrders.complete.useMutation({
         onSuccess: () => {
-            toast.success("Radni nalog je uspješno završen i evidentiran!");
+            toast.success("Radni nalog je završen i evidentiran.");
             utils.workOrders.getActiveByReservation.invalidate({ reservationId });
             utils.workOrders.list.invalidate();
             utils.userCard.getCard.invalidate();
@@ -250,7 +250,7 @@ export function WorkOrderExecutionDialog({
     // Mutation for direct 1-step completion (retroactive entry)
     const completeDirectlyMutation = trpc.workOrders.completeDirectly.useMutation({
         onSuccess: (res: any) => {
-            toast.success(`Radni nalog ${res.workOrder.orderNumber} je uspješno evidentiran i zaključen!`);
+            toast.success(`Radni nalog ${res.workOrder.orderNumber} je evidentiran i zaključen.`);
             utils.workOrders.getActiveByReservation.invalidate({ reservationId });
             utils.workOrders.list.invalidate();
             utils.userCard.getCard.invalidate();

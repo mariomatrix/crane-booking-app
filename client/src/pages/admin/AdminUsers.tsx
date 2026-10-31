@@ -310,22 +310,22 @@ export default function AdminUsers() {
     const handleCreate = () => {
         if (newIsLegalEntity) {
             if (!newCompanyName.trim()) {
-                toast.error("Naziv pravne osobe / tvrtke je obavezan.");
+                toast.error("Naziv pravne osobe / tvrtke je obvezan.");
                 return;
             }
         } else {
             if (!newFirstName.trim()) {
-                toast.error("Ime korisnika je obavezno.");
+                toast.error("Ime korisnika je obvezno.");
                 return;
             }
             if (!newLastName.trim()) {
-                toast.error("Prezime korisnika je obavezno.");
+                toast.error("Prezime korisnika je obvezno.");
                 return;
             }
         }
 
         if (!newPhone.trim()) {
-            toast.error("Broj mobitela / telefona je obavezan.");
+            toast.error("Broj mobitela / telefona je obvezan.");
             return;
         }
 

@@ -35,6 +35,22 @@ function cleanup(store: Map<string, RateLimitEntry>, windowMs: number) {
     }
 }
 
+export function formatDurationHr(seconds: number): string {
+    if (seconds < 60) {
+        const mod10 = seconds % 10;
+        const mod100 = seconds % 100;
+        if (mod10 === 1 && mod100 !== 11) return `${seconds} sekundu`;
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${seconds} sekunde`;
+        return `${seconds} sekundi`;
+    }
+    const minutes = Math.ceil(seconds / 60);
+    const mod10 = minutes % 10;
+    const mod100 = minutes % 100;
+    if (mod10 === 1 && mod100 !== 11) return `${minutes} minutu`;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return `${minutes} minute`;
+    return `${minutes} minuta`;
+}
+
 export function createRateLimiter(options: {
     /** Max requests per window */
     maxRequests: number;
@@ -43,7 +59,7 @@ export function createRateLimiter(options: {
     /** Name for this limiter (used to separate stores) */
     name?: string;
     /** Custom message on 429 */
-    message?: string;
+    message?: string | ((retryAfterSec: number) => string);
     /** Custom key generator */
     keyGenerator?: (req: Request) => string;
 }) {
@@ -76,9 +92,15 @@ export function createRateLimiter(options: {
             const retryAfterSec = Math.ceil(retryAfterMs / 1000);
 
             res.set("Retry-After", String(retryAfterSec));
+            const formattedDuration = formatDurationHr(retryAfterSec);
+            const msg = typeof message === "function"
+                ? message(retryAfterSec)
+                : message
+                    ? message.replace("{preostaloVrijeme}", formattedDuration)
+                    : `Previše zahtjeva. Pokušajte ponovno za ${formattedDuration}.`;
             res.status(429).json({
                 error: "TOO_MANY_REQUESTS",
-                message: message || `Previše zahtjeva. Pokušajte ponovo za ${retryAfterSec} sekundi.`,
+                message: msg,
                 retryAfterSeconds: retryAfterSec,
             });
             return;

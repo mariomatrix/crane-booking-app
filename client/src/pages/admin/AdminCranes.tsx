@@ -110,7 +110,7 @@ export default function AdminCranes() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.maxCapacityKN) {
-      toast.error("Naziv i kapacitet su obavezni.");
+      toast.error("Naziv i nosivost su obvezni.");
       return;
     }
     if (editingId) {
@@ -188,7 +188,7 @@ export default function AdminCranes() {
                       )}
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <span className="font-semibold text-slate-700">Maks. kapacitet: {crane.maxCapacityKN} kN</span>
+                      <span className="font-semibold text-slate-700">Najveće dopušteno opterećenje: {crane.maxCapacityKN} kN</span>
                       {crane.maxPoolWidth && (
                         <span className="ml-2 pl-2 border-l">Širina bazena: {crane.maxPoolWidth} m</span>
                       )}

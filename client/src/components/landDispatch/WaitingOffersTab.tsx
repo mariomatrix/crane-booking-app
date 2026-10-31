@@ -63,7 +63,7 @@ export function WaitingOffersTab({
   // Let's create an offer mutation
   const createOfferMutation = trpc.landDispatch.createWaitingOffer.useMutation({
     onSuccess: () => {
-      toast.success("Ponuda termina je poslana sa zadržavanjem mjesta (24h)!");
+      toast.success("Ponuda termina je poslana sa zadržavanjem mjesta (24 h).");
       utils.landDispatch.getDailyOverview.invalidate();
       setOfferModalOpen(false);
     },

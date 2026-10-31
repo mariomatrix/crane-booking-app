@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
 import { hr } from "@/i18n/hr";
 import { en } from "@/i18n/en";
 import type { Translations } from "@/i18n/hr";
@@ -27,6 +27,12 @@ export function LangProvider({ children }: { children: ReactNode }) {
         setLangState(newLang);
         localStorage.setItem("lang", newLang);
     };
+
+    useEffect(() => {
+        if (typeof document !== "undefined") {
+            document.documentElement.lang = lang;
+        }
+    }, [lang]);
 
     const t: Translations = lang === "hr" ? hr : en;
 

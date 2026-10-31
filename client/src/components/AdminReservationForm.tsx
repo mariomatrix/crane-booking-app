@@ -290,8 +290,10 @@ export function AdminReservationForm({
                     `Termin ${scheduledTime} na dizalici ${selectedCrane?.name || ""} je zauzet (${selectedSlotObj.occupiedBy || "preklapanje termina"}).`
                 );
             } else if (selectedSlotObj.teamCapacityWarning || selectedSlotObj.canOverride) {
+                const busy = selectedSlotObj.busyCranesCount ?? 2;
+                const maxTeams = (slotData as any)?.maxConcurrentTeams ?? 2;
                 overrideReasons.push(
-                    `Kapacitet posade je popunjen: u terminu ${scheduledTime} već rade 2 dizalice (${selectedSlotObj.busyCranesNames?.join(" i ") || "2 aktivna tima"}).`
+                    `Zauzete ekipe: ${busy} od ${maxTeams} (operacije na: ${selectedSlotObj.busyCranesNames?.join(" i ") || "ostalim dizalicama"}). Odobrenje iznimke zahtijeva angažman dodatne ekipe.`
                 );
             }
         }
@@ -470,12 +472,12 @@ export function AdminReservationForm({
 
         if (isWaitlisted) {
             if (!userId || !serviceTypeId || !requestedDate || !craneId || !vesselType) {
-                toast.error("Molimo popunite sva obavezna polja (vlasnik, tip operacije, datum, dizalicu i tip plovila).");
+                toast.error("Molimo popunite sva obvezna polja (vlasnik, tip operacije, datum, dizalicu i tip plovila).");
                 return;
             }
         } else {
             if (!userId || !serviceTypeId || !requestedDate || !scheduledTime || !craneId || !durationMin || !vesselType) {
-                toast.error("Molimo popunite sva obavezna polja (uključujući datum, vrijeme, dizalicu i trajanje).");
+                toast.error("Molimo popunite sva obvezna polja (uključujući datum, vrijeme, dizalicu i trajanje).");
                 return;
             }
         }
@@ -488,11 +490,11 @@ export function AdminReservationForm({
             }
             if (liveDiagnostics.status === "override_required") {
                 if (!overrideTeamCapacity) {
-                    toast.error("Zahtijeva se svjesna potvrda dispečerskog overridea za detektirana ograničenja.");
+                    toast.error("Zahtijeva se potvrda odobrenja iznimke za detektirana ograničenja.");
                     return;
                 }
                 if (!overrideReason.trim()) {
-                    toast.error("Molimo unesite razlog za dispečerski override.");
+                    toast.error("Molimo unesite razlog odobravanja iznimke.");
                     return;
                 }
             }
@@ -550,7 +552,7 @@ export function AdminReservationForm({
                     });
                 },
                 onError: (err) => {
-                    toast.error("Greška pri kreiranju plovila: " + err.message);
+                    toast.error("Stvaranje plovila nije uspjelo: " + err.message);
                 }
             });
         } else {
@@ -1119,13 +1121,21 @@ export function AdminReservationForm({
                                     <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                                     <div className="text-xs text-amber-950 space-y-1 flex-1">
                                         <p className="font-bold">
-                                            Detektirana ograničenja / kolizije — zahtijeva svjesni dispečerski override:
+                                            Detektirana operativna ograničenja — zahtijeva odobrenje iznimke:
                                         </p>
                                         <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900 font-medium">
                                             {liveDiagnostics.overrideReasons.map((reason, idx) => (
                                                 <li key={idx}>{reason}</li>
                                             ))}
                                         </ul>
+
+                                        <div className="p-2 rounded bg-amber-100/80 text-[11px] text-amber-950 border border-amber-300/60 mt-1">
+                                            <p className="font-semibold mb-0.5">Opseg operativne iznimke:</p>
+                                            <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
+                                                <li><strong>Što se može odobriti iznimkom:</strong> Angažman dodatne operativne ekipe iznad redovnog kapaciteta ili dopušten prolaz u zonu kopna uz nadzor.</li>
+                                                <li><strong>Što se NE MOŽE zaobići:</strong> Fizičko prekoračenje maksimalne nosivosti dizalice &gt; 10%, širina bazena dizalice te aktivne sigurnosne obustave rada.</li>
+                                            </ul>
+                                        </div>
                                     </div>
                                 </div>
                                 <label className="flex items-center gap-2 text-xs font-bold text-amber-950 bg-amber-100/80 p-2 rounded border border-amber-300 cursor-pointer select-none">
@@ -1136,18 +1146,18 @@ export function AdminReservationForm({
                                         className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
                                     />
                                     <span>
-                                        Svjesno potvrđujem dispečerski override navedenih ograničenja
+                                        Odobri iznimku uz dodatnu ekipu / posebne operativne uvjete
                                     </span>
                                 </label>
                                 {overrideTeamCapacity && (
                                     <div className="space-y-1 pt-0.5">
                                         <Label className="text-xs font-bold text-amber-950">
-                                            Obvezan razlog dispečerskog overridea *
+                                            Razlog odobravanja iznimke *
                                         </Label>
                                         <Input
                                             value={overrideReason}
                                             onChange={(e) => setOverrideReason(e.target.value)}
-                                            placeholder="Unesite razlog (npr. Preraspodjela osoblja na terenu)..."
+                                            placeholder="Unesite razlog odobravanja iznimke (npr. Preraspodjela osoblja na terenu)..."
                                             className="h-8 text-xs bg-white border-amber-300"
                                         />
                                     </div>

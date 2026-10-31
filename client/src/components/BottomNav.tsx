@@ -12,7 +12,7 @@ export function BottomNav() {
     { icon: ClipboardList, label: t.nav.myReservations, path: "/my-reservations" },
     { icon: Plus, label: t.nav.newReservation, path: "/new-reservation", primary: true },
     { icon: Ship, label: t.nav.vessels, path: "/my-vessels" },
-    { icon: IdCard, label: lang === "hr" ? "Karton" : "Card", path: "/my-card" },
+    { icon: IdCard, label: lang === "hr" ? "Karton plovila" : "Service Card", path: "/my-card" },
   ];
 
   return (

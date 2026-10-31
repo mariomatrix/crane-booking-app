@@ -56,8 +56,8 @@ export async function sendReservationConfirmationSms(opts: {
         minute: "2-digit",
     });
     const msg = lang === "hr"
-        ? `MARINA: Rezervacija za ${opts.craneName} potvrđena. Dođite u ${opts.location} u ${time}.`
-        : `MARINA: Reservation for ${opts.craneName} confirmed. Come to ${opts.location} at ${time}.`;
+        ? `PŠD ŠPINUT: Rezervacija za ${opts.craneName} potvrđena. Dođite u ${opts.location} u ${time}.`
+        : `PŠD ŠPINUT: Your reservation for ${opts.craneName} is confirmed. Please arrive at ${opts.location} at ${time}.`;
     return sendSms(opts.phone, msg);
 }
 
@@ -81,7 +81,7 @@ export async function sendLandSpotAvailableSms(opts: {
 }) {
     const { lang = "hr" } = opts;
     const msg = lang === "hr"
-        ? `MARINA: Slobodno mjesto na kopnu u zoni ${opts.zoneName} je dostupno za Vase plovilo. Prijavite se u aplikaciju za detalje.`
-        : `MARINA: A dry berth slot in zone ${opts.zoneName} is available for your vessel. Log in to the application for details.`;
+        ? `PŠD ŠPINUT: Slobodno mjesto na kopnu u zoni ${opts.zoneName} je dostupno za vaše plovilo. Prijavite se u aplikaciju za potvrdu.`
+        : `PŠD ŠPINUT: A dry berth slot in zone ${opts.zoneName} is available for your vessel. Log in to the application for details.`;
     return sendSms(opts.phone, msg);
 }

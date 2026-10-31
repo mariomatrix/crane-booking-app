@@ -66,15 +66,15 @@ export function CreateUserDialog({ open, onOpenChange, onSuccess }: CreateUserDi
         e.preventDefault();
         const cleanEmail = email.trim();
         if (cleanEmail && !newEmailValid(cleanEmail)) {
-            toast.error("Unesite ispravnu email adresu.");
+            toast.error("Unesite ispravnu adresu e-pošte.");
             return;
         }
         if (!firstName.trim() || !lastName.trim()) {
-            toast.error("Ime i prezime su obavezni.");
+            toast.error("Ime i prezime su obvezni.");
             return;
         }
         if (!phone.trim()) {
-            toast.error("Broj mobitela / telefona je obavezan.");
+            toast.error("Broj mobitela / telefona je obvezan.");
             return;
         }
         const cleanOib = oib.trim();

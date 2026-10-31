@@ -4308,7 +4308,7 @@ export const appRouter = router({
                 freeCranes.length === 0
                   ? "Sve dizalice zauzete"
                   : occupiedCount >= maxTeams
-                    ? "Zauzeta 2 tima operatera"
+                    ? `Zauzete ekipe: ${occupiedCount} od ${maxTeams}`
                     : undefined,
             });
             if (isAvail) availableSlots.push(timeStr);
@@ -4358,8 +4358,8 @@ export const appRouter = router({
                   teamCapacityWarning: true,
                   busyCranesCount: teamCap.busyCranesCount,
                   busyCranesNames: teamCap.busyCranesNames,
-                  occupiedBy: `Zauzeta 2 tima (${busyList})`,
-                  reason: `Maksimalan kapacitet operatera (2 tima) popunjen. Dostupno uz ručni override.`,
+                  occupiedBy: `Zauzete ekipe: ${teamCap.busyCranesCount} od ${maxTeams} (${busyList})`,
+                  reason: `Kapacitet operativnih ekipa (${teamCap.busyCranesCount}/${maxTeams}) je popunjen. Dostupno uz odobrenje iznimke uz dodatnu ekipu.`,
                 });
               } else {
                 slots.push({
@@ -4412,6 +4412,7 @@ export const appRouter = router({
           isWorkingDay: true,
           seasonName: activeSeason?.name ?? "Retroaktivni unos",
           workingHours: { from: workStartStr, to: workEndStr },
+          maxConcurrentTeams: maxTeams,
           slots,
           availableSlots,
           otherCranesSummary,

@@ -90,7 +90,7 @@ export default function AdminSeasons() {
 
     const handleSave = () => {
         if (!name || !startDate || !endDate) {
-            toast.error("Molimo popunite sve obavezne podatke.");
+            toast.error("Molimo popunite sve obvezne podatke.");
             return;
         }
         if (editingId) {

@@ -14,7 +14,7 @@ export function AffinitySettingsTab() {
 
   const updateMutation = trpc.landDispatch.updateAffinity.useMutation({
     onSuccess: () => {
-      toast.success("Postavka afiniteta uspješno spremljena!");
+      toast.success("Postavka afiniteta je spremljena.");
       refetch();
     },
     onError: (err) => {
@@ -51,7 +51,7 @@ export function AffinitySettingsTab() {
         <CardContent className="pt-2">
           <div className="flex items-center justify-between max-w-sm p-3 rounded-xl bg-muted/30 border">
             <div>
-              <span className="text-xs font-bold text-foreground block">Maksimalno timova (posada):</span>
+              <span className="text-xs font-bold text-foreground block">Maksimalan broj istovremenih ekipa:</span>
               <span className="text-[11px] text-muted-foreground">Zadana vrijednost u sustavu = 2</span>
             </div>
             <Badge variant="outline" className="text-sm font-bold px-3 py-1 bg-background text-primary border-primary/30">

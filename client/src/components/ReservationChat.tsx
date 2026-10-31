@@ -124,6 +124,8 @@ export function ReservationChat({ reservationId, pollInterval = 30000 }: Reserva
                     />
                     <Button
                         size="icon"
+                        aria-label="Pošalji poruku"
+                        title="Pošalji poruku"
                         onClick={handleSend}
                         disabled={!body.trim() || sendMutation.isPending}
                         className="shrink-0 self-end"

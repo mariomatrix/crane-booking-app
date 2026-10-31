@@ -386,10 +386,10 @@ export default function MobileOperatorApp() {
                 setIncidentNote("");
                 fetchActiveIncidents();
             } else {
-                toast.error("Greška pri slanju prijave.");
+                toast.error("Slanje prijave nije uspjelo.");
             }
         } catch (e) {
-            toast.error("Greška pri mreži.");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         } finally {
             setIsSubmittingIncident(false);
         }
@@ -406,7 +406,7 @@ export default function MobileOperatorApp() {
                 fetchActiveIncidents();
             }
         } catch (e) {
-            toast.error("Greška pri rješavanju zastoja.");
+            toast.error("Rješavanje zastoja nije uspjelo.");
         }
     };
 
@@ -423,14 +423,14 @@ export default function MobileOperatorApp() {
                 body: JSON.stringify({ reason: noShowReason })
             });
             if (res.ok) {
-                toast.info(`Termin za ${noShowTask.vessel?.name || "plovilo"} je označen kao 'Nije došlo' (otkazan).`);
+                toast.info(`Rezervacija za ${noShowTask.vessel?.name || "plovilo"} je otkazana. Razlog: ${noShowReason}.`);
                 setNoShowTask(null);
                 fetchSchedule();
             } else {
-                toast.error("Greška pri otkazivanju termina.");
+                toast.error("Otkazivanje termina nije uspjelo.");
             }
         } catch (e) {
-            toast.error("Greška pri slanju zahtjeva.");
+            toast.error("Slanje zahtjeva nije uspjelo.");
         } finally {
             setIsSubmittingNoShow(false);
         }
@@ -456,7 +456,7 @@ export default function MobileOperatorApp() {
             setOperatorUser(data.user);
             toast.success(`Dobrodošli, ${data.user.name || data.user.email}`);
         } catch (e: any) {
-            toast.error("Greška pri mreži ili poslužitelju");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         } finally {
             setIsLoggingIn(false);
         }
@@ -487,13 +487,13 @@ export default function MobileOperatorApp() {
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success(`Status posla: ${newStatus === "in_progress" ? "Započeto (U tijeku)" : "Uspješno završeno"}`);
+                toast.success(`Status operacije: ${newStatus === "in_progress" ? "U tijeku" : "Završeno"}`);
                 fetchSchedule();
             } else {
-                toast.error(data.error || "Greška pri promjeni statusa");
+                toast.error(data.error || "Promjena statusa nije uspjela.");
             }
         } catch (e) {
-            toast.error("Mrežna greška");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         }
     };
 
@@ -529,14 +529,14 @@ export default function MobileOperatorApp() {
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success("Napomena operatera uspješno spremljena!");
+                toast.success("Napomena operatera je spremljena.");
                 setViewingTask(null);
                 fetchSchedule();
             } else {
-                toast.error(data.error || "Greška pri spremanju napomene");
+                toast.error(data.error || "Spremanje napomene nije uspjelo.");
             }
         } catch (e) {
-            toast.error("Mrežna greška");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         } finally {
             setIsSavingNotes(false);
         }
@@ -566,15 +566,15 @@ export default function MobileOperatorApp() {
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success("Operacija uspješno završena! Kalendar je ažuriran (plavo).");
+                toast.success("Operacija je završena. Status u kalendaru je ažuriran.");
                 setFinishingTask(null);
                 fetchSchedule();
                 fetchLandZones();
             } else {
-                toast.error(data.error || "Greška pri završetku operacije");
+                toast.error(data.error || "Završetak operacije nije uspio.");
             }
         } catch (e) {
-            toast.error("Mrežna greška");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         } finally {
             setIsSubmittingFinish(false);
         }
@@ -613,7 +613,7 @@ export default function MobileOperatorApp() {
                 toast.error(data.error || "Greška pri dodjeli zone");
             }
         } catch (e) {
-            toast.error("Mrežna greška");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         } finally {
             setIsSubmittingAssign(false);
         }
@@ -637,14 +637,14 @@ export default function MobileOperatorApp() {
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success("Poruka i obavijest poslane vlasniku!");
+                toast.success("Poruka je spremljena u razgovor.");
                 setMessageText("");
                 fetchTaskMessages(messagingTask.id);
             } else {
                 toast.error(data.error || "Greška pri slanju poruke");
             }
         } catch (e) {
-            toast.error("Mrežna greška");
+            toast.error("Nije moguće povezati se s uslugom. Provjerite vezu i pokušajte ponovno.");
         } finally {
             setIsSendingMessage(false);
         }
@@ -723,7 +723,7 @@ export default function MobileOperatorApp() {
                     <div className="inline-flex items-center justify-center p-4 bg-indigo-600/20 text-indigo-400 rounded-3xl mb-2 border border-indigo-500/30">
                         <Anchor className="h-10 w-10" />
                     </div>
-                    <h1 className="text-2xl font-black tracking-tight text-white">Operater Dizalica</h1>
+                    <h1 className="text-2xl font-black tracking-tight text-white">Operater dizalice</h1>
                     <p className="text-xs text-slate-400">Lučica Spinut • Mobilni pristup</p>
                 </div>
 
@@ -1093,7 +1093,7 @@ export default function MobileOperatorApp() {
                                                         title="Zabilježi da korisnik nije došao"
                                                     >
                                                         <XCircle className="h-3.5 w-3.5" />
-                                                        <span className="hidden sm:inline">Nije došlo</span>
+                                                        <span className="hidden sm:inline">Otkaži termin</span>
                                                     </button>
                                                 )}
                                                 <button
@@ -1805,7 +1805,7 @@ export default function MobileOperatorApp() {
                         <div className="flex items-center justify-between border-b pb-3">
                             <h3 className="font-bold text-base text-rose-900 flex items-center gap-2">
                                 <XCircle className="h-5 w-5 text-rose-600" />
-                                Potvrda izostanka (Nije došlo)
+                                Otkaži termin na terenu (izostanak / odustajanje)
                             </h3>
                             <button onClick={() => setNoShowTask(null)} className="text-slate-400 hover:text-slate-600 font-bold text-base px-2">✕</button>
                         </div>

@@ -31,24 +31,21 @@ class ErrorBoundary extends Component<Props, State> {
               className="text-destructive mb-6 flex-shrink-0"
             />
 
-            <h2 className="text-xl mb-4">An unexpected error occurred.</h2>
-
-            <div className="p-4 w-full rounded bg-muted overflow-auto mb-6">
-              <pre className="text-sm text-muted-foreground whitespace-break-spaces">
-                {this.state.error?.stack}
-              </pre>
-            </div>
+            <h2 className="text-xl font-bold mb-2">Došlo je do neočekivane pogreške</h2>
+            <p className="text-sm text-muted-foreground mb-6 text-center">
+              Pokušajte ponovno učitati stranicu. Ako se problem nastavi, obratite se osoblju lučice.
+            </p>
 
             <button
               onClick={() => window.location.reload()}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-lg",
                 "bg-primary text-primary-foreground",
-                "hover:opacity-90 cursor-pointer"
+                "hover:opacity-90 cursor-pointer font-medium"
               )}
             >
               <RotateCcw size={16} />
-              Reload Page
+              Ponovno učitaj stranicu
             </button>
           </div>
         </div>

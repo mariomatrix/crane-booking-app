@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { trpc } from "@/lib/trpc";
-import { ArrowLeft, CalendarDays, CalendarPlus, Copy, ExternalLink, Loader2, Plus, X, Anchor, Clock, MessageSquare, Check, Circle, Rss } from "lucide-react";
+import { ArrowLeft, CalendarDays, CalendarPlus, Copy, ExternalLink, Loader2, Plus, X, Anchor, Clock, MessageSquare, Check, Circle, Rss, AlertCircle, HelpCircle } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
@@ -83,8 +83,35 @@ export default function MyReservations() {
       );
     }
 
-    const currentStepIndex = steps.findIndex(s => s.id === status);
-    const activeIndex = status === "completed" ? 2 : status === "approved" ? 1 : 0;
+    if (status === "waitlisted") {
+      return (
+        <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-md px-2.5 py-1.5 mt-3">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+          <span>{isHr ? "Zahtjev je na listi čekanja (čeka se slobodan vez na kopnu ili termin)" : "Request is waitlisted (awaiting available dry dock or slot)"}</span>
+        </div>
+      );
+    }
+
+    if (status === "not_performed") {
+      return (
+        <div className="flex items-center gap-2 text-xs font-medium text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-md px-2.5 py-1.5 mt-3">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-rose-600" />
+          <span>{isHr ? "Operacija nije izvedena u zakazanom terminu" : "Operation was not performed as scheduled"}</span>
+        </div>
+      );
+    }
+
+    const isSequential = ["pending", "approved", "in_progress", "completed"].includes(status);
+    if (!isSequential) {
+      return (
+        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground bg-muted/40 border rounded-md px-2.5 py-1.5 mt-3">
+          <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>{isHr ? `Status operacije: ${status}` : `Operation status: ${status}`}</span>
+        </div>
+      );
+    }
+
+    const activeIndex = status === "completed" ? 2 : (status === "approved" || status === "in_progress") ? 1 : 0;
 
     return (
       <div className="flex items-center w-full max-w-xs mt-4 mb-2">

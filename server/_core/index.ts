@@ -69,7 +69,7 @@ async function startServer() {
     name: "forgotPassword",
     maxRequests: 3,
     windowMs: 900_000, // 3 req / 15 min
-    message: "Previše zahtjeva za reset lozinke. Pokušajte ponovo za minutu.",
+    message: "Poslali ste previše zahtjeva za promjenu lozinke. Pokušajte ponovno za {preostaloVrijeme}.",
   });
 
   // Apply rate limiters to specific tRPC procedure paths

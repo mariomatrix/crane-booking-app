@@ -9,7 +9,7 @@ export default function PrivacyPolicy() {
     return (
         <div className="container max-w-4xl mx-auto py-12 px-4">
             <h1 className="text-3xl font-bold mb-8">
-                {isHr ? "Politika Privatnosti" : "Privacy Policy"}
+                {isHr ? "Politika privatnosti" : "Privacy Policy"}
             </h1>
 
             <div className="space-y-8">
@@ -20,8 +20,8 @@ export default function PrivacyPolicy() {
                     <CardContent className="space-y-4">
                         <p className="text-muted-foreground">
                             {isHr
-                                ? "Marina app prikuplja samo podatke nužne za operativno izvršavanje usluge (rezervacije dizalice), što uključuje vaše ime, email adresu te kontakt broj, kao i specifikacije vaših registriranih plovila."
-                                : "The Marina app collects only the data necessary for the operational execution of the service (crane reservations), which includes your name, email address, contact number, and the specifications of your registered vessels."}
+                                ? "Sustav za rezervacije dizalica PŠD Špinut prikuplja samo podatke nužne za operativno izvršavanje usluge (rezervacije dizalice), što uključuje vaše ime, adresu e-pošte te kontakt broj, kao i specifikacije vaših registriranih plovila."
+                                : "The PŠD Špinut crane booking system collects only data necessary for the operational execution of services (crane reservations), including your name, email address, contact number, and specifications of your registered vessels."}
                         </p>
                     </CardContent>
                 </Card>

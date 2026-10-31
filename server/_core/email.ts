@@ -221,7 +221,7 @@ export async function sendPasswordResetEmail(opts: {
             : "We received a request to reset your password. If you didn't make this request, you can safely ignore this email."
         }</p>
     <p>${isHr
-            ? `Za postavljanje nove lozinke, kliknite na gumb ispod:`
+            ? `Za postavljanje nove lozinke odaberite gumb u nastavku:`
             : `To set a new password, click the button below:`
         }</p>
     <div style="margin:24px 0">
@@ -357,13 +357,13 @@ export async function sendNewMessageNotification(opts: {
     const { lang = "hr" } = opts;
     const isHr = lang === "hr";
     const subject = isHr
-        ? `Nova poruka u vezi rezervacije — Marina Crane Booking`
-        : `New message regarding reservation — Marina Crane Booking`;
+        ? `Nova poruka o rezervaciji — PŠD Špinut`
+        : `New message regarding reservation — PŠD Špinut`;
 
     const content = `
         <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
         <p>${isHr
-            ? `Imate novu poruku od osoblja marine u vezi vaše rezervacije <strong>${opts.reservationNumber}</strong>.`
+            ? `Imate novu poruku osoblja lučice o rezervaciji <strong>${opts.reservationNumber}</strong>.`
             : `You have a new message from the marina staff regarding your reservation <strong>${opts.reservationNumber}</strong>.`
         }</p>
         <blockquote style="border-left:3px solid #2563eb;padding:8px 16px;margin:16px 0;color:#374151;background-color:#f9fafb;">${opts.messageBody}</blockquote>
@@ -386,12 +386,12 @@ export async function sendLandSpotAvailable(opts: {
     const content = `
     <h2>${isHr ? "Pozdrav" : "Hello"}, ${opts.userName}!</h2>
     <p>${isHr
-            ? `Slobodno mjesto na kopnu u zoni <strong>${opts.zoneName}</strong> je sada dostupno za Vaše plovilo.`
+            ? `U zoni <strong>${opts.zoneName}</strong> dostupno je mjesto na kopnu za vaše plovilo.`
             : `A dry berth slot in zone <strong>${opts.zoneName}</strong> is now available for your vessel.`
         }</p>
     <p>${isHr 
-            ? "Molimo kontaktirajte lučku kapetaniju ili posjetite aplikaciju kako biste potvrdili prihvaćanje." 
-            : "Please contact the harbor master or visit the application to confirm acceptance."
+            ? "Za potvrdu ponude javite se osoblju lučice ili otvorite ponudu u aplikaciji." 
+            : "Contact the marina team or open the offer in the app to confirm."
         }</p>
   `;
     return sendEmail({ to: opts.to, subject, html: getHtmlWrapper(content) });

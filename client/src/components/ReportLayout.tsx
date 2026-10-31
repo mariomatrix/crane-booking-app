@@ -97,7 +97,7 @@ export function ExportActions({ excelData, excelFileName, pdfDocument, pdfFileNa
             XLSX.writeFile(workbook, `${excelFileName}_${format(new Date(), "yyyy-MM-dd")}.xlsx`);
             toast.success("Excel tablica je uspješno preuzeta.");
         } catch (error: any) {
-            toast.error("Greška pri izvozu u Excel: " + error.message);
+            toast.error("Izvoz u Excel nije uspio: " + error.message);
         }
     };
 

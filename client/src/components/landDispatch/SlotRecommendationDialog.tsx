@@ -79,7 +79,7 @@ export function SlotRecommendationDialog({
 
   const assignMutation = trpc.landDispatch.assignReservation.useMutation({
     onSuccess: () => {
-      toast.success("Zahtjev je uspješno raspoređen i potvrđen!");
+      toast.success("Zahtjev je raspoređen i potvrđen.");
       utils.landDispatch.getDailyOverview.invalidate();
       utils.reservation.listAll.invalidate();
       utils.reservation.listDailyOperations.invalidate();

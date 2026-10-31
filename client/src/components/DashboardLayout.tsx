@@ -261,7 +261,7 @@ function DashboardLayoutContent({
               <button
                 onClick={toggleSidebar}
                 className="h-8 w-8 flex items-center justify-center hover:bg-accent rounded-lg transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring shrink-0"
-                aria-label="Toggle navigation"
+                aria-label={lang === "hr" ? "Prikaži ili sakrij navigaciju" : "Toggle navigation"}
               >
                 <PanelLeft className="h-4 w-4 text-muted-foreground" />
               </button>
@@ -460,7 +460,7 @@ function DashboardLayoutContent({
               <div className="flex items-center gap-3">
                 <div className="flex flex-col gap-1">
                   <span className="tracking-tight text-foreground">
-                    {activeMenuItem?.label ?? "Admin"}
+                    {activeMenuItem?.label ?? (lang === "hr" ? "Administracija" : "Admin")}
                   </span>
                 </div>
               </div>

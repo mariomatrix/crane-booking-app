@@ -40,7 +40,7 @@ type AuthMode =
   | "claimMember";
 
 export default function AuthPage() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [, setLocation] = useLocation();
   const [mode, setMode] = useState<AuthMode>("login");
   const [claimTab, setClaimTab] = useState<"member" | "commercial">("member");
@@ -144,7 +144,11 @@ export default function AuthPage() {
 
   const forgotPasswordMutation = trpc.auth.forgotPassword.useMutation({
     onSuccess: () => {
-      toast.success("Link za resetiranje je poslan na vaš email.");
+      toast.success(
+        lang === "hr"
+          ? "Ako postoji račun s tom adresom e-pošte, poslat ćemo upute za postavljanje nove lozinke."
+          : "If an account exists for that email address, we’ll send instructions to reset your password."
+      );
       setMode("login");
     },
     onError: (err) => toast.error(err.message),
@@ -161,7 +165,11 @@ export default function AuthPage() {
 
   const sendOtpMutation = trpc.auth.sendEmailOtp.useMutation({
     onSuccess: () => {
-      toast.success("6-znamenkasti kod za prijavu je poslan na vaš email.");
+      toast.success(
+        lang === "hr"
+          ? "Jednokratni kod za prijavu je generiran i predan na slanje na vašu adresu e-pošte."
+          : "One-time login code has been generated and sent to your email address."
+      );
       setMode("otpVerify");
     },
     onError: (err) => toast.error(err.message),

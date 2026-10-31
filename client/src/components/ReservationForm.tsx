@@ -156,12 +156,12 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
         onSuccess: () => {
             toast.success(
                 lang === "hr"
-                    ? "Uspješno ste se prijavili na listu čekanja za suhi vez!"
-                    : "Successfully added to the dry berth waitlist!"
+                    ? "Prijavljeni ste na listu čekanja za suhi vez."
+                    : "You have joined the dry berth waitlist."
             );
             onSuccess?.();
         },
-        onError: (error: any) => toast.error(error.message || "Greška pri prijavi na listu čekanja."),
+        onError: (error: any) => toast.error(error.message || "Prijava na listu čekanja nije uspjela."),
     });
 
     // ── Handlers ─────────────────────────────────────────────────────────
@@ -564,15 +564,15 @@ export function ReservationForm({ onSuccess, onCancel, initialData }: Reservatio
 
                         <div className="grid grid-cols-3 gap-2">
                             <div className="space-y-1">
-                                <Label className="text-xs">{t.form.vesselLength} (m)</Label>
+                                <Label className="text-xs">{t.form.vesselLength}</Label>
                                 <Input type="number" step="0.1" value={vesselLength} onChange={(e) => setVesselLength(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-xs">{t.form.vesselWidth} (m)</Label>
+                                <Label className="text-xs">{t.form.vesselWidth}</Label>
                                 <Input type="number" step="0.1" value={vesselWidth} onChange={(e) => setVesselWidth(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
                             </div>
                             <div className="space-y-1">
-                                <Label className="text-xs">{t.form.vesselWeight} (t)</Label>
+                                <Label className="text-xs">{t.form.vesselWeight}</Label>
                                 <Input type="number" step="0.1" value={vesselWeight} onChange={(e) => setVesselWeight(e.target.value)} disabled={!!vesselId && vesselId !== "new"} />
                             </div>
                         </div>

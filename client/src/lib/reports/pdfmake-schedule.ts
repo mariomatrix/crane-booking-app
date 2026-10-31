@@ -95,8 +95,8 @@ export function exportSchedulePdf(options: GeneratePdfOptions) {
                 body: [
                     [
                         { text: `Ukupno operacija: ${totalOps}`, bold: true, fontSize: 9, color: "#0369a1", alignment: "center" },
-                        { text: `Održavanje / Blokade: ${totalMaint}`, bold: true, fontSize: 9, color: "#b45309", alignment: "center" },
-                        { text: `Planirano sati: ${totalHours} h`, bold: true, fontSize: 9, color: "#047857", alignment: "center" },
+                        { text: `Održavanje i blokirani termini: ${totalMaint}`, bold: true, fontSize: 9, color: "#b45309", alignment: "center" },
+                        { text: `Planirano trajanje: ${totalHours} h`, bold: true, fontSize: 9, color: "#047857", alignment: "center" },
                     ]
                 ]
             },

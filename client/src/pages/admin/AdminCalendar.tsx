@@ -44,9 +44,11 @@ import { DatePicker } from "@/components/ui/date-picker";
 
 const STATUS_COLORS: Record<string, string> = {
     pending: "#f59e0b",     // Amber (Žuta - Na čekanju)
+    waitlisted: "#d97706",  // Amber 600 (Lista čekanja)
     approved: "#059669",    // Emerald 600 (Zelena - Odobreno)
     in_progress: "#8b5cf6", // Violet 500 (Ljubičasta - U tijeku)
     completed: "#2563eb",   // Blue 600 (Plava - Izvršeno / Završeno)
+    not_performed: "#f43f5e", // Rose 500 (Nije izvedeno)
     rejected: "#dc2626",    // Red 600 (Crvena - Odbijeno)
     cancelled: "#64748b",   // Slate 500 (Siva - Otkazano)
 };
@@ -55,9 +57,11 @@ const CRANE_COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899"];
 
 const STATUS_LABELS: Record<string, string> = {
     pending: "Na čekanju",
+    waitlisted: "Lista čekanja",
     approved: "Odobreno",
     in_progress: "U tijeku",
     completed: "Završeno",
+    not_performed: "Nije izvedeno",
     rejected: "Odbijeno",
     cancelled: "Otkazano",
 };
@@ -1148,7 +1152,7 @@ export default function AdminCalendar() {
                                                     className="h-8 shrink-0"
                                                     onClick={() => {
                                                         navigator.clipboard.writeText(`${window.location.origin}${subscriptionLinks.operatorAllCranesFeedPath}`);
-                                                        toast.success("URL za sve dizalice kopiran u međuspremnik!");
+                                                        toast.success("Poveznica kalendara za sve dizalice kopirana je u međuspremnik.");
                                                     }}
                                                 >
                                                     <Copy className="h-3.5 w-3.5 mr-1" />
@@ -1192,7 +1196,7 @@ export default function AdminCalendar() {
                                                             className="h-8 shrink-0"
                                                             onClick={() => {
                                                                 navigator.clipboard.writeText(`${window.location.origin}${cf.feedPath}`);
-                                                                toast.success(`URL za ${cf.craneName} kopiran!`);
+                                                                toast.success(`Poveznica za ${cf.craneName} kopirana je u međuspremnik.`);
                                                             }}
                                                         >
                                                             <Copy className="h-3.5 w-3.5 mr-1" />
@@ -1272,7 +1276,7 @@ export default function AdminCalendar() {
                         >
                             Svi
                         </Button>
-                        {["pending", "approved", "in_progress", "completed", "rejected", "cancelled"].map(s => (
+                        {["pending", "waitlisted", "approved", "in_progress", "completed", "not_performed", "rejected", "cancelled"].map(s => (
                             <Button
                                 key={s}
                                 variant={statusFilters.includes(s) ? "secondary" : "ghost"}

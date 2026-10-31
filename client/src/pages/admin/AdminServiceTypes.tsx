@@ -121,7 +121,7 @@ export default function AdminServiceTypes() {
     };
 
     const handleSubmit = () => {
-        if (!form.name.trim()) { toast.error("Naziv je obavezan."); return; }
+        if (!form.name.trim()) { toast.error("Naziv je obvezan."); return; }
         if (editingId) {
             updateMutation.mutate({ id: editingId, ...form });
         } else {

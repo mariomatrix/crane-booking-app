@@ -165,7 +165,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
   // Batch conclude mutation
   const batchConcludeMutation = trpc.landDispatch.batchConcludeDay.useMutation({
     onSuccess: (data) => {
-      toast.success(`Uspješno zaključeno ${data.concludedCount} operacija!`);
+      toast.success(`Zaključeno je ${data.concludedCount} operacija.`);
       utils.landDispatch.getDailyOverview.invalidate();
     },
     onError: (err) => {
@@ -951,7 +951,7 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
           <AdminReservationForm
             onSuccess={() => {
               setCreateResOpen(false);
-              toast.success("Rezervacija je uspješno kreirana!");
+              toast.success("Rezervacija je kreirana.");
               utils.landDispatch.getDailyOverview.invalidate();
               utils.reservation.listAll.invalidate();
               utils.calendar.events.invalidate();

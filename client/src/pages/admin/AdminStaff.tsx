@@ -113,7 +113,7 @@ export default function AdminStaff() {
             utils.user.list.invalidate();
         },
         onError: (err) => {
-            toast.error(err.message || "Greška pri promjeni role.");
+            toast.error(err.message || "Nije moguće promijeniti ulogu korisnika.");
         },
     });
 
@@ -468,13 +468,13 @@ export default function AdminStaff() {
                             type="password"
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
-                            placeholder="Minimalno 6 znakova"
+                            placeholder="Najmanje 8 znakova"
                         />
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setResetUser(null)}>{t.admin.cancel}</Button>
                         <Button
-                            disabled={!newPassword || newPassword.length < 6 || adminResetPassword.isPending}
+                            disabled={!newPassword || newPassword.length < 8 || adminResetPassword.isPending}
                             onClick={() => adminResetPassword.mutate({ id: resetUser.id, password: newPassword })}
                         >
                             {adminResetPassword.isPending ? t.admin.saving : "Spremi lozinku"}

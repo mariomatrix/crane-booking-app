@@ -461,7 +461,7 @@ export function DispatchGanttTimeline({
                                 {opInSlot.teamOverride && (
                                   <span
                                     className="bg-amber-300 text-amber-950 px-1 rounded font-bold"
-                                    title="Ručni override posade"
+                                    title="Odobrena iznimka za ekipu"
                                   >
                                     ★ Ovrd
                                   </span>

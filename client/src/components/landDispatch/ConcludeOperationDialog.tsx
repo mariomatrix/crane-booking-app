@@ -58,7 +58,7 @@ export function ConcludeOperationDialog({
     onSuccess: () => {
       toast.success(
         status === "completed"
-          ? "Operacija i radni nalog su uspješno zaključeni!"
+          ? "Operacija i radni nalog su zaključeni."
           : "Operacija je označena kao neizvedena."
       );
       utils.landDispatch.getDailyOverview.invalidate();

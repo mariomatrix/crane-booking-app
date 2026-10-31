@@ -103,7 +103,7 @@ router.get("/schedule/today", requireMobileAuth, async (req: AuthenticatedReques
     const user = req.operatorUser!;
     const dateParam = (req.query.date as string) || new Date().toISOString().split("T")[0];
     const db = await getDb();
-    if (!db) return res.status(500).json({ error: "DB unavailable" });
+    if (!db) return res.status(500).json({ error: "Baza podataka trenutačno nije dostupna. Pokušajte ponovno." });
 
     const assignedCraneIds = await getOperatorCranes(user.id);
 
@@ -481,7 +481,7 @@ router.post("/messages/send", requireMobileAuth, async (req: AuthenticatedReques
     const user = req.operatorUser!;
     const { reservationId, content } = req.body;
     if (!reservationId || !content || !content.trim()) {
-        return res.status(400).json({ error: "reservationId and content are required" });
+        return res.status(400).json({ error: "Odaberite rezervaciju i unesite sadržaj poruke." });
     }
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "DB unavailable" });
@@ -509,7 +509,7 @@ router.post("/messages/send", requireMobileAuth, async (req: AuthenticatedReques
     }
 
     if (owner?.phone) {
-        const smsText = `MARINA SPINUT (Nalog ${resRow.reservationNumber || ""}): ${content.trim()}`;
+        const smsText = `PŠD ŠPINUT (Rezervacija ${resRow.reservationNumber || ""}): ${content.trim()}`;
         sendSms(owner.phone, smsText).catch(err => console.warn("[Mobile API SMS] Failed:", err?.message || err));
     }
 

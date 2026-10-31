@@ -92,8 +92,8 @@ export default function AdminLandHub() {
             </h1>
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {isHr
-                ? "Središnji dnevni operativni centar dizalica, zone suhog veza (SZ, A1-A3, ZO, LB), operativni raspored i lista čekanja"
-                : "Central daily crane dispatch board, dry berth zones (SZ, A1-A3, ZO, LB), operational schedule and waitlist"}
+                ? "Raspored dizalica, mjesta na kopnu i lista čekanja"
+                : "Crane schedule, dry berth spots, and waitlist"}
             </p>
           </div>
         </div>

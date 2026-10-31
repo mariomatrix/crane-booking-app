@@ -138,7 +138,7 @@ export default function AdminUserCard() {
 
     const handleSaveVessel = () => {
         if (!vesselForm.name.trim()) {
-            toast.error("Naziv plovila je obavezan.");
+            toast.error("Naziv plovila je obvezan.");
             return;
         }
 
