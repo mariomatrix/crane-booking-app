@@ -988,8 +988,8 @@ export class LandDispatchService {
     const db = await getDb();
     if (!db) throw new Error("Database unavailable");
 
-    const dayStartIso = `${dateStr}T00:00:00.000Z`;
-    const dayEndIso = `${dateStr}T23:59:59.999Z`;
+    const dayStart = fromZagreb(dateStr, "00:00");
+    const dayEnd = fromZagreb(dateStr, "23:59:59");
 
     const approvedOps = await db
       .select({ id: reservations.id })
@@ -997,8 +997,8 @@ export class LandDispatchService {
       .where(
         and(
           eq(reservations.status, "approved"),
-          sql`${reservations.scheduledStart} >= ${dayStartIso}`,
-          sql`${reservations.scheduledStart} <= ${dayEndIso}`
+          sql`${reservations.scheduledStart} >= ${dayStart.toISOString()}`,
+          sql`${reservations.scheduledStart} <= ${dayEnd.toISOString()}`
         )
       );
 

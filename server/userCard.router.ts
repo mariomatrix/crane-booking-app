@@ -2,8 +2,9 @@ import { router, publicProcedure, operatorProcedure, adminProcedure } from "./_c
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { getDb } from "./db";
-import { users, vessels, memberStatutoryRights, userCardEntries, workOrders } from "../drizzle/schema";
+import { users, vessels, userCardEntries, workOrders } from "../drizzle/schema";
 import { eq, desc } from "drizzle-orm";
+import { ensureMemberStatutoryRights } from "./services/statutoryQuotaService";
 
 export const userCardRouter = router({
     // ─── Get User Card (Za admina / operatera ili vlastiti karton) ───────
@@ -23,26 +24,12 @@ export const userCardRouter = router({
 
             const userVessels = await db.select().from(vessels).where(eq(vessels.ownerId, user.id));
 
-            // Fetch or create statutory rights only for members
+            // Fetch, initialize, or rollover statutory rights only for members
             const isMember = (user.clientCategory || "member") === "member";
             const currentYear = new Date().getFullYear();
-            let [rights] = isMember
-                ? await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, user.id)).limit(1)
-                : [null];
-
-            if (!rights && isMember) {
-                const expiresAt = `${currentYear + 1}-12-31`;
-                [rights] = await db.insert(memberStatutoryRights).values({
-                    userId: user.id,
-                    liftAvailable: true,
-                    liftAcquiredYear: currentYear,
-                    liftExpiresAt: expiresAt,
-                    lowerAvailable: true,
-                    lowerAcquiredYear: currentYear,
-                    lowerExpiresAt: expiresAt,
-                    pendingFeeAdjustmentsCount: 0,
-                }).returning();
-            }
+            const rights = isMember
+                ? await ensureMemberStatutoryRights(db, user.id, currentYear)
+                : null;
 
             // Fetch all entries in user card
             const entries = await db
@@ -80,7 +67,7 @@ export const userCardRouter = router({
                     userStatus: user.userStatus,
                     createdAt: user.createdAt,
                 },
-                rights: isMember ? (rights || null) : null,
+                rights,
                 vessels: userVessels,
                 entries,
             };

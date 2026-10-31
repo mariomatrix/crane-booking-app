@@ -26,6 +26,14 @@ import {
   operationDependencies,
 } from "../../drizzle/schema";
 import { generateWorkOrderNumber } from "./numberingService";
+import {
+  ensureMemberStatutoryRights,
+  evaluateQuotaOperationType,
+  determineMemberFeeAdjustmentItem,
+  calculateCommercialPricing,
+} from "./statutoryQuotaService";
+
+export { ensureMemberStatutoryRights };
 
 export interface StartWorkOrderParams {
   reservationId: string;
@@ -66,58 +74,28 @@ async function evaluateWorkOrderFinancials(
   res: any,
   user: any,
   vessel: any,
-  currentYear: number
+  currentYear: number,
+  craneId?: string | null
 ) {
   const isMember = (user.clientCategory || "member") === "member";
   const clientType: "member" | "external" = isMember ? "member" : "external";
 
-  let quotaOperationType: "lift" | "lower" | "none" = "none";
-  let opCategory: string | null = null;
-  let isTruckDelivery = false;
-
-  if (res.serviceTypeId) {
-    const [st] = await db
-      .select()
-      .from(serviceTypes)
-      .where(eq(serviceTypes.id, res.serviceTypeId))
-      .limit(1);
-    opCategory = st?.operationCategory || null;
-    isTruckDelivery = !!st?.name?.toLowerCase().includes("kamion");
-    if (isTruckDelivery) quotaOperationType = "none";
-    else if (st?.operationCategory === "lift_from_sea") quotaOperationType = "lift";
-    else if (st?.operationCategory === "lower_to_sea") quotaOperationType = "lower";
-  }
+  const { quotaOperationType, opCategory, isTruckDelivery } = await evaluateQuotaOperationType(
+    db,
+    res.serviceTypeId,
+    res.liftPurpose
+  );
 
   let isStatutoryCovered = false;
   let chargeItemCode: string | null = null;
   let chargeItemName: string | null = null;
   let commercialPricePerMeter: string | null = null;
   let commercialTotal: string | null = null;
-  const vesselLengthM = res.vesselLengthM || (vessel?.lengthM ? String(vessel.lengthM) : "8.00");
+  const rawVesselLengthM = res.vesselLengthM || (vessel?.lengthM ? String(vessel.lengthM) : "8.00");
+  let vesselLengthM = String(rawVesselLengthM);
 
   if (isMember) {
-    let [rights] = await db
-      .select()
-      .from(memberStatutoryRights)
-      .where(eq(memberStatutoryRights.userId, user.id))
-      .limit(1);
-
-    if (!rights) {
-      const expiresAt = `${currentYear + 1}-12-31`;
-      [rights] = await db
-        .insert(memberStatutoryRights)
-        .values({
-          userId: user.id,
-          liftAvailable: true,
-          liftAcquiredYear: currentYear,
-          liftExpiresAt: expiresAt,
-          lowerAvailable: true,
-          lowerAcquiredYear: currentYear,
-          lowerExpiresAt: expiresAt,
-          pendingFeeAdjustmentsCount: 0,
-        })
-        .returning();
-    }
+    const rights = await ensureMemberStatutoryRights(db, user.id, currentYear);
 
     if (quotaOperationType === "lift" && rights.liftAvailable) {
       isStatutoryCovered = true;
@@ -125,23 +103,17 @@ async function evaluateWorkOrderFinancials(
       isStatutoryCovered = true;
     } else {
       isStatutoryCovered = false;
-      chargeItemCode = "USL-D9T";
-      chargeItemName = "Korištenje dizalice 9T (Doplata članarine)";
+      const feeItem = await determineMemberFeeAdjustmentItem(db, craneId || res.craneId);
+      chargeItemCode = feeItem.code;
+      chargeItemName = feeItem.name;
     }
   } else {
-    const [priceItem] = await db
-      .select()
-      .from(priceListItems)
-      .where(and(eq(priceListItems.code, "USL-VANJSKI-M"), eq(priceListItems.isActive, true)))
-      .limit(1);
-
-    const ratePerMeter = priceItem?.pricePerMeterEur ? Number(priceItem.pricePerMeterEur) : 12.0;
-    const length = Number(vesselLengthM) || 8.0;
-    const baseAmount = length * ratePerMeter;
-    const totalWithVat = baseAmount * 1.25;
-
-    commercialPricePerMeter = ratePerMeter.toFixed(2);
-    commercialTotal = totalWithVat.toFixed(2);
+    const comm = await calculateCommercialPricing(db, rawVesselLengthM);
+    commercialPricePerMeter = comm.ratePerMeter;
+    commercialTotal = comm.totalWithVat;
+    vesselLengthM = comm.vesselLengthM;
+    chargeItemCode = comm.chargeItemCode;
+    chargeItemName = comm.chargeItemName;
     isStatutoryCovered = false;
   }
 
@@ -254,7 +226,7 @@ export async function startReservationWorkOrder(params: StartWorkOrderParams) {
   const currentYear = new Date().getFullYear();
   const orderNumber = await generateWorkOrderNumber(db, currentYear);
 
-  const fin = await evaluateWorkOrderFinancials(db, res, user, vessel, currentYear);
+  const fin = await evaluateWorkOrderFinancials(db, res, user, vessel, currentYear, chosenCraneId);
 
   const [newOrder] = await db
     .insert(workOrders)
@@ -406,9 +378,6 @@ export async function completeReservationOperation(params: CompleteOperationPara
     ? await db.select().from(vessels).where(eq(vessels.id, res.vesselId)).limit(1)
     : [null];
 
-  const currentYear = new Date().getFullYear();
-  const fin = await evaluateWorkOrderFinancials(db, res, user, vessel, currentYear);
-
   let chosenCraneId = params.craneId || res.craneId;
   if (!chosenCraneId) {
     const [firstActiveCrane] = await db
@@ -421,6 +390,9 @@ export async function completeReservationOperation(params: CompleteOperationPara
   if (!chosenCraneId) {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Dizalica mora biti odabrana za zaključenje operacije." });
   }
+
+  const currentYear = new Date().getFullYear();
+  const fin = await evaluateWorkOrderFinancials(db, res, user, vessel, currentYear, chosenCraneId);
 
   const alreadyHadCompletedOrder = !!(existing && existing.status === "completed");
 

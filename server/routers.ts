@@ -4051,6 +4051,7 @@ export const appRouter = router({
             scheduledStart: z.date().optional(),
             scheduledEnd: z.date().optional(),
             craneId: z.string().uuid().optional(),
+            status: z.string().optional(),
           })
           .optional()
       )
@@ -4070,12 +4071,17 @@ export const appRouter = router({
             );
           }
         }
-        conditions.push(
-          or(
-            eq(reservations.status, "approved"),
-            eq(reservations.status, "pending")
-          )
-        );
+        if (input?.status && input.status !== "all") {
+          conditions.push(eq(reservations.status, input.status as any));
+        } else {
+          conditions.push(
+            or(
+              eq(reservations.status, "approved"),
+              eq(reservations.status, "pending"),
+              eq(reservations.status, "completed")
+            )
+          );
+        }
 
         if (input?.scheduledStart && input?.scheduledEnd) {
           const startStr = toZagreb(input.scheduledStart).dateStr;

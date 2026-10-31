@@ -658,7 +658,7 @@ export const reportsRouter = router({
             const totalOrders = results.length;
             const completedCount = results.filter(r => r.status === "completed").length;
             const statutoryCount = results.filter(r => r.isStatutoryCovered).length;
-            const feeAdjustmentsCount = results.filter(r => r.chargeItemCode !== null).length;
+            const feeAdjustmentsCount = results.filter(r => r.clientType === "member" && !r.isStatutoryCovered && r.chargeItemCode !== null).length;
             const commercialCount = results.filter(r => r.clientType === "external").length;
             const totalCommercialBilledEur = results
                 .filter(r => r.commercialTotal)
