@@ -36,6 +36,7 @@ import {
   completeReservationOperation,
 } from "./services/workOrderService";
 import { resolveActiveUserById } from "./services/authPolicyService";
+import { generateWorkOrderNumber, generateInvoiceNumber } from "./services/numberingService";
 import { appRouter } from "./routers";
 
 describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
@@ -148,11 +149,15 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       // 10 * 12 = 120; 120 * 1.13 = 135.60
       expect(p13.totalWithVat).toBe("135.60");
 
-      // Zero, missing, negative, or invalid length MUST throw BAD_REQUEST
-      await expect(calculateCommercialPricing(mockDb, null)).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
-      await expect(calculateCommercialPricing(mockDb, "0")).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
-      await expect(calculateCommercialPricing(mockDb, -5)).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
-      await expect(calculateCommercialPricing(mockDb, "neispravno")).rejects.toThrow("Duljina plovila mora biti valjani pozitivni broj");
+      // Zero, missing, negative, Infinity or invalid length (e.g. 10abc) MUST throw BAD_REQUEST
+      await expect(calculateCommercialPricing(mockDb, null)).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, "")).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, "0")).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, -5)).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, "10abc")).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, Infinity)).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, "Infinity")).rejects.toThrow("Duljina plovila mora biti");
+      await expect(calculateCommercialPricing(mockDb, "neispravno")).rejects.toThrow("Duljina plovila mora biti");
     });
 
     it("evaluates quota operation type from service type and textual fallbacks", async () => {
@@ -971,6 +976,12 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
     it("Point 6: getUnifiedCycleSummary and generateUnifiedQuote calculate matching 281.25 € for member with 45-day stay", async () => {
       const db = await requireTestDb();
 
+      // Ensure standard 25% rate on berth price item
+      await db
+        .update(priceListItems)
+        .set({ vatRate: "25.00", fixedPriceEur: "15.00", isActive: true })
+        .where(eq(priceListItems.code, "USL-LEZARINA-DAN"));
+
       // Clear previous occupancies for this test vessel so the 45-day occupancy is the latest
       await db.delete(landOccupancies).where(eq(landOccupancies.vesselId, testVesselMemberId));
 
@@ -1128,6 +1139,328 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
         .update(priceListItems)
         .set({ vatRate: "25.00", pricePerMeterEur: "12.00" })
         .where(eq(priceListItems.code, "USL-VANJSKI-M"));
+    });
+
+    it("High Priority: Concurrent operations for SAME member on DIFFERENT reservations are locked and consume quota exactly once", async () => {
+      const db = await requireTestDb();
+      const currentYear = new Date().getFullYear();
+
+      // Reset member quota so liftAvailable is true
+      await db
+        .update(memberStatutoryRights)
+        .set({
+          liftAvailable: true,
+          liftAcquiredYear: currentYear,
+          pendingFeeAdjustmentsCount: 0,
+        })
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+
+      // Create two distinct approved reservations for the same member
+      const [resDiffA] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      const [resDiffB] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      // Complete both DIFFERENT reservations for the SAME member concurrently
+      const [compA, compB] = await Promise.all([
+        completeReservationOperation({
+          reservationId: resDiffA.id,
+          operatorId: TEST_USER_IDS.operator,
+          craneId: TEST_CRANE_IDS.crane2,
+          actualDurationMin: 40,
+          operatorNotes: "Istodobno vađenje rezervacija A",
+          allowFutureDate: true,
+        }),
+        completeReservationOperation({
+          reservationId: resDiffB.id,
+          operatorId: TEST_USER_IDS.operator,
+          craneId: TEST_CRANE_IDS.crane2,
+          actualDurationMin: 40,
+          operatorNotes: "Istodobno vađenje rezervacija B",
+          allowFutureDate: true,
+        }),
+      ]);
+
+      expect(compA.success).toBe(true);
+      expect(compB.success).toBe(true);
+
+      // Exactly ONE must be statutory covered (free lift), and exactly ONE must be fee adjustment (exceeded quota)
+      const coveredCount = [compA.workOrder?.isStatutoryCovered, compB.workOrder?.isStatutoryCovered].filter(Boolean).length;
+      expect(coveredCount).toBe(1);
+
+      const feeChargedCount = [compA.workOrder?.chargeItemCode, compB.workOrder?.chargeItemCode].filter(
+        c => c === "USL-D9T"
+      ).length;
+      expect(feeChargedCount).toBe(1);
+
+      // Check card entries in DB
+      const cardEntries = await db
+        .select()
+        .from(userCardEntries)
+        .where(eq(userCardEntries.userId, uniqueMemberId));
+
+      const statutoryUsedEntries = cardEntries.filter(
+        e => (e.workOrderId === compA.workOrder?.id || e.workOrderId === compB.workOrder?.id) && e.entryType === "statutory_quota_used"
+      );
+      const feeAdjustmentEntries = cardEntries.filter(
+        e => (e.workOrderId === compA.workOrder?.id || e.workOrderId === compB.workOrder?.id) && e.entryType === "fee_adjustment_charge"
+      );
+
+      expect(statutoryUsedEntries).toHaveLength(1);
+      expect(feeAdjustmentEntries).toHaveLength(1);
+
+      // Check rights in DB
+      const [rightsInDb] = await db
+        .select()
+        .from(memberStatutoryRights)
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+      expect(rightsInDb.liftAvailable).toBe(false);
+      expect(rightsInDb.pendingFeeAdjustmentsCount).toBe(1);
+    });
+
+    it("High Priority: Missing vessel length is NOT replaced with 8m and throws BAD_REQUEST for commercial client", async () => {
+      const db = await requireTestDb();
+
+      // Create a commercial vessel without length
+      const noLenVesselId = "c2222222-2222-4333-a444-555555555555";
+      await db.delete(vessels).where(eq(vessels.id, noLenVesselId));
+      await db.insert(vessels).values({
+        id: noLenVesselId,
+        ownerId: uniqueCommercialId,
+        name: "Brod Bez Duljine",
+        registration: "ZG-0000-NL",
+        type: "motorni",
+        lengthM: null, // missing!
+      });
+
+      const [resNoLen] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueCommercialId,
+          vesselId: noLenVesselId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Brod Bez Duljine",
+          vesselRegistration: "ZG-0000-NL",
+          vesselLengthM: null, // missing!
+        })
+        .returning();
+
+      // Completing without length must reject with BAD_REQUEST, never silently using 8m
+      await expect(
+        completeReservationOperation({
+          reservationId: resNoLen.id,
+          operatorId: TEST_USER_IDS.operator,
+          craneId: TEST_CRANE_IDS.crane2,
+          actualDurationMin: 60,
+          allowFutureDate: true,
+        })
+      ).rejects.toThrow("Duljina plovila mora biti");
+
+      await db.delete(reservations).where(eq(reservations.id, resNoLen.id));
+      await db.delete(vessels).where(eq(vessels.id, noLenVesselId));
+    });
+
+    it("Medium Priority: Concurrent numbering generation is concurrency-safe and produces distinct sequential numbers", async () => {
+      const db = await requireTestDb();
+      const currentYear = new Date().getFullYear();
+
+      // Generate 5 work order numbers concurrently inside independent transactions
+      const orderNumbers = await Promise.all([
+        db.transaction(async (tx) => {
+          const num = await generateWorkOrderNumber(tx, currentYear);
+          await tx.insert(workOrders).values({
+            orderNumber: num,
+            userId: uniqueMemberId,
+            craneId: TEST_CRANE_IDS.crane2,
+            operatorId: TEST_USER_IDS.operator,
+            status: "in_progress",
+          });
+          return num;
+        }),
+        db.transaction(async (tx) => {
+          const num = await generateWorkOrderNumber(tx, currentYear);
+          await tx.insert(workOrders).values({
+            orderNumber: num,
+            userId: uniqueMemberId,
+            craneId: TEST_CRANE_IDS.crane2,
+            operatorId: TEST_USER_IDS.operator,
+            status: "in_progress",
+          });
+          return num;
+        }),
+        db.transaction(async (tx) => {
+          const num = await generateWorkOrderNumber(tx, currentYear);
+          await tx.insert(workOrders).values({
+            orderNumber: num,
+            userId: uniqueMemberId,
+            craneId: TEST_CRANE_IDS.crane2,
+            operatorId: TEST_USER_IDS.operator,
+            status: "in_progress",
+          });
+          return num;
+        }),
+      ]);
+
+      // All generated numbers MUST be distinct
+      const uniqueNumbers = new Set(orderNumbers);
+      expect(uniqueNumbers.size).toBe(3);
+
+      // Clean up the draft test orders
+      for (const num of orderNumbers) {
+        await db.delete(workOrders).where(eq(workOrders.orderNumber, num));
+      }
+    });
+
+    it("Medium Priority: getUnifiedCycleSummary returns dynamic vatRate matching items rate instead of hardcoded 25.00", async () => {
+      const db = await requireTestDb();
+
+      // Clear previous occupancies for this test vessel so the 45-day occupancy is the latest
+      await db.delete(landOccupancies).where(eq(landOccupancies.vesselId, testVesselMemberId));
+
+      const [zone] = await db.select().from(landZones).limit(1);
+      const fortyFiveDaysAgo = new Date();
+      fortyFiveDaysAgo.setDate(fortyFiveDaysAgo.getDate() - 45);
+      const returnedDate = new Date(fortyFiveDaysAgo.getTime() + 45 * 24 * 60 * 60 * 1000);
+
+      await db.insert(landOccupancies).values({
+        userId: uniqueMemberId,
+        vesselId: testVesselMemberId,
+        zoneId: zone.id,
+        spotNumber: 12,
+        liftedAt: fortyFiveDaysAgo,
+        returnedAt: returnedDate,
+      });
+
+      try {
+        // Set berth item to 13.00% VAT
+        await db
+          .update(priceListItems)
+          .set({ vatRate: "13.00" })
+          .where(eq(priceListItems.code, "USL-LEZARINA-DAN"));
+
+        const [operatorUser] = await db
+          .select()
+          .from(users)
+          .where(eq(users.id, TEST_USER_IDS.operator))
+          .limit(1);
+
+        const caller = appRouter.createCaller({
+          user: operatorUser,
+          req: {} as any,
+          res: {} as any,
+        });
+
+        const summary = await caller.workOrders.getUnifiedCycleSummary({
+          vesselId: testVesselMemberId,
+        });
+
+        // VAT rate should be 13.00%
+        expect(summary.totals.vatRate).toBe(13.00);
+        expect(summary.totals.berthVatRate).toBe(13.00);
+        // Net 225.00 * 0.13 = 29.25
+        expect(summary.totals.grandTotalVat).toBe(29.25);
+        expect(summary.totals.grandTotalGross).toBe(254.25);
+      } finally {
+        // Always restore to 25.00%
+        await db
+          .update(priceListItems)
+          .set({ vatRate: "25.00" })
+          .where(eq(priceListItems.code, "USL-LEZARINA-DAN"));
+      }
+    });
+
+    it("Medium Priority: workOrders.complete enforces allowFutureDate: false and blocks future appointment completion", async () => {
+      const db = await requireTestDb();
+
+      // Create reservation scheduled for day after tomorrow
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 2);
+
+      const [futureRes] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: futureDate,
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+        })
+        .returning();
+
+      // Create an existing in-progress work order for this reservation
+      const [futureWo] = await db
+        .insert(workOrders)
+        .values({
+          orderNumber: "RN-FUTURE-TEST-01",
+          reservationId: futureRes.id,
+          userId: uniqueMemberId,
+          craneId: TEST_CRANE_IDS.crane2,
+          operatorId: TEST_USER_IDS.operator,
+          status: "in_progress",
+          clientType: "member",
+        })
+        .returning();
+
+      const [operatorUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, TEST_USER_IDS.operator))
+        .limit(1);
+
+      const caller = appRouter.createCaller({
+        user: operatorUser,
+        req: {} as any,
+        res: {} as any,
+      });
+
+      // Calling workOrders.complete on a future appointment MUST fail with BAD_REQUEST
+      await expect(
+        caller.workOrders.complete({
+          workOrderId: futureWo.id,
+          actualDurationMin: 45,
+          operatorNotes: "Pokušaj zaključenja budućeg termina",
+        })
+      ).rejects.toThrow("Nije moguće zaključiti operaciju za rezervaciju koja je zakazana za budući datum");
+
+      // Cleanup
+      await db.delete(workOrders).where(eq(workOrders.id, futureWo.id));
+      await db.delete(reservations).where(eq(reservations.id, futureRes.id));
     });
 
     afterAll(async () => {

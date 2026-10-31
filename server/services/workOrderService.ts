@@ -92,11 +92,11 @@ async function evaluateWorkOrderFinancials(
   let commercialPricePerMeter: string | null = null;
   let commercialTotal: string | null = null;
   let vatRate = "25.00";
-  const rawVesselLengthM = res.vesselLengthM || (vessel?.lengthM ? String(vessel.lengthM) : "8.00");
-  let vesselLengthM = String(rawVesselLengthM);
+  const rawVesselLengthM = res.vesselLengthM || vessel?.lengthM || null;
+  let vesselLengthM = rawVesselLengthM ? String(rawVesselLengthM) : null;
 
   if (isMember) {
-    const rights = await ensureMemberStatutoryRights(db, user.id, currentYear);
+    const rights = await ensureMemberStatutoryRights(db, user.id, currentYear, { forUpdate: true });
 
     if (quotaOperationType === "lift" && rights?.liftAvailable) {
       isStatutoryCovered = true;
@@ -109,6 +109,7 @@ async function evaluateWorkOrderFinancials(
       chargeItemName = feeItem.name;
     }
   } else {
+    // External commercial client: strict validation (no fallback to arbitrary 8m)
     const comm = await calculateCommercialPricing(db, rawVesselLengthM);
     commercialPricePerMeter = comm.ratePerMeter;
     commercialTotal = comm.totalWithVat;
@@ -142,168 +143,187 @@ export async function startReservationWorkOrder(params: StartWorkOrderParams) {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
 
-  const [res] = await db
-    .select()
-    .from(reservations)
-    .where(eq(reservations.id, params.reservationId))
-    .limit(1);
-  if (!res) throw new TRPCError({ code: "NOT_FOUND", message: "Rezervacija nije pronađena." });
+  const result = await db.transaction(async (tx) => {
+    const [res] = await tx
+      .select()
+      .from(reservations)
+      .where(eq(reservations.id, params.reservationId))
+      .for("update")
+      .limit(1);
+    if (!res) throw new TRPCError({ code: "NOT_FOUND", message: "Rezervacija nije pronađena." });
 
-  if (res.status === "completed") {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je već završena." });
-  }
-  if (res.status === "cancelled" || res.status === "rejected") {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je otkazana ili odbijena." });
-  }
-
-  // Check that reservation is not scheduled for a future date
-  const targetDate = res.scheduledStart
-    ? new Date(res.scheduledStart)
-    : res.requestedDate
-      ? new Date(res.requestedDate)
-      : null;
-
-  if (targetDate) {
-    const now = new Date();
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-    if (targetDate.getTime() > endOfToday.getTime()) {
-      const dateStr = targetDate.toLocaleDateString("hr-HR");
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `Nije moguće pokrenuti radni nalog za rezervaciju koja je zakazana za budući datum (${dateStr}). Radni nalog se može pokrenuti tek na dan termina ili nakon njega.`,
-      });
+    if (res.status === "completed") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je već završena." });
     }
-  }
-
-  // Check if active or completed work order already exists
-  const [existing] = await db
-    .select()
-    .from(workOrders)
-    .where(and(eq(workOrders.reservationId, params.reservationId), ne(workOrders.status, "cancelled")))
-    .limit(1);
-
-  if (existing) {
-    if (existing.status === "in_progress") {
-      return { success: true, workOrder: existing, alreadyRunning: true };
+    if (res.status === "cancelled" || res.status === "rejected") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Rezervacija je otkazana ili odbijena." });
     }
-    if (existing.status === "completed") {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `Za ovu rezervaciju već postoji zaključeni radni nalog (${existing.orderNumber}).`,
-      });
-    }
-  }
 
-  let chosenCraneId = params.craneId || res.craneId;
-  if (!chosenCraneId) {
-    const assignedCraneIds = await getOperatorCranes(params.operatorId);
-    if (assignedCraneIds.length > 0) {
-      chosenCraneId = assignedCraneIds[0];
-    } else {
-      const [firstCrane] = await db
-        .select({ id: cranes.id })
-        .from(cranes)
-        .where(eq(cranes.craneStatus, "active"))
-        .limit(1);
-      chosenCraneId = firstCrane?.id || null;
-    }
-    if (chosenCraneId && !res.craneId) {
-      await db
-        .update(reservations)
-        .set({ craneId: chosenCraneId, updatedAt: new Date() })
-        .where(eq(reservations.id, res.id));
-    }
-  }
+    // Check that reservation is not scheduled for a future date
+    const targetDate = res.scheduledStart
+      ? new Date(res.scheduledStart)
+      : res.requestedDate
+        ? new Date(res.requestedDate)
+        : null;
 
-  if (!chosenCraneId) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Nema dostupne dizalice za rezervaciju." });
-  }
-
-  const [user] = await db.select().from(users).where(eq(users.id, res.userId)).limit(1);
-  if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
-
-  const [vessel] = res.vesselId
-    ? await db.select().from(vessels).where(eq(vessels.id, res.vesselId)).limit(1)
-    : [null];
-
-  const currentYear = new Date().getFullYear();
-  const orderNumber = await generateWorkOrderNumber(db, currentYear);
-
-  const fin = await evaluateWorkOrderFinancials(db, res, user, vessel, currentYear, chosenCraneId);
-
-  const [newOrder] = await db
-    .insert(workOrders)
-    .values({
-      orderNumber,
-      reservationId: res.id,
-      userId: user.id,
-      vesselId: res.vesselId || null,
-      craneId: chosenCraneId,
-      operatorId: params.operatorId,
-      status: "in_progress",
-      clientType: fin.clientType,
-      isStatutoryCovered: fin.isStatutoryCovered,
-      quotaOperationType: fin.quotaOperationType,
-      chargeItemCode: fin.chargeItemCode,
-      chargeItemName: fin.chargeItemName,
-      vesselLengthM: fin.vesselLengthM,
-      commercialPricePerMeter: fin.commercialPricePerMeter,
-      commercialTotal: fin.commercialTotal,
-      vatRate: fin.vatRate || "25.00",
-      startedAt: params.startTime || new Date(),
-      operatorNotes: params.operatorNotes || null,
-      erpSyncStatus: "pending",
-    })
-    .returning();
-
-  let resourcesToApply = params.resources || [];
-  if (resourcesToApply.length === 0 && res.selectedResources) {
-    try {
-      const parsed = JSON.parse(res.selectedResources);
-      if (Array.isArray(parsed)) {
-        resourcesToApply = parsed;
-      }
-    } catch {}
-  }
-
-  if (resourcesToApply && resourcesToApply.length > 0) {
-    for (const resItem of resourcesToApply) {
-      const [resDef] = await db
-        .select()
-        .from(resources)
-        .where(eq(resources.id, resItem.resourceId))
-        .limit(1);
-      if (resDef) {
-        const unitPrice = Number(resDef.pricePerUnitEur) || 0;
-        const qty = Number(resItem.quantity) || 1;
-        const totalPrice = Number((unitPrice * qty).toFixed(2));
-        await db.insert(workOrderResources).values({
-          workOrderId: newOrder.id,
-          resourceId: resDef.id,
-          quantity: qty.toFixed(2),
-          unitPriceEur: unitPrice.toFixed(2),
-          totalPriceEur: totalPrice.toFixed(2),
-          notes: resItem.notes || null,
+    if (targetDate) {
+      const now = new Date();
+      const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      if (targetDate.getTime() > endOfToday.getTime()) {
+        const dateStr = targetDate.toLocaleDateString("hr-HR");
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Nije moguće pokrenuti radni nalog za rezervaciju koja je zakazana za budući datum (${dateStr}). Radni nalog se može pokrenuti tek na dan termina ili nakon njega.`,
         });
       }
     }
-  }
 
-  await createAuditEntry({
-    actorId: params.operatorId,
-    action: params.auditAction || "work_order_started",
-    entityType: "work_orders",
-    entityId: newOrder.id,
-    payload: {
-      orderNumber,
-      reservationId: res.id,
-      isStatutoryCovered: fin.isStatutoryCovered,
-      clientType: fin.clientType,
+    // Check if active or completed work order already exists (locked)
+    const [existing] = await tx
+      .select()
+      .from(workOrders)
+      .where(and(eq(workOrders.reservationId, params.reservationId), ne(workOrders.status, "cancelled")))
+      .for("update")
+      .limit(1);
+
+    if (existing) {
+      if (existing.status === "in_progress") {
+        return { success: true, workOrder: existing, alreadyRunning: true };
+      }
+      if (existing.status === "completed") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Za ovu rezervaciju već postoji zaključeni radni nalog (${existing.orderNumber}).`,
+        });
+      }
+    }
+
+    let chosenCraneId = params.craneId || res.craneId;
+    if (!chosenCraneId) {
+      const assignedCraneIds = await getOperatorCranes(params.operatorId);
+      if (assignedCraneIds.length > 0) {
+        chosenCraneId = assignedCraneIds[0];
+      } else {
+        const [firstCrane] = await tx
+          .select({ id: cranes.id })
+          .from(cranes)
+          .where(eq(cranes.craneStatus, "active"))
+          .limit(1);
+        chosenCraneId = firstCrane?.id || null;
+      }
+      if (chosenCraneId && !res.craneId) {
+        await tx
+          .update(reservations)
+          .set({ craneId: chosenCraneId, updatedAt: new Date() })
+          .where(eq(reservations.id, res.id));
+      }
+    }
+
+    if (!chosenCraneId) {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Nema dostupne dizalice za rezervaciju." });
+    }
+
+    const [user] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, res.userId))
+      .for("update")
+      .limit(1);
+    if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
+
+    const [vessel] = res.vesselId
+      ? await tx.select().from(vessels).where(eq(vessels.id, res.vesselId)).limit(1)
+      : [null];
+
+    const currentYear = new Date().getFullYear();
+    const orderNumber = await generateWorkOrderNumber(tx, currentYear);
+
+    const fin = await evaluateWorkOrderFinancials(tx, res, user, vessel, currentYear, chosenCraneId);
+
+    const [newOrder] = await tx
+      .insert(workOrders)
+      .values({
+        orderNumber,
+        reservationId: res.id,
+        userId: user.id,
+        vesselId: res.vesselId || null,
+        craneId: chosenCraneId,
+        operatorId: params.operatorId,
+        status: "in_progress",
+        clientType: fin.clientType,
+        isStatutoryCovered: fin.isStatutoryCovered,
+        quotaOperationType: fin.quotaOperationType,
+        chargeItemCode: fin.chargeItemCode,
+        chargeItemName: fin.chargeItemName,
+        vesselLengthM: fin.vesselLengthM,
+        commercialPricePerMeter: fin.commercialPricePerMeter,
+        commercialTotal: fin.commercialTotal,
+        vatRate: fin.vatRate || "25.00",
+        startedAt: params.startTime || new Date(),
+        operatorNotes: params.operatorNotes || null,
+        erpSyncStatus: "pending",
+      })
+      .returning();
+
+    let resourcesToApply = params.resources || [];
+    if (resourcesToApply.length === 0 && res.selectedResources) {
+      try {
+        const parsed = JSON.parse(res.selectedResources);
+        if (Array.isArray(parsed)) {
+          resourcesToApply = parsed;
+        }
+      } catch {}
+    }
+
+    if (resourcesToApply && resourcesToApply.length > 0) {
+      for (const resItem of resourcesToApply) {
+        const [resDef] = await tx
+          .select()
+          .from(resources)
+          .where(eq(resources.id, resItem.resourceId))
+          .limit(1);
+        if (resDef) {
+          const unitPrice = Number(resDef.pricePerUnitEur) || 0;
+          const qty = Number(resItem.quantity) || 1;
+          const totalPrice = Number((unitPrice * qty).toFixed(2));
+          await tx.insert(workOrderResources).values({
+            workOrderId: newOrder.id,
+            resourceId: resDef.id,
+            quantity: qty.toFixed(2),
+            unitPriceEur: unitPrice.toFixed(2),
+            totalPriceEur: totalPrice.toFixed(2),
+            notes: resItem.notes || null,
+          });
+        }
+      }
+    }
+
+    return {
+      success: true,
+      workOrder: newOrder,
+      alreadyRunning: false,
+      fin,
       resourcesCount: resourcesToApply?.length || 0,
-    },
+    };
   });
 
-  return { success: true, workOrder: newOrder, alreadyRunning: false };
+  if (result.workOrder && !result.alreadyRunning) {
+    await createAuditEntry({
+      actorId: params.operatorId,
+      action: params.auditAction || "work_order_started",
+      entityType: "work_orders",
+      entityId: result.workOrder.id,
+      payload: {
+        orderNumber: result.workOrder.orderNumber,
+        reservationId: params.reservationId,
+        isStatutoryCovered: result.fin?.isStatutoryCovered,
+        clientType: result.fin?.clientType,
+        resourcesCount: result.resourcesCount,
+      },
+    });
+  }
+
+  return { success: result.success, workOrder: result.workOrder, alreadyRunning: result.alreadyRunning };
 }
 
 /**
@@ -378,7 +398,12 @@ export async function completeReservationOperation(params: CompleteOperationPara
 
     let order = existing;
 
-    const [user] = await tx.select().from(users).where(eq(users.id, res.userId)).limit(1);
+    const [user] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, res.userId))
+      .for("update")
+      .limit(1);
     if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
 
     const [vessel] = res.vesselId

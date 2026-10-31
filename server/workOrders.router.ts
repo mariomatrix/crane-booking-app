@@ -24,6 +24,7 @@ import {
 import { eq, desc, and, gte, lte, sql, count, ne, or } from "drizzle-orm";
 import { generateWorkOrderNumber, generateInvoiceNumber } from "./services/numberingService";
 import { startReservationWorkOrder, completeReservationOperation } from "./services/workOrderService";
+import { parseStrictVesselLength } from "./services/statutoryQuotaService";
 
 export { completeReservationOperation, startReservationWorkOrder };
 
@@ -343,7 +344,7 @@ export const workOrdersRouter = router({
                 zoneId: input.zoneId,
                 operatorNotes: input.operatorNotes,
                 resources: input.resources,
-                allowFutureDate: true,
+                allowFutureDate: false,
             });
 
             return { success: true, alreadyCompleted: result.alreadyCompleted || false };
@@ -426,7 +427,9 @@ export const workOrdersRouter = router({
             if (!user) throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
 
             const isMember = (user.clientCategory || "member") === "member";
-            const lengthM = Number(vessel.lengthM) || 8.0;
+            const lengthM = isMember
+                ? (vessel.lengthM ? Number(vessel.lengthM) : 0)
+                : parseStrictVesselLength(vessel.lengthM);
 
             // Fetch Land Occupancy for this vessel (active or latest completed)
             const [occupancy] = await db
@@ -543,7 +546,9 @@ export const workOrdersRouter = router({
             const grandTotalNet = liftCostNet + lowerCostNet + berthCostNet + totalResourcesNet;
             const grandTotalVat = Number((liftVat + lowerVat + berthVat + resourcesVat).toFixed(2));
             const grandTotalGross = Number((grandTotalNet + grandTotalVat).toFixed(2));
-            const vatRate = 25.00;
+            const effectiveVatRate = grandTotalNet > 0
+                ? Number(((grandTotalVat / grandTotalNet) * 100).toFixed(2))
+                : (berthVatRate || 25.00);
 
             // Check if invoice/quote is already generated for this cycle
             const [existingInvoice] = await db
@@ -602,7 +607,9 @@ export const workOrdersRouter = router({
                     berthCostNet,
                     resourcesCostNet: totalResourcesNet,
                     grandTotalNet,
-                    vatRate,
+                    vatRate: effectiveVatRate,
+                    craneVatRate,
+                    berthVatRate,
                     grandTotalVat,
                     grandTotalGross,
                 },
@@ -633,7 +640,9 @@ export const workOrdersRouter = router({
             if (!vessel) throw new TRPCError({ code: "NOT_FOUND", message: "Plovilo nije pronađeno." });
 
             const isMember = (user.clientCategory || "member") === "member";
-            const lengthM = Number(vessel.lengthM) || 8.0;
+            const lengthM = isMember
+                ? (vessel.lengthM ? Number(vessel.lengthM) : 0)
+                : parseStrictVesselLength(vessel.lengthM);
 
             // Fetch Land Occupancy
             const [occupancy] = await db
@@ -784,46 +793,51 @@ export const workOrdersRouter = router({
             const totalGross = Number((totalNet + totalVat).toFixed(2));
 
             const currentYear = new Date().getFullYear();
-            const invoiceNumber = await generateInvoiceNumber(db, currentYear, input.documentType === "proforma");
             const dueDate = new Date();
             dueDate.setDate(dueDate.getDate() + input.dueDateDays);
 
-            const [createdInvoice] = await db
-                .insert(invoices)
-                .values({
-                    invoiceNumber,
-                    userId: user.id,
-                    vesselId: vessel.id,
-                    reservationId: occupancy?.returnReservationId || occupancy?.reservationId || null,
-                    documentType: input.documentType,
-                    invoiceType: "crane_operation",
-                    issueDate: new Date(),
-                    dueDate,
-                    dateOfSupply: new Date(),
-                    totalNetAmount: totalNet.toFixed(2),
-                    totalVatAmount: totalVat.toFixed(2),
-                    totalGrossAmount: totalGross.toFixed(2),
-                    currency: "EUR",
-                    paymentMethod: input.paymentMethod,
-                    paymentStatus: "unpaid",
-                    notes: input.notes || `Jedinstvena ponuda za plovilo ${vessel.name} (${vessel.registration || ''}) — Boravak na kopnu: ${totalDays} dana.`,
-                })
-                .returning();
+            const createdInvoice = await db.transaction(async (tx) => {
+                const invoiceNumber = await generateInvoiceNumber(tx, currentYear, input.documentType === "proforma");
 
-            for (const item of itemsToInsert) {
-                await db.insert(invoiceItems).values({
-                    invoiceId: createdInvoice.id,
-                    productCode: item.productCode,
-                    description: item.description,
-                    quantity: item.quantity,
-                    unit: item.unit,
-                    unitPrice: item.unitPrice,
-                    vatRate: item.vatRate,
-                    netAmount: item.netAmount,
-                    vatAmount: item.vatAmount,
-                    grossAmount: item.grossAmount,
-                });
-            }
+                const [inv] = await tx
+                    .insert(invoices)
+                    .values({
+                        invoiceNumber,
+                        userId: user.id,
+                        vesselId: vessel.id,
+                        reservationId: occupancy?.returnReservationId || occupancy?.reservationId || null,
+                        documentType: input.documentType,
+                        invoiceType: "crane_operation",
+                        issueDate: new Date(),
+                        dueDate,
+                        dateOfSupply: new Date(),
+                        totalNetAmount: totalNet.toFixed(2),
+                        totalVatAmount: totalVat.toFixed(2),
+                        totalGrossAmount: totalGross.toFixed(2),
+                        currency: "EUR",
+                        paymentMethod: input.paymentMethod,
+                        paymentStatus: "unpaid",
+                        notes: input.notes || `Jedinstvena ponuda za plovilo ${vessel.name} (${vessel.registration || ''}) — Boravak na kopnu: ${totalDays} dana.`,
+                    })
+                    .returning();
+
+                for (const item of itemsToInsert) {
+                    await tx.insert(invoiceItems).values({
+                        invoiceId: inv.id,
+                        productCode: item.productCode,
+                        description: item.description,
+                        quantity: item.quantity,
+                        unit: item.unit,
+                        unitPrice: item.unitPrice,
+                        vatRate: item.vatRate,
+                        netAmount: item.netAmount,
+                        vatAmount: item.vatAmount,
+                        grossAmount: item.grossAmount,
+                    });
+                }
+
+                return inv;
+            });
 
             await createAuditEntry({
                 actorId: ctx.user.id,
@@ -831,7 +845,7 @@ export const workOrdersRouter = router({
                 entityType: "invoices",
                 entityId: createdInvoice.id,
                 payload: {
-                    invoiceNumber,
+                    invoiceNumber: createdInvoice.invoiceNumber,
                     totalGross,
                     documentType: input.documentType,
                     vesselName: vessel.name,

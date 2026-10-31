@@ -72,7 +72,8 @@ export async function evaluateQuotaOperationType(
 export async function ensureMemberStatutoryRights(
   db: any,
   userId: string,
-  currentYear?: number
+  currentYear?: number,
+  options?: { forUpdate?: boolean }
 ) {
   const year = currentYear ?? new Date().getFullYear();
   const todayStr = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
@@ -88,11 +89,16 @@ export async function ensureMemberStatutoryRights(
   // If a membership record is recorded and activeMember === false (unpaid dues), renewal is blocked
   const isDuesPaid = membership ? membership.activeMember : true;
 
-  let [rights] = await db
+  let query: any = db
     .select()
     .from(memberStatutoryRights)
-    .where(eq(memberStatutoryRights.userId, userId))
-    .limit(1);
+    .where(eq(memberStatutoryRights.userId, userId));
+
+  if (options?.forUpdate && typeof query.for === "function") {
+    query = query.for("update");
+  }
+
+  let [rights] = await query.limit(1);
 
   if (!rights) {
     [rights] = await db
@@ -232,6 +238,50 @@ export async function determineMemberFeeAdjustmentItem(
 }
 
 /**
+ * Strictly parses and validates vessel length in meters.
+ * Rejects null, undefined, empty strings, non-numeric strings (e.g. "10abc"),
+ * negative numbers, zero, NaN, and Infinity.
+ */
+export function parseStrictVesselLength(vesselLengthM?: string | number | null): number {
+  if (vesselLengthM === null || vesselLengthM === undefined) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Duljina plovila mora biti navedena kao valjani pozitivni broj veći od 0 metara za komercijalni obračun (uneseno: "").`,
+    });
+  }
+
+  let num: number;
+  if (typeof vesselLengthM === "number") {
+    num = vesselLengthM;
+  } else {
+    const trimmed = String(vesselLengthM).trim();
+    if (!trimmed) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Duljina plovila mora biti navedena kao valjani pozitivni broj veći od 0 metara za komercijalni obračun (uneseno: "").`,
+      });
+    }
+    // Strict pattern: integer or decimal, no trailing characters like '10abc', no hexadecimal, no exponents
+    if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Duljina plovila mora biti valjani pozitivni broj veći od 0 metara za komercijalni obračun (uneseno: "${vesselLengthM}").`,
+      });
+    }
+    num = Number(trimmed);
+  }
+
+  if (isNaN(num) || !isFinite(num) || num <= 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Duljina plovila mora biti valjani pozitivni konačni broj veći od 0 metara za komercijalni obračun (uneseno: "${vesselLengthM}").`,
+    });
+  }
+
+  return num;
+}
+
+/**
  * Commercial calculation for external / non-member vessels based on length in meters.
  * Validates that length is strictly positive and applies active price list item and configured VAT rate.
  */
@@ -246,13 +296,7 @@ export async function calculateCommercialPricing(
   chargeItemName: string;
   vatRate: string;
 }> {
-  const parsedLen = typeof vesselLengthM === "number" ? vesselLengthM : parseFloat(String(vesselLengthM ?? "").trim());
-  if (isNaN(parsedLen) || parsedLen <= 0) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: `Duljina plovila mora biti valjani pozitivni broj veći od 0 metara za komercijalni obračun (uneseno: "${vesselLengthM ?? ""}").`,
-    });
-  }
+  const parsedLen = parseStrictVesselLength(vesselLengthM);
 
   const [priceItem] = await db
     .select()
