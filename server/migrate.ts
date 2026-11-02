@@ -1074,6 +1074,21 @@ async function runMigration() {
             });
             console.log("Added USL-LEZARINA-DAN to price list items.");
         }
+
+        // Ensure USL-MANIPULACIJA exists
+        const [hasManipulacija] = await db.select().from(priceListItems).where(eq(priceListItems.code, "USL-MANIPULACIJA")).limit(1);
+        if (!hasManipulacija) {
+            await db.insert(priceListItems).values({
+                code: "USL-MANIPULACIJA",
+                name: "Manipulacija dizalicom / ukrcaj na kamion",
+                targetType: "external_commercial",
+                fixedPriceEur: "40.00",
+                vatRate: "25.00",
+                isActive: true,
+                sortOrder: 6,
+            });
+            console.log("Added USL-MANIPULACIJA to price list items.");
+        }
     }
 
     // ─── Seed: Resources (Traktor, Pumpa, Oprema) ────────────────────

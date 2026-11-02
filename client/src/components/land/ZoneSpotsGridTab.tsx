@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TruckDeliveryToLandDialog } from "@/components/land/TruckDeliveryToLandDialog";
+import { TruckDispatchFromLandDialog } from "@/components/land/TruckDispatchFromLandDialog";
 
 interface ZoneSpotsGridTabProps {
   onAssignFromWaitlist?: (spotId: string) => void;
@@ -35,10 +36,11 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
   const [selectedSpot, setSelectedSpot] = useState<any | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
 
-  // Truck delivery dialog state
+  // Truck delivery and dispatch dialog state
   const [truckDialogOpen, setTruckDialogOpen] = useState(false);
   const [truckDefaultSpotId, setTruckDefaultSpotId] = useState<string | null>(null);
   const [truckDefaultSpotNumber, setTruckDefaultSpotNumber] = useState<number | null>(null);
+  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
 
   const utils = trpc.useUtils();
 
@@ -403,7 +405,19 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
                   </div>
 
                   {selectedSpot.occupancyId && (
-                    <div className="pt-2 border-t">
+                    <div className="pt-2 border-t space-y-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full text-xs text-primary hover:bg-primary/10 border-primary/30 gap-1.5"
+                        onClick={() => {
+                          setDetailModalOpen(false);
+                          setDispatchDialogOpen(true);
+                        }}
+                      >
+                        <Truck className="w-3.5 h-3.5 text-amber-600" />
+                        Otpremi kamionom (odlazak na servis / iz lučice)
+                      </Button>
                       <Button
                         size="sm"
                         variant="outline"
@@ -458,6 +472,13 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
         defaultZoneId={activeZoneId}
         defaultSpotId={truckDefaultSpotId}
         defaultSpotNumber={truckDefaultSpotNumber}
+      />
+
+      {/* Truck Dispatch from Land Dialog */}
+      <TruckDispatchFromLandDialog
+        open={dispatchDialogOpen}
+        onOpenChange={setDispatchDialogOpen}
+        spot={selectedSpot}
       />
     </div>
   );

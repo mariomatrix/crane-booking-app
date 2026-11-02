@@ -1512,7 +1512,6 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
 
       // Verify that getUnifiedCycleSummary returns 0 EUR for liftCostNet
       const summary = await caller.workOrders.getUnifiedCycleSummary({
-        userId: uniqueCommercialId,
         vesselId: truckPlacementResult.vesselId,
       });
 
@@ -1534,6 +1533,159 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       await db.delete(invoices).where(eq(invoices.id, quote.id));
       await db.delete(landOccupancies).where(eq(landOccupancies.id, truckPlacementResult.id));
       await db.delete(vessels).where(eq(vessels.id, truckPlacementResult.vesselId));
+    });
+
+    it("Direct Sea to Truck (More -> Kamion našom dizalicom): consumes lift quota, no land occupancy, no berth charge", async () => {
+      const db = await requireTestDb();
+
+      // Reset member quota so lift is available
+      await db
+        .update(memberStatutoryRights)
+        .set({ liftAvailable: true, lowerAvailable: true })
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+
+      const [resDirect] = await db
+        .insert(reservations)
+        .values({
+          userId: uniqueMemberId,
+          vesselId: testVesselMemberId,
+          serviceTypeId: stLiftId,
+          craneId: TEST_CRANE_IDS.crane2,
+          status: "approved",
+          scheduledStart: new Date(),
+          durationMin: 60,
+          vesselName: "Morski Vuk (Član)",
+          vesselRegistration: "ST-1234-CL",
+          vesselLengthM: "9.50",
+          liftPurpose: "More -> kamion direktno našom dizalicom",
+          landZoneId: null,
+        })
+        .returning();
+
+      const completionResult = await completeReservationOperation({
+        reservationId: resDirect.id,
+        operatorId: TEST_USER_IDS.operator,
+        craneId: TEST_CRANE_IDS.crane2,
+        actualDurationMin: 45,
+        operatorNotes: "Direktan ukrcaj na kamion iz mora",
+        allowFutureDate: true,
+      });
+
+      expect(completionResult.success).toBe(true);
+      expect(completionResult.workOrder?.quotaOperationType).toBe("lift");
+      expect(completionResult.workOrder?.isStatutoryCovered).toBe(true);
+
+      // Check that member lift quota was consumed
+      const [rightsAfter] = await db
+        .select()
+        .from(memberStatutoryRights)
+        .where(eq(memberStatutoryRights.userId, uniqueMemberId));
+      expect(rightsAfter.liftAvailable).toBe(false);
+
+      // Verify that NO land occupancy was created (no dry berth days, no spot taken)
+      const [directOcc] = await db
+        .select()
+        .from(landOccupancies)
+        .where(eq(landOccupancies.reservationId, resDirect.id));
+      expect(directOcc).toBeUndefined();
+
+      // Clean up (delete dependent userCardEntries first)
+      await db.delete(userCardEntries).where(eq(userCardEntries.workOrderId, completionResult.workOrder?.id));
+      await db.delete(workOrders).where(eq(workOrders.reservationId, resDirect.id));
+      await db.delete(craneOperationLog).where(eq(craneOperationLog.reservationId, resDirect.id));
+      await db.delete(reservations).where(eq(reservations.id, resDirect.id));
+    });
+
+    it("Dry Berth to Truck (Suhi vez -> Kamion): dispatchByTruck with club crane charges manipulation fee and frees land spot without touching statutory quota", async () => {
+      const db = await requireTestDb();
+      const [testZone] = await db.select().from(landZones).limit(1);
+
+      const [operatorUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, TEST_USER_IDS.operator))
+        .limit(1);
+
+      const caller = appRouter.createCaller({
+        user: operatorUser,
+        req: {} as any,
+        res: {} as any,
+      });
+
+      // 1. Create a land occupancy for an external vessel (simulating 10 days on dry berth)
+      const tenDaysAgo = new Date();
+      tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+
+      const [testVessel] = await db
+        .insert(vessels)
+        .values({
+          ownerId: uniqueCommercialId,
+          name: "Servisni Brod 1",
+          type: "motorni",
+          registration: "SB-100",
+          lengthM: "10.00",
+        })
+        .returning();
+
+      const [occ] = await db
+        .insert(landOccupancies)
+        .values({
+          vesselId: testVessel.id,
+          userId: uniqueCommercialId,
+          zoneId: testZone.id,
+          spotNumber: 88,
+          liftedAt: tenDaysAgo,
+          note: "Smješteno na suhi vez radi pripreme servisa",
+          createdBy: TEST_USER_IDS.operator,
+        })
+        .returning();
+
+      // 2. Dispatch by truck using club crane (našom dizalicom)
+      const dispatchResult = await caller.landOccupancy.dispatchByTruck({
+        occupancyId: occ.id,
+        craneUsageMode: "club_crane",
+        craneId: TEST_CRANE_IDS.crane2,
+        dispatchedAt: new Date(),
+        note: "Odvoz kamionom u servisnu radionicu",
+      });
+
+      expect(dispatchResult.success).toBe(true);
+      expect(dispatchResult.totalDays).toBeGreaterThanOrEqual(10);
+
+      // Verify occupancy is completed
+      const [updatedOcc] = await db
+        .select()
+        .from(landOccupancies)
+        .where(eq(landOccupancies.id, occ.id));
+      expect(updatedOcc.returnedAt).not.toBeNull();
+      expect(updatedOcc.note).toContain("[OTPREMA KAMIONOM - KLUPSKA DIZALICA:");
+
+      // Verify that getUnifiedCycleSummary reflects manipulation fee and dry berth days, with NO lower to sea charge
+      const summary = await caller.workOrders.getUnifiedCycleSummary({
+        vesselId: testVessel.id,
+      });
+
+      expect(summary.lower.costNet).toBe(0); // Lowering into sea was NOT performed
+      expect(summary.totals.berthCostNet).toBeGreaterThan(0); // 10 days of dry berth charged
+
+      // Verify that generateUnifiedQuote produces berth days + manipulation item without USL-DIZ-SPU
+      const quote = await caller.workOrders.generateUnifiedQuote({
+        userId: uniqueCommercialId,
+        vesselId: testVessel.id,
+        documentType: "proforma",
+      });
+
+      const invItems = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, quote.id));
+      expect(invItems.some((i: any) => i.productCode === "USL-DIZ-SPU")).toBe(false);
+      expect(invItems.some((i: any) => i.productCode === "USL-MANIPULACIJA")).toBe(true);
+
+      // Clean up
+      await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, quote.id));
+      await db.delete(invoices).where(eq(invoices.id, quote.id));
+      await db.delete(userCardEntries).where(eq(userCardEntries.userId, uniqueCommercialId));
+      await db.delete(craneOperationLog).where(eq(craneOperationLog.operatorId, TEST_USER_IDS.operator));
+      await db.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+      await db.delete(vessels).where(eq(vessels.id, testVessel.id));
     });
 
     afterAll(async () => {

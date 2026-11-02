@@ -516,7 +516,15 @@ export async function completeReservationOperation(params: CompleteOperationPara
       const isLower = fin.opCategory === "lower_to_sea";
       const isMove = fin.opCategory === "move";
 
-      if ((isLift || isMove) && res.userId) {
+      const isDirectToTruck =
+        res.liftPurpose?.toLowerCase().includes("more -> kamion") ||
+        res.liftPurpose?.toLowerCase().includes("direktan ukrcaj") ||
+        res.liftPurpose?.toLowerCase().includes("direktno na kamion") ||
+        params.operatorNotes?.toLowerCase().includes("direktan ukrcaj") ||
+        params.operatorNotes?.toLowerCase().includes("direktno na kamion") ||
+        res.adminNote?.toLowerCase().includes("direktan ukrcaj");
+
+      if ((isLift || isMove) && res.userId && !isDirectToTruck) {
         let targetZoneId = finalZoneId;
         if (!targetZoneId && isLift) {
           const allZones = await tx.select().from(landZones).where(eq(landZones.isActive, true));

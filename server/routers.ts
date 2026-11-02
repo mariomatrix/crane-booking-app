@@ -23,6 +23,7 @@ import { isValidOib } from "../shared/oib";
 import { reportsRouter } from "./reports.router";
 import { workOrdersRouter } from "./workOrders.router";
 import { completeReservationOperation } from "./services/workOrderService";
+import { getCraneManipulationPricing } from "./services/statutoryQuotaService";
 import { generateReservationNumber } from "./services/numberingService";
 import { issueTokenPairCookies as issueTokenPair } from "./services/authPolicyService";
 import {
@@ -164,6 +165,8 @@ import {
   landSpots,
   vessels,
   workOrders,
+  craneOperationLog,
+  userCardEntries,
 } from "../drizzle/schema";
 import {
   and,
@@ -5570,6 +5573,106 @@ export const appRouter = router({
           entityId: input.id,
         });
         return { success: true };
+      }),
+
+    dispatchByTruck: operatorProcedure
+      .input(
+        z.object({
+          occupancyId: z.string().uuid(),
+          craneUsageMode: z.enum(["truck_crane", "club_crane"]).default("truck_crane"),
+          craneId: z.string().uuid().optional(),
+          dispatchedAt: z.date().optional(),
+          note: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [occ] = await db
+          .select()
+          .from(landOccupancies)
+          .where(eq(landOccupancies.id, input.occupancyId))
+          .limit(1);
+
+        if (!occ) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Zapis o boravku na kopnu nije pronađen." });
+        }
+        if (occ.returnedAt) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Ovaj boravak na kopnu je već ranije zaključen." });
+        }
+
+        const effectiveDispatchedAt = input.dispatchedAt || new Date();
+        const diffMs = effectiveDispatchedAt.getTime() - new Date(occ.liftedAt).getTime();
+        const totalDays = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+        let craneName = "";
+        if (input.craneUsageMode === "club_crane") {
+          if (!input.craneId) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Odaberite klupsku dizalicu za ukrcaj na kamion." });
+          }
+          const [crane] = await db.select().from(cranes).where(eq(cranes.id, input.craneId)).limit(1);
+          if (!crane) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Odabrana klupska dizalica nije pronađena." });
+          }
+          craneName = crane.name;
+
+          const manipPricing = await getCraneManipulationPricing(db);
+          const [vessel] = await db.select().from(vessels).where(eq(vessels.id, occ.vesselId)).limit(1);
+
+          await db.insert(craneOperationLog).values({
+            craneId: input.craneId,
+            operationType: "move",
+            startTime: effectiveDispatchedAt,
+            endTime: effectiveDispatchedAt,
+            durationMinutes: 45,
+            operatorId: ctx.user.id,
+            note: `Ukrcaj plovila sa suhog veza na kamion (${crane.name})`,
+          });
+
+          await db.insert(userCardEntries).values({
+            userId: occ.userId,
+            entryType: "commercial_service",
+            serviceItemCode: manipPricing.code,
+            serviceItemName: `${manipPricing.name} (${crane.name})`,
+            vesselName: vessel?.name || "Plovilo",
+            vesselRegistration: vessel?.registration || "",
+            eventDate: effectiveDispatchedAt,
+            note: `Ukrcaj na kamion sa suhog veza klupskom dizalicom — Cijena: ${manipPricing.totalWithVat.toFixed(2)} EUR s PDV`,
+            erpStatus: "pending",
+          });
+        }
+
+        const dispatchNote = input.craneUsageMode === "club_crane"
+          ? `[OTPREMA KAMIONOM - KLUPSKA DIZALICA: ${craneName}] ${input.note?.trim() || "Ukrcaj na kamion klupskom dizalicom"}`
+          : `[OTPREMA KAMIONOM - VLASTITA DIZALICA KAMIONA] ${input.note?.trim() || "Ukrcaj na kamion vlastitom dizalicom kamiona (0,00 € dizalica)"}`;
+
+        const fullNote = occ.note ? `${occ.note} | ${dispatchNote}` : dispatchNote;
+
+        await db
+          .update(landOccupancies)
+          .set({
+            returnedAt: effectiveDispatchedAt,
+            updatedAt: new Date(),
+            note: fullNote,
+          })
+          .where(eq(landOccupancies.id, occ.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "land_occupancy_dispatched_by_truck",
+          entityType: "land_occupancy",
+          entityId: occ.id,
+          payload: {
+            vesselId: occ.vesselId,
+            userId: occ.userId,
+            totalDays,
+            craneUsageMode: input.craneUsageMode,
+            craneId: input.craneId || null,
+          },
+        });
+
+        return { success: true, totalDays, craneUsageMode: input.craneUsageMode };
       }),
 
     history: operatorProcedure

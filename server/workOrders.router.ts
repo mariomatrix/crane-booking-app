@@ -24,7 +24,7 @@ import {
 import { eq, desc, and, gte, lte, sql, count, ne, or } from "drizzle-orm";
 import { generateWorkOrderNumber, generateInvoiceNumber } from "./services/numberingService";
 import { startReservationWorkOrder, completeReservationOperation } from "./services/workOrderService";
-import { parseStrictVesselLength } from "./services/statutoryQuotaService";
+import { parseStrictVesselLength, getCraneManipulationPricing } from "./services/statutoryQuotaService";
 
 export { completeReservationOperation, startReservationWorkOrder };
 
@@ -530,11 +530,22 @@ export const workOrdersRouter = router({
             const craneVatRate = cranePriceItem?.vatRate ? Number(cranePriceItem.vatRate) : 25.00;
             const berthVatRate = berthPriceItem?.vatRate ? Number(berthPriceItem.vatRate) : 25.00;
 
+            const isDispatchedByTruck = !!occupancy?.note?.includes("OTPREMA KAMIONOM");
+            const isDispatchedByClubCrane = isDispatchedByTruck && !!occupancy?.note?.includes("KLUPSKA DIZALICA");
+
+            let manipulationCostNet = 0;
+            let manipulationVat = 0;
+            if (isDispatchedByClubCrane) {
+                const manipPricing = await getCraneManipulationPricing(db);
+                manipulationCostNet = manipPricing.fixedPriceEur;
+                manipulationVat = Number((manipulationCostNet * (manipPricing.vatRate / 100)).toFixed(2));
+            }
+
             const isTruckWithoutClubCrane = occupancy && (!occupancy.reservationId || occupancy.note?.includes("VLASTITA DIZALICA KAMIONA") || occupancy.note?.includes("bez klupske dizalice"));
             const hasClubCraneLift = occupancy ? !isTruckWithoutClubCrane : true;
 
             const liftCostNet = (isMember || !hasClubCraneLift) ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
-            const lowerCostNet = isMember ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
+            const lowerCostNet = (isMember || isDispatchedByTruck) ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
             const berthCostNet = Number((billableDays * dailyBerthRate).toFixed(2));
 
             const totalResourcesNet = [...liftResources, ...lowerResources].reduce(
@@ -547,8 +558,8 @@ export const workOrdersRouter = router({
             const berthVat = Number((berthCostNet * (berthVatRate / 100)).toFixed(2));
             const resourcesVat = Number((totalResourcesNet * 0.25).toFixed(2));
 
-            const grandTotalNet = liftCostNet + lowerCostNet + berthCostNet + totalResourcesNet;
-            const grandTotalVat = Number((liftVat + lowerVat + berthVat + resourcesVat).toFixed(2));
+            const grandTotalNet = liftCostNet + lowerCostNet + berthCostNet + manipulationCostNet + totalResourcesNet;
+            const grandTotalVat = Number((liftVat + lowerVat + berthVat + manipulationVat + resourcesVat).toFixed(2));
             const grandTotalGross = Number((grandTotalNet + grandTotalVat).toFixed(2));
             const effectiveVatRate = grandTotalNet > 0
                 ? Number(((grandTotalVat / grandTotalNet) * 100).toFixed(2))
@@ -735,8 +746,11 @@ export const workOrdersRouter = router({
                 totalNet += berthNet;
             }
 
-            // 3. Spuštanje plovila
-            if (!isMember) {
+            // 3. Spuštanje plovila (samo ako plovilo nije otpremljeno kamionom)
+            const isDispatchedByTruck = !!occupancy?.note?.includes("OTPREMA KAMIONOM");
+            const isDispatchedByClubCrane = isDispatchedByTruck && !!occupancy?.note?.includes("KLUPSKA DIZALICA");
+
+            if (!isMember && !isDispatchedByTruck) {
                 const lowerNet = Number((lengthM * craneRatePerMeter).toFixed(2));
                 const lowerVat = Number((lowerNet * (craneVatRate / 100)).toFixed(2));
                 itemsToInsert.push({
@@ -751,6 +765,25 @@ export const workOrdersRouter = router({
                     grossAmount: (lowerNet + lowerVat).toFixed(2),
                 });
                 totalNet += lowerNet;
+            }
+
+            // 3b. Ukrcaj na kamion klupskom dizalicom (manipulacija)
+            if (isDispatchedByClubCrane) {
+                const manipPricing = await getCraneManipulationPricing(db);
+                const manipNet = manipPricing.fixedPriceEur;
+                const manipVat = Number((manipNet * (manipPricing.vatRate / 100)).toFixed(2));
+                itemsToInsert.push({
+                    productCode: manipPricing.code,
+                    description: `${manipPricing.name} (Ukrcaj sa suhog veza na kamion)`,
+                    quantity: "1",
+                    unit: "usl",
+                    unitPrice: manipNet.toFixed(2),
+                    vatRate: manipPricing.vatRate.toFixed(2),
+                    netAmount: manipNet.toFixed(2),
+                    vatAmount: manipVat.toFixed(2),
+                    grossAmount: (manipNet + manipVat).toFixed(2),
+                });
+                totalNet += manipNet;
             }
 
             // 4. Fetch attached resources for lift and lower

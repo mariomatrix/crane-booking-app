@@ -15,7 +15,7 @@ import { formatToSqlDate, fromZagreb } from "@/lib/date-utils";
 import { DatePicker } from "@/components/ui/date-picker";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
-import { Loader2, Send, UserPlus, XCircle, AlertTriangle, ShieldAlert, CheckCircle2 } from "lucide-react";
+import { Loader2, Send, UserPlus, XCircle, AlertTriangle, ShieldAlert, CheckCircle2, Info } from "lucide-react";
 import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { CreateUserDialog } from "@/components/CreateUserDialog";
 import { cn } from "@/lib/utils";
@@ -835,7 +835,11 @@ export function AdminReservationForm({
                                             <SelectValue placeholder={lang === "hr" ? "Odaberite zonu (opcionalno)" : "Select zone (optional)"} />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="none">{lang === "hr" ? "Nije odabrano" : "Not selected"}</SelectItem>
+                                            <SelectItem value="none">
+                                                {lang === "hr"
+                                                    ? "🚚 Direktno na kamion (bez smještaja na kopnu)"
+                                                    : "🚚 Direct to truck (no dry berth)"}
+                                            </SelectItem>
                                             {(landZones as any[]).map((lz: any) => {
                                                 const activeCount = lz.activeSpots || 0;
                                                 const reservedCount = lz.reservedSpots || 0;
@@ -850,6 +854,15 @@ export function AdminReservationForm({
                                         </SelectContent>
                                     </Select>
                                 </div>
+
+                                {isLiftFromSea && (!landZoneId || landZoneId === "none") && (
+                                    <div className="p-2.5 bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-900 dark:text-blue-200 text-xs flex items-start gap-2">
+                                        <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                                        <div>
+                                            <strong>More → kamion (direktan ukrcaj):</strong> Klupska dizalica vadi plovilo iz mora i ukrcava ga na kamion. Troši se statutarno pravo na vađenje (ili doplata po dizalici ako je kvota iskorištena). Plovilo se ne smješta na suhi vez te se <strong>ne zaračunava ležarina</strong>.
+                                        </div>
+                                    </div>
+                                )}
 
                                 {zoneCapacity?.isOver80 && !isWaitlisted && (
                                     <div className="bg-amber-50 border border-amber-300 rounded-md p-2.5 space-y-2">

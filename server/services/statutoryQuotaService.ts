@@ -35,13 +35,30 @@ export async function evaluateQuotaOperationType(
 
     if (st) {
       opCategory = st.operationCategory || null;
-      isTruckDelivery = !!st.name?.toLowerCase().includes("kamion");
-      if (isTruckDelivery) {
-        quotaOperationType = "none";
-      } else if (st.operationCategory === "lift_from_sea") {
+      const lowerName = st.name?.toLowerCase() || "";
+      const isKamion = lowerName.includes("kamion");
+
+      // More -> kamion našom dizalicom (direktni ukrcaj iz mora na kamion): troši statutarno pravo na vađenje!
+      const isDirectSeaToTruckLift =
+        st.operationCategory === "lift_from_sea" ||
+        (isKamion && (lowerName.includes("more -> kamion") || lowerName.includes("more u kamion") || lowerName.includes("vađenje")));
+
+      // Suhi vez -> kamion (ukrcaj s kopna na kamion) ili dolazak s kamiona: ne troši kvotu vađenja/spuštanja
+      isTruckDelivery =
+        isKamion &&
+        (lowerName.includes("iskrcaj") ||
+          lowerName.includes("dolazak") ||
+          lowerName.includes("ukrcaj") ||
+          lowerName.includes("otprema") ||
+          st.operationCategory === "move");
+
+      if (isDirectSeaToTruckLift && !isTruckDelivery) {
         quotaOperationType = "lift";
+        opCategory = "lift_from_sea";
       } else if (st.operationCategory === "lower_to_sea") {
         quotaOperationType = "lower";
+      } else {
+        quotaOperationType = "none";
       }
     }
   }
@@ -317,5 +334,30 @@ export async function calculateCommercialPricing(
     chargeItemCode: priceItem?.code || "USL-VANJSKI-M",
     chargeItemName: priceItem?.name || "Komercijalno korištenje dizalice (po metru duljine)",
     vatRate: vatRate.toFixed(2),
+  };
+}
+
+/**
+ * Dynamic pricing lookup for crane manipulation / loading onto truck from dry berth.
+ * Reads active price item 'USL-MANIPULACIJA' or falls back to system defaults.
+ * Allows administrators to customize the tariff at any time via AdminPriceList.
+ */
+export async function getCraneManipulationPricing(db: any) {
+  const [priceItem] = await db
+    .select()
+    .from(priceListItems)
+    .where(and(eq(priceListItems.code, "USL-MANIPULACIJA"), eq(priceListItems.isActive, true)))
+    .limit(1);
+
+  const fixedPrice = priceItem?.fixedPriceEur ? Number(priceItem.fixedPriceEur) : 40.0;
+  const vatRate = priceItem?.vatRate ? Number(priceItem.vatRate) : 25.0;
+  const totalWithVat = fixedPrice * (1 + vatRate / 100);
+
+  return {
+    code: priceItem?.code || "USL-MANIPULACIJA",
+    name: priceItem?.name || "Manipulacija dizalicom / ukrcaj na kamion",
+    fixedPriceEur: fixedPrice,
+    vatRate,
+    totalWithVat: Number(totalWithVat.toFixed(2)),
   };
 }
