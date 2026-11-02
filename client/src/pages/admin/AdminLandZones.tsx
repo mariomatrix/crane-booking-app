@@ -165,7 +165,7 @@ export default function AdminLandZones() {
             className="border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800 rounded-xl shadow-xs font-semibold"
           >
             <Truck className="h-4 w-4 mr-2 text-amber-600" />
-            {isHr ? "Iskrcaj s kamiona (Bez dizalice)" : "Truck Delivery (No Crane)"}
+            {isHr ? "Iskrcaj s kamiona" : "Truck Delivery (No Crane)"}
           </Button>
         </div>
         <Button onClick={openCreate} className="bg-primary hover:bg-primary/95 text-white rounded-xl shadow-md">
@@ -272,20 +272,18 @@ export default function AdminLandZones() {
                 </CardDescription>
               </div>
             </div>
-            
+
             <div className="flex border-t border-muted pt-1 mt-1">
               <button
-                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all mr-4 ${
-                  activeTab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
+                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all mr-4 ${activeTab === "active" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
                 onClick={() => setActiveTab("active")}
               >
                 {isHr ? "Aktivna plovila na kopnu" : "Active Vessels"} ({occupancies.length})
               </button>
               <button
-                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 mr-4 ${
-                  activeTab === "reserved" ? "border-amber-500 text-amber-700 font-bold" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
+                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 mr-4 ${activeTab === "reserved" ? "border-amber-500 text-amber-700 font-bold" : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
                 onClick={() => setActiveTab("reserved")}
               >
                 {isHr ? "Rezervirana plovila (Nadolazeće operacije)" : "Reserved Vessels"}
@@ -296,9 +294,8 @@ export default function AdminLandZones() {
                 )}
               </button>
               <button
-                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${
-                  activeTab === "waiting" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
+                className={`py-2 px-4 text-xs font-semibold border-b-2 transition-all flex items-center gap-1.5 ${activeTab === "waiting" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
                 onClick={() => setActiveTab("waiting")}
               >
                 {isHr ? "Lista čekanja za suhi vez" : "Waiting List"}

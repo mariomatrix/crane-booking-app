@@ -443,6 +443,7 @@ export const workOrdersRouter = router({
                     returnReservationId: landOccupancies.returnReservationId,
                     liftedAt: landOccupancies.liftedAt,
                     returnedAt: landOccupancies.returnedAt,
+                    note: landOccupancies.note,
                 })
                 .from(landOccupancies)
                 .leftJoin(landZones, eq(landOccupancies.zoneId, landZones.id))
@@ -529,7 +530,10 @@ export const workOrdersRouter = router({
             const craneVatRate = cranePriceItem?.vatRate ? Number(cranePriceItem.vatRate) : 25.00;
             const berthVatRate = berthPriceItem?.vatRate ? Number(berthPriceItem.vatRate) : 25.00;
 
-            const liftCostNet = isMember ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
+            const isTruckWithoutClubCrane = occupancy && (!occupancy.reservationId || occupancy.note?.includes("VLASTITA DIZALICA KAMIONA") || occupancy.note?.includes("bez klupske dizalice"));
+            const hasClubCraneLift = occupancy ? !isTruckWithoutClubCrane : true;
+
+            const liftCostNet = (isMember || !hasClubCraneLift) ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
             const lowerCostNet = isMember ? 0 : Number((lengthM * craneRatePerMeter).toFixed(2));
             const berthCostNet = Number((billableDays * dailyBerthRate).toFixed(2));
 
@@ -692,13 +696,16 @@ export const workOrdersRouter = router({
 
             let totalNet = 0;
 
-            // 1. Vađenje plovila
-            if (!isMember) {
+            // 1. Vađenje plovila / iskrcaj dizalicom (samo ako je korištena naša klupska dizalica)
+            const isTruckWithoutClubCrane = occupancy && (!occupancy.reservationId || occupancy.note?.includes("VLASTITA DIZALICA KAMIONA") || occupancy.note?.includes("bez klupske dizalice"));
+            const hasClubCraneLift = occupancy ? !isTruckWithoutClubCrane : true;
+
+            if (!isMember && hasClubCraneLift) {
                 const liftNet = Number((lengthM * craneRatePerMeter).toFixed(2));
                 const liftVat = Number((liftNet * (craneVatRate / 100)).toFixed(2));
                 itemsToInsert.push({
                     productCode: "USL-DIZ-VAD",
-                    description: `Vađenje plovila iz mora (${lengthM.toFixed(2)} m)`,
+                    description: `Vađenje / iskrcaj plovila klupskom dizalicom (${lengthM.toFixed(2)} m)`,
                     quantity: "1",
                     unit: "usl",
                     unitPrice: liftNet.toFixed(2),

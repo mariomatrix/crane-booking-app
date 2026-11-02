@@ -30,6 +30,8 @@ import {
   Calendar,
   Loader2,
   Info,
+  Anchor,
+  CheckCircle2,
 } from "lucide-react";
 
 interface TruckDeliveryToLandDialogProps {
@@ -60,6 +62,10 @@ export function TruckDeliveryToLandDialog({
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [vesselMode, setVesselMode] = useState<"new" | "existing">("new");
   const [selectedVesselId, setSelectedVesselId] = useState<string>("");
+
+  // Crane usage mode: kamion ima vlastitu dizalicu vs angažman klupske dizalice
+  const [craneUsageMode, setCraneUsageMode] = useState<"truck_crane" | "club_crane">("truck_crane");
+  const [selectedCraneId, setSelectedCraneId] = useState<string>("");
 
   // New vessel form fields
   const [vesselName, setVesselName] = useState("");
@@ -128,6 +134,21 @@ export function TruckDeliveryToLandDialog({
     [spots]
   );
 
+  const { data: cranes = [], isLoading: cranesLoading } =
+    trpc.crane.list.useQuery(undefined, { enabled: open });
+
+  const activeCranes = useMemo(
+    () => (cranes as any[]).filter((c: any) => c.craneStatus === "active"),
+    [cranes]
+  );
+
+  // Auto-select crane when switching to club_crane
+  useEffect(() => {
+    if (craneUsageMode === "club_crane" && !selectedCraneId && activeCranes.length > 0) {
+      setSelectedCraneId(activeCranes[0].id);
+    }
+  }, [craneUsageMode, selectedCraneId, activeCranes]);
+
   // Sync defaults when modal opens
   useEffect(() => {
     if (open) {
@@ -153,13 +174,17 @@ export function TruckDeliveryToLandDialog({
   const placeMutation = trpc.landOccupancy.placeFromTruck.useMutation({
     onSuccess: () => {
       toast.success(
-        "Brod s kamiona je uspješno smješten na kopno. Brojanje dana do spuštanja u more je započelo."
+        craneUsageMode === "club_crane"
+          ? "Brod s kamiona je uspješno iskrcan klupskom dizalicom i smješten na kopno."
+          : "Brod s kamiona je uspješno smješten na kopno (vlastita dizalica kamiona, 0,00 € dizalica)."
       );
       utils.landOccupancy.listActive.invalidate();
       utils.landOccupancy.history.invalidate();
       utils.landZone.list.invalidate();
       utils.landFlow.getSpotsByZone.invalidate();
       utils.landFlow.getDailyBalance.invalidate();
+      utils.reservation.listAll.invalidate();
+      utils.workOrders.list.invalidate();
       if (selectedUserId) {
         utils.user.getCard.invalidate({ userId: selectedUserId });
       }
@@ -195,6 +220,11 @@ export function TruckDeliveryToLandDialog({
       }
     }
 
+    if (craneUsageMode === "club_crane" && !selectedCraneId) {
+      toast.error("Odaberite klupsku dizalicu za iskrcaj.");
+      return;
+    }
+
     const parsedLiftedAt = liftedAtStr ? new Date(liftedAtStr) : new Date();
     const chosenSpot =
       spotId && spotId !== "none"
@@ -213,48 +243,82 @@ export function TruckDeliveryToLandDialog({
       newVessel:
         vesselMode === "new"
           ? {
-              name: vesselName.trim(),
-              type: vesselType,
-              registration: vesselRegistration.trim() || undefined,
-              lengthM: vesselLengthM ? parseFloat(vesselLengthM) : undefined,
-              beamM: vesselBeamM ? parseFloat(vesselBeamM) : undefined,
-              draftM: vesselDraftM ? parseFloat(vesselDraftM) : undefined,
-              weightTons: vesselWeightTons
-                ? parseFloat(vesselWeightTons)
-                : undefined,
-            }
+            name: vesselName.trim(),
+            type: vesselType,
+            registration: vesselRegistration.trim() || undefined,
+            lengthM: vesselLengthM ? parseFloat(vesselLengthM) : undefined,
+            beamM: vesselBeamM ? parseFloat(vesselBeamM) : undefined,
+            draftM: vesselDraftM ? parseFloat(vesselDraftM) : undefined,
+            weightTons: vesselWeightTons
+              ? parseFloat(vesselWeightTons)
+              : undefined,
+          }
           : undefined,
       zoneId,
       spotId: spotId && spotId !== "none" ? spotId : undefined,
       spotNumber: spotNum && !isNaN(spotNum) ? spotNum : undefined,
       liftedAt: !isNaN(parsedLiftedAt.getTime()) ? parsedLiftedAt : new Date(),
+      craneUsageMode,
+      craneId: craneUsageMode === "club_crane" ? selectedCraneId : undefined,
       note: note.trim() || undefined,
     });
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl md:max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Truck className="w-5 h-5 text-amber-600" />
-            Iskrcaj broda s kamiona na kopno (bez klupske dizalice)
-          </DialogTitle>
+          <div className="flex items-center justify-between gap-2 pr-6">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Truck className="w-5 h-5 text-amber-600" />
+              Iskrcaj broda s kamiona na kopno
+            </DialogTitle>
+            <Badge
+              variant="outline"
+              className={
+                craneUsageMode === "truck_crane"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300 text-[11px]"
+                  : "bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-950/40 dark:text-blue-300 text-[11px]"
+              }
+            >
+              {craneUsageMode === "truck_crane"
+                ? "🚚 Vlastita dizalica kamiona (0,00 €)"
+                : "🏗️ Angažman klupske dizalice"}
+            </Badge>
+          </div>
           <DialogDescription className="text-xs">
-            Evidentirajte novi brod koji je kamion iskrcao vlastitom dizalicom na
-            mjesto na kopnu. Mjesto odmah postaje zauzeto i broji dane provedene na
-            kopnu sve do operacije spuštanja u more.
+            Evidentirajte dolazak i smještaj broda s kamiona na suhi vez. Možete odabrati ima li kamion vlastitu dizalicu ili se angažira klupska dizalica.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-1">
-          {/* Info Banner */}
-          <div className="p-2.5 rounded-lg bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
-            <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
-            <div>
-              <strong>Napomena o pravima i obračunu:</strong> Klupska dizalica nije
-              angažirana pri iskrcaju. Broj dana provedenih na kopnu vodi se{" "}
-              <strong>informativno</strong> sve dok se brod ne spusti u more.
+          {/* Info Banner ovisno o odabranom načinu */}
+          <div
+            className={`p-2.5 rounded-lg border flex items-start gap-2.5 text-xs transition-colors ${craneUsageMode === "truck_crane"
+                ? "bg-emerald-50/80 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60 text-emerald-900 dark:text-emerald-200"
+                : "bg-blue-50/80 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800/60 text-blue-900 dark:text-blue-200"
+              }`}
+          >
+            <Info
+              className={`w-4 h-4 shrink-0 mt-0.5 ${craneUsageMode === "truck_crane" ? "text-emerald-600" : "text-blue-600"
+                }`}
+            />
+            <div className="space-y-0.5">
+              <strong>
+                {craneUsageMode === "truck_crane"
+                  ? "Kamion s vlastitom dizalicom (bez klupske dizalice):"
+                  : "Iskrcaj klupskom dizalicom kluba:"}
+              </strong>{" "}
+              {craneUsageMode === "truck_crane" ? (
+                <span>
+                  Klupska dizalica <strong>nije angažirana</strong> pri iskrcaju te se{" "}
+                  <strong>usluga dizalice ne zaračunava (0,00 €)</strong>. Mjesto na kopnu odmah postaje zauzeto, a dani ležarine broje se sve do operacije spuštanja u more.
+                </span>
+              ) : (
+                <span>
+                  Klupska dizalica <strong>obavlja iskrcaj s kamiona</strong>. Operacija se evidentira u radnom nalogu i zadužuje prema statutarnoj kvoti (za članove) ili po važećem cjeniku (za vanjske korisnike).
+                </span>
+              )}
             </div>
           </div>
 
@@ -268,7 +332,7 @@ export function TruckDeliveryToLandDialog({
               placeholder="Pretraži korisnika po imenu, prezimenu, tvrtki ili OIB-u..."
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
-              className="h-8 text-xs bg-background"
+              className="h-8 text-xs bg-background w-full"
             />
             <Select
               value={selectedUserId}
@@ -277,7 +341,7 @@ export function TruckDeliveryToLandDialog({
                 setSelectedVesselId("");
               }}
             >
-              <SelectTrigger className="h-9 text-xs bg-background">
+              <SelectTrigger className="h-9 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                 <SelectValue
                   placeholder={
                     usersLoading
@@ -291,7 +355,7 @@ export function TruckDeliveryToLandDialog({
                   <SelectItem key={u.id} value={u.id} className="text-xs">
                     {u.name || u.companyName || u.email}{" "}
                     {u.clientCategory === "member"
-                      ? "(Član)"
+                      ? "(Član kluba)"
                       : "(Vanjski korisnik)"}
                   </SelectItem>
                 ))}
@@ -299,34 +363,140 @@ export function TruckDeliveryToLandDialog({
             </Select>
           </div>
 
-          {/* 2. Plovilo (Novi brod ili postojeće plovilo) */}
+          {/* 2. Način iskrcaja i dizalica */}
+          <div className="space-y-3 p-3 rounded-xl border bg-muted/20">
+            <Label className="text-xs font-bold flex items-center gap-1.5">
+              <Truck className="w-3.5 h-3.5 text-primary" />
+              2. Način iskrcaja s kamiona i angažman dizalice *
+            </Label>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Opcija 1: Kamion ima vlastitu dizalicu */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setCraneUsageMode("truck_crane")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    setCraneUsageMode("truck_crane");
+                  }
+                }}
+                className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between text-left ${craneUsageMode === "truck_crane"
+                    ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30 ring-1 ring-emerald-500 shadow-2xs"
+                    : "border-border hover:border-muted-foreground/40 bg-background"
+                  }`}
+              >
+                <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                  <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                    <Truck className="w-4 h-4 text-emerald-600" />
+                    Kamion ima svoju dizalicu
+                  </div>
+                  {craneUsageMode === "truck_crane" && (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  Kamion samostalno iskrcava brod. Klupska dizalica <strong>nije potrebna</strong>.
+                </p>
+                <Badge
+                  variant="outline"
+                  className="w-fit text-[10px] font-semibold bg-emerald-100/70 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300"
+                >
+                  Usluga dizalice: 0,00 € (ne naplaćuje se)
+                </Badge>
+              </div>
+
+              {/* Opcija 2: Angažira se klupska dizalica */}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setCraneUsageMode("club_crane")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    setCraneUsageMode("club_crane");
+                  }
+                }}
+                className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between text-left ${craneUsageMode === "club_crane"
+                    ? "border-blue-500 bg-blue-50/50 dark:bg-blue-950/30 ring-1 ring-blue-500 shadow-2xs"
+                    : "border-border hover:border-muted-foreground/40 bg-background"
+                  }`}
+              >
+                <div className="flex items-start justify-between gap-1.5 mb-1.5">
+                  <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+                    <Anchor className="w-4 h-4 text-blue-600" />
+                    Angažman klupske dizalice
+                  </div>
+                  {craneUsageMode === "club_crane" && (
+                    <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0" />
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  Iskrcaj broda obavlja naša dizalica (Travelift / Stupna dizalica).
+                </p>
+                <Badge
+                  variant="outline"
+                  className="w-fit text-[10px] font-semibold bg-blue-100/70 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300"
+                >
+                  Zaračunava se usluga dizalice (kvota / cjenik)
+                </Badge>
+              </div>
+            </div>
+
+            {/* Ako je odabran angažman klupske dizalice, prikazujemo odabir dizalice */}
+            {craneUsageMode === "club_crane" && (
+              <div className="pt-1.5 space-y-1.5 animate-in fade-in duration-200">
+                <Label className="text-[11px] font-semibold flex items-center gap-1 text-blue-900 dark:text-blue-300">
+                  <Anchor className="w-3.5 h-3.5" />
+                  Odaberite klupsku dizalicu za iskrcaj *
+                </Label>
+                <Select value={selectedCraneId} onValueChange={setSelectedCraneId}>
+                  <SelectTrigger className="h-8 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate border-blue-300">
+                    <SelectValue
+                      placeholder={
+                        cranesLoading
+                          ? "Učitavanje dizalica..."
+                          : "Odaberite klupsku dizalicu"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-56">
+                    {activeCranes.map((c: any) => (
+                      <SelectItem key={c.id} value={c.id} className="text-xs">
+                        {c.name} ({c.type}) — Nosivost: do {c.capacityTons} t
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          {/* 3. Plovilo (Novi brod ili postojeće plovilo) */}
           <div className="space-y-3 p-3 rounded-xl border bg-muted/20">
             <div className="flex items-center justify-between gap-2">
               <Label className="text-xs font-bold flex items-center gap-1.5">
                 <Ship className="w-3.5 h-3.5 text-primary" />
-                2. Podaci o brodu *
+                3. Podaci o brodu *
               </Label>
               <div className="flex items-center gap-1 bg-background p-0.5 rounded-lg border">
                 <button
                   type="button"
                   onClick={() => setVesselMode("new")}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 ${
-                    vesselMode === "new"
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1 ${vesselMode === "new"
                       ? "bg-primary text-primary-foreground shadow-2xs"
                       : "text-muted-foreground hover:text-foreground"
-                  }`}
+                    }`}
                 >
                   <Plus className="w-3 h-3" />
-                  Novi brod (tek kupljen)
+                  Novi brod
                 </button>
                 <button
                   type="button"
                   onClick={() => setVesselMode("existing")}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                    vesselMode === "existing"
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${vesselMode === "existing"
                       ? "bg-primary text-primary-foreground shadow-2xs"
                       : "text-muted-foreground hover:text-foreground"
-                  }`}
+                    }`}
                 >
                   Postojeći brod ({userVessels.length})
                 </button>
@@ -335,8 +505,8 @@ export function TruckDeliveryToLandDialog({
 
             {vesselMode === "new" ? (
               <div className="space-y-2.5 pt-1">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div className="space-y-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
+                  <div className="space-y-1 min-w-0">
                     <Label className="text-[11px]">
                       Naziv / model novog broda *
                     </Label>
@@ -344,17 +514,18 @@ export function TruckDeliveryToLandDialog({
                       value={vesselName}
                       onChange={(e) => setVesselName(e.target.value)}
                       placeholder="npr. Novi brod - Merry Fisher 795"
-                      className="h-8 text-xs bg-background"
+                      className="h-8 text-xs bg-background w-full"
                       required
                     />
                   </div>
-                  <div className="space-y-1">
+
+                  <div className="space-y-1 min-w-0">
                     <Label className="text-[11px]">Tip plovila *</Label>
                     <Select
                       value={vesselType}
                       onValueChange={(v: any) => setVesselType(v)}
                     >
-                      <SelectTrigger className="h-8 text-xs bg-background">
+                      <SelectTrigger className="h-8 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -375,12 +546,12 @@ export function TruckDeliveryToLandDialog({
                     value={vesselRegistration}
                     onChange={(e) => setVesselRegistration(e.target.value)}
                     placeholder="Ostavite prazno ako brod još nema registraciju (npr. ST-1234)"
-                    className="h-8 text-xs bg-background"
+                    className="h-8 text-xs bg-background w-full"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className="text-[11px]">Dužina (m)</Label>
                     <Input
                       type="number"
@@ -389,10 +560,10 @@ export function TruckDeliveryToLandDialog({
                       value={vesselLengthM}
                       onChange={(e) => setVesselLengthM(e.target.value)}
                       placeholder="8.50"
-                      className="h-8 text-xs bg-background"
+                      className="h-8 text-xs bg-background w-full"
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className="text-[11px]">Širina (m)</Label>
                     <Input
                       type="number"
@@ -401,10 +572,10 @@ export function TruckDeliveryToLandDialog({
                       value={vesselBeamM}
                       onChange={(e) => setVesselBeamM(e.target.value)}
                       placeholder="2.95"
-                      className="h-8 text-xs bg-background"
+                      className="h-8 text-xs bg-background w-full"
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className="text-[11px]">Gaz (m)</Label>
                     <Input
                       type="number"
@@ -413,10 +584,10 @@ export function TruckDeliveryToLandDialog({
                       value={vesselDraftM}
                       onChange={(e) => setVesselDraftM(e.target.value)}
                       placeholder="0.80"
-                      className="h-8 text-xs bg-background"
+                      className="h-8 text-xs bg-background w-full"
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className="text-[11px]">Težina (t)</Label>
                     <Input
                       type="number"
@@ -425,7 +596,7 @@ export function TruckDeliveryToLandDialog({
                       value={vesselWeightTons}
                       onChange={(e) => setVesselWeightTons(e.target.value)}
                       placeholder="3.2"
-                      className="h-8 text-xs bg-background"
+                      className="h-8 text-xs bg-background w-full"
                     />
                   </div>
                 </div>
@@ -437,8 +608,8 @@ export function TruckDeliveryToLandDialog({
                     Prvo odaberite korisnika iznad kako bi se prikazala njegova plovila.
                   </p>
                 ) : userVessels.length === 0 ? (
-                  <div className="text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between">
-                    <span>Odabrani korisnik nema upisanih plovila.</span>
+                  <div className="text-xs text-amber-700 dark:text-amber-300 flex items-center justify-between p-2 rounded-lg bg-amber-50/50 border border-amber-200">
+                    <span>Odabrani korisnik nema ranije evidentiranih plovila.</span>
                     <Button
                       type="button"
                       size="sm"
@@ -454,7 +625,7 @@ export function TruckDeliveryToLandDialog({
                     value={selectedVesselId}
                     onValueChange={setSelectedVesselId}
                   >
-                    <SelectTrigger className="h-9 text-xs bg-background">
+                    <SelectTrigger className="h-9 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                       <SelectValue placeholder="Odaberite plovilo korisnika" />
                     </SelectTrigger>
                     <SelectContent>
@@ -474,16 +645,16 @@ export function TruckDeliveryToLandDialog({
             )}
           </div>
 
-          {/* 3. Zona i mjesto na kopnu */}
+          {/* 4. Zona i mjesto na kopnu */}
           <div className="space-y-3 p-3 rounded-xl border bg-muted/20">
             <Label className="text-xs font-bold flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5 text-primary" />
-              3. Smještaj na kopnu i početak brojanja dana *
+              4. Smještaj na kopnu i početak brojanja dana *
             </Label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div className="space-y-1">
-                <Label className="text-[11px]">Zona na kopnu *</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
+              <div className="space-y-1 min-w-0">
+                <Label className="text-[11px] font-medium">Zona na kopnu *</Label>
                 <Select
                   value={zoneId}
                   onValueChange={(val) => {
@@ -491,10 +662,10 @@ export function TruckDeliveryToLandDialog({
                     setSpotId("none");
                   }}
                 >
-                  <SelectTrigger className="h-8 text-xs bg-background">
+                  <SelectTrigger className="h-8 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                     <SelectValue placeholder="Odaberite zonu" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-56">
                     {activeZones.map((z: any) => (
                       <SelectItem key={z.id} value={z.id} className="text-xs">
                         Zona {z.code} — {z.name} (Slobodno: {z.availableSpots ?? 0}/
@@ -505,12 +676,12 @@ export function TruckDeliveryToLandDialog({
                 </Select>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-[11px]">
+              <div className="space-y-1 min-w-0">
+                <Label className="text-[11px] font-medium">
                   Mjesto u zoni (odabir iz mreže mjesta)
                 </Label>
                 <Select value={spotId} onValueChange={setSpotId}>
-                  <SelectTrigger className="h-8 text-xs bg-background">
+                  <SelectTrigger className="h-8 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                     <SelectValue
                       placeholder={
                         spotsLoading
@@ -534,10 +705,10 @@ export function TruckDeliveryToLandDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
               {spotId === "none" && (
-                <div className="space-y-1">
-                  <Label className="text-[11px]">
+                <div className="space-y-1 min-w-0">
+                  <Label className="text-[11px] font-medium">
                     Broj mjesta (opcijski ručni unos)
                   </Label>
                   <Input
@@ -546,13 +717,13 @@ export function TruckDeliveryToLandDialog({
                     value={manualSpotNumber}
                     onChange={(e) => setManualSpotNumber(e.target.value)}
                     placeholder="npr. 12"
-                    className="h-8 text-xs bg-background"
+                    className="h-8 text-xs bg-background w-full"
                   />
                 </div>
               )}
 
-              <div className="space-y-1">
-                <Label className="text-[11px] flex items-center gap-1">
+              <div className="space-y-1 min-w-0">
+                <Label className="text-[11px] font-medium flex items-center gap-1">
                   <Calendar className="w-3 h-3" />
                   Datum i vrijeme iskrcaja s kamiona *
                 </Label>
@@ -560,22 +731,22 @@ export function TruckDeliveryToLandDialog({
                   type="datetime-local"
                   value={liftedAtStr}
                   onChange={(e) => setLiftedAtStr(e.target.value)}
-                  className="h-8 text-xs bg-background"
+                  className="h-8 text-xs bg-background w-full"
                   required
                 />
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-[11px]">
-                Napomena (pripremni radovi / prijevoznik)
+            <div className="space-y-1 min-w-0">
+              <Label className="text-[11px] font-medium">
+                Napomena (pripremni radovi / prijevoznik / dizalica)
               </Label>
               <Textarea
                 rows={2}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Unesite napomenu o iskrcaju s kamiona i pripremnim radovima..."
-                className="text-xs bg-background"
+                className="text-xs bg-background w-full"
               />
             </div>
           </div>
@@ -593,14 +764,21 @@ export function TruckDeliveryToLandDialog({
               type="submit"
               size="sm"
               disabled={placeMutation.isPending}
-              className="gap-1.5 bg-amber-600 hover:bg-amber-700 text-white"
+              className={`gap-1.5 text-white ${craneUsageMode === "truck_crane"
+                  ? "bg-emerald-600 hover:bg-emerald-700"
+                  : "bg-blue-600 hover:bg-blue-700"
+                }`}
             >
               {placeMutation.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
+              ) : craneUsageMode === "truck_crane" ? (
                 <Truck className="w-4 h-4" />
+              ) : (
+                <Anchor className="w-4 h-4" />
               )}
-              Evidentiraj iskrcaj i zauzmi mjesto
+              {craneUsageMode === "truck_crane"
+                ? "Evidentiraj iskrcaj (bez klupske dizalice, 0,00 €)"
+                : "Evidentiraj iskrcaj klupskom dizalicom"}
             </Button>
           </DialogFooter>
         </form>

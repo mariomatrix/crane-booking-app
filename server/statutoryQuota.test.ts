@@ -268,6 +268,8 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       await db.delete(reservations).where(eq(reservations.userId, uniqueDuesUnpaidMemberId));
       await db.delete(vessels).where(eq(vessels.id, testVesselMemberId));
       await db.delete(vessels).where(eq(vessels.id, testVesselCommId));
+      await db.delete(vessels).where(eq(vessels.ownerId, uniqueMemberId));
+      await db.delete(vessels).where(eq(vessels.ownerId, uniqueCommercialId));
       await db.delete(users).where(eq(users.id, uniqueMemberId));
       await db.delete(users).where(eq(users.id, uniqueCommercialId));
       await db.delete(users).where(eq(users.id, uniqueSuspendedOperatorId));
@@ -1461,6 +1463,77 @@ describe("Statutory Quota & Billing Domain Engine (PŠD Špinut)", () => {
       // Cleanup
       await db.delete(workOrders).where(eq(workOrders.id, futureWo.id));
       await db.delete(reservations).where(eq(reservations.id, futureRes.id));
+    });
+
+    it("Truck Unloading: truck's own crane incurs 0,00 EUR crane fee, while club crane engages club crane", async () => {
+      const db = await requireTestDb();
+      const [testZone] = await db.select().from(landZones).limit(1);
+
+      const [operatorUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, TEST_USER_IDS.operator))
+        .limit(1);
+
+      const caller = appRouter.createCaller({
+        user: operatorUser,
+        req: {} as any,
+        res: {} as any,
+      });
+
+      // 1. Truck with own crane (bez klupske dizalice)
+      const truckPlacementResult = await caller.landOccupancy.placeFromTruck({
+        userId: uniqueCommercialId,
+        newVessel: {
+          name: "Kamionski Brod Test",
+          type: "motorni",
+          registration: "KB-TRUCK-99",
+          lengthM: 8.0,
+          beamM: 2.5,
+          draftM: 0.8,
+          weightTons: 2.2,
+        },
+        zoneId: testZone.id,
+        spotNumber: 99,
+        craneUsageMode: "truck_crane",
+        note: "Iskrcaj vlastitom hidrauličkom dizalicom kamiona",
+      });
+
+      expect(truckPlacementResult.id).toBeDefined();
+      expect(truckPlacementResult.vesselId).toBeDefined();
+
+      const [truckOcc] = await db
+        .select()
+        .from(landOccupancies)
+        .where(eq(landOccupancies.id, truckPlacementResult.id));
+
+      expect(truckOcc.reservationId).toBeNull();
+      expect(truckOcc.note).toContain("[KAMION - VLASTITA DIZALICA KAMIONA (BEZ KLUPSKE DIZALICE)]");
+
+      // Verify that getUnifiedCycleSummary returns 0 EUR for liftCostNet
+      const summary = await caller.workOrders.getUnifiedCycleSummary({
+        userId: uniqueCommercialId,
+        vesselId: truckPlacementResult.vesselId,
+      });
+
+      expect(summary.lift.costNet).toBe(0);
+      expect(summary.totals.liftCostNet).toBe(0);
+
+      // Verify that generateUnifiedQuote does not charge USL-DIZ-VAD
+      const quote = await caller.workOrders.generateUnifiedQuote({
+        userId: uniqueCommercialId,
+        vesselId: truckPlacementResult.vesselId,
+        documentType: "proforma",
+      });
+
+      const invItems = await db.select().from(invoiceItems).where(eq(invoiceItems.invoiceId, quote.id));
+      expect(invItems.some((i: any) => i.productCode === "USL-DIZ-VAD")).toBe(false);
+
+      // Clean up truck placement, invoice, and vessel
+      await db.delete(invoiceItems).where(eq(invoiceItems.invoiceId, quote.id));
+      await db.delete(invoices).where(eq(invoices.id, quote.id));
+      await db.delete(landOccupancies).where(eq(landOccupancies.id, truckPlacementResult.id));
+      await db.delete(vessels).where(eq(vessels.id, truckPlacementResult.vesselId));
     });
 
     afterAll(async () => {

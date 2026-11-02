@@ -180,6 +180,7 @@ import {
   sql,
   ne,
   inArray,
+  ilike,
 } from "drizzle-orm";
 import crypto from "crypto";
 import {
@@ -5291,6 +5292,8 @@ export const appRouter = router({
           spotId: z.string().uuid().optional(),
           spotNumber: z.number().int().positive().optional(),
           liftedAt: z.date().optional(),
+          craneUsageMode: z.enum(["truck_crane", "club_crane"]).default("truck_crane"),
+          craneId: z.string().uuid().optional(),
           note: z.string().optional(),
         })
       )
@@ -5407,35 +5410,123 @@ export const appRouter = router({
           }
         }
 
-        const id = await createLandOccupancy({
-          vesselId: targetVesselId,
-          userId: input.userId,
-          zoneId: input.zoneId,
-          spotId: resolvedSpotId,
-          spotNumber: resolvedSpotNumber,
-          reservationId: null,
-          liftedAt: input.liftedAt || new Date(),
-          note:
-            input.note?.trim() ||
-            "Iskrcaj novog broda s kamiona — priprema za spuštanje u more",
-          createdBy: ctx.user.id,
-        });
+        let landOccupancyId: string;
+
+        if (input.craneUsageMode === "club_crane") {
+          if (!input.craneId) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Kada se odabere iskrcaj klupskom dizalicom, odabir dizalice je obavezan.",
+            });
+          }
+          const [crane] = await db.select().from(cranes).where(eq(cranes.id, input.craneId)).limit(1);
+          if (!crane) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Odabrana klupska dizalica nije pronađena.",
+            });
+          }
+          const [user] = await db.select().from(users).where(eq(users.id, input.userId)).limit(1);
+          if (!user) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Korisnik nije pronađen." });
+          }
+          const [vessel] = await db.select().from(vessels).where(eq(vessels.id, targetVesselId)).limit(1);
+
+          const [st] = await db
+            .select()
+            .from(serviceTypes)
+            .where(
+              or(
+                ilike(serviceTypes.name, "%kamion%"),
+                ilike(serviceTypes.name, "%vađ%"),
+                eq(serviceTypes.operationCategory, "lift_from_sea")
+              )
+            )
+            .limit(1);
+
+          const liftTime = input.liftedAt || new Date();
+          const endTime = new Date(liftTime.getTime() + 60 * 60 * 1000);
+
+          const reservationId = await createReservation({
+            userId: input.userId,
+            craneId: input.craneId,
+            vesselId: targetVesselId,
+            vesselName: vessel?.name || "Brod s kamiona",
+            vesselType: (vessel?.type as any) || "motorni",
+            vesselRegistration: vessel?.registration || undefined,
+            vesselLengthM: vessel?.lengthM || undefined,
+            vesselWeightTons: vessel?.weightTons || undefined,
+            serviceTypeId: st?.id || undefined,
+            scheduledStart: liftTime,
+            scheduledEnd: endTime,
+            status: "approved",
+            liftPurpose: `Iskrcaj s kamiona klupskom dizalicom (${crane.name})`,
+            landZoneId: input.zoneId,
+            contactPhone: user.phone || "000",
+          });
+
+          await completeReservationOperation({
+            reservationId,
+            operatorId: ctx.user.id,
+            craneId: input.craneId,
+            startTime: liftTime,
+            actualDurationMin: 60,
+            zoneId: input.zoneId,
+            spotNumber: resolvedSpotNumber,
+            operatorNotes: input.note
+              ? `[KAMION - KLUPSKA DIZALICA: ${crane.name}] ${input.note}`
+              : `[KAMION - KLUPSKA DIZALICA: ${crane.name}] Iskrcaj s kamiona klupskom dizalicom`,
+            allowFutureDate: false,
+          });
+
+          if (resolvedSpotId) {
+            await db
+              .update(landOccupancies)
+              .set({ spotId: resolvedSpotId })
+              .where(eq(landOccupancies.reservationId, reservationId));
+          }
+
+          const [createdOcc] = await db
+            .select({ id: landOccupancies.id })
+            .from(landOccupancies)
+            .where(eq(landOccupancies.reservationId, reservationId))
+            .limit(1);
+
+          landOccupancyId = createdOcc?.id || "";
+        } else {
+          // Kamion ima vlastitu dizalicu: naša klupska dizalica se NE angažira i NE zaračunava se usluga dizalice (0,00 €)
+          landOccupancyId = await createLandOccupancy({
+            vesselId: targetVesselId,
+            userId: input.userId,
+            zoneId: input.zoneId,
+            spotId: resolvedSpotId,
+            spotNumber: resolvedSpotNumber,
+            reservationId: null,
+            liftedAt: input.liftedAt || new Date(),
+            note: input.note?.trim()
+              ? `[KAMION - VLASTITA DIZALICA KAMIONA (BEZ KLUPSKE DIZALICE)] ${input.note.trim()}`
+              : "[KAMION - VLASTITA DIZALICA KAMIONA (BEZ KLUPSKE DIZALICE)] Iskrcaj s kamiona na mjesto na kopnu",
+            createdBy: ctx.user.id,
+          });
+        }
 
         await createAuditEntry({
           actorId: ctx.user.id,
           action: "land_occupancy_truck_delivery",
           entityType: "land_occupancy",
-          entityId: id,
+          entityId: landOccupancyId,
           payload: {
             vesselId: targetVesselId,
             zoneId: input.zoneId,
             spotId: resolvedSpotId,
             spotNumber: resolvedSpotNumber,
             createdNewVessel: !!input.newVessel,
+            craneUsageMode: input.craneUsageMode,
+            craneId: input.craneId || null,
           },
         });
 
-        return { id, vesselId: targetVesselId };
+        return { id: landOccupancyId, vesselId: targetVesselId };
       }),
 
     create: operatorProcedure

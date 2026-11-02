@@ -147,7 +147,7 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
           className="h-8 text-xs font-semibold border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800 gap-1.5"
         >
           <Truck className="w-3.5 h-3.5 text-amber-600" />
-          Iskrcaj s kamiona (Bez dizalice)
+          Iskrcaj s kamiona
         </Button>
       </div>
 
