@@ -252,6 +252,7 @@ export function AdminReservationForm({
 
         const selectedCrane = (cranes as any[]).find((c: any) => c.id === craneId);
         const currentWeightTons = vesselWeight ? Number(vesselWeight) : 0;
+        const currentLength = vesselLength ? Number(vesselLength) : 0;
         const currentBeam = vesselWidth ? Number(vesselWidth) : 0;
 
         if (!isWorkingDay) {
@@ -275,6 +276,10 @@ export function AdminReservationForm({
                         `Prekoračenje nosivosti dizalice ${selectedCrane.name} za +${exceedPct.toFixed(1)}% (${currentWeightTons.toFixed(1)} t > nominalno ${nominalTons.toFixed(1)} t, unutar +10% tolerancije).`
                     );
                 }
+            } else if (currentWeightTons <= 0 && currentLength >= 5.5 && nominalTons > 0 && nominalTons <= 2.0) {
+                overrideReasons.push(
+                    `Za plovilo dužine ${currentLength.toFixed(1)}m bez upisane mase procjenjuje se masa veća od nosivosti dizalice ${selectedCrane.name} (${nominalTons.toFixed(1)} t). Zahtijeva provjeru mase ili svjesni dispečerski override.`
+                );
             }
 
             if (maxPoolWidth && currentBeam > 0 && currentBeam > maxPoolWidth) {
@@ -352,6 +357,12 @@ export function AdminReservationForm({
             }
         }
 
+        if (isLiftFromSea && isVesselOnLand) {
+            overrideReasons.push(
+                "Plovilo se prema evidenciji već nalazi na kopnu (suhom vezu). Provjerite status plovila ili potvrdite dispečerski override."
+            );
+        }
+
         const status =
             hardBlocks.length > 0
                 ? ("blocked" as const)
@@ -368,6 +379,7 @@ export function AdminReservationForm({
         cranes,
         vesselWeight,
         vesselWidth,
+        vesselLength,
         isWorkingDay,
         nonWorkingReason,
         selectedSlotObj,
@@ -377,6 +389,7 @@ export function AdminReservationForm({
         landZones,
         affinitiesMatrix,
         isLiftFromSea,
+        isVesselOnLand,
     ]);
 
     // Auto-select first available free slot when date/crane/duration changes
@@ -456,10 +469,12 @@ export function AdminReservationForm({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (isLiftFromSea && isVesselOnLand) {
+        const isAnyOverride = overrideCapacityCheck || overrideTeamCapacity;
+
+        if (isLiftFromSea && isVesselOnLand && !isAnyOverride) {
             toast.error(lang === "hr"
-                ? "Nije moguće zakazati vađenje iz mora jer se plovilo već nalazi na kopnu (suhom vezu)."
-                : "Cannot schedule lift from sea because the vessel is already on dry berth.");
+                ? "Plovilo se prema evidenciji već nalazi na kopnu (suhom vezu). Za nastavak je potreban ručni override."
+                : "Vessel is recorded as already on dry berth. Manual override required.");
             return;
         }
 
@@ -489,12 +504,8 @@ export function AdminReservationForm({
                 return;
             }
             if (liveDiagnostics.status === "override_required") {
-                if (!overrideTeamCapacity) {
+                if (!isAnyOverride) {
                     toast.error("Zahtijeva se potvrda odobrenja iznimke za detektirana ograničenja.");
-                    return;
-                }
-                if (!overrideReason.trim()) {
-                    toast.error("Molimo unesite razlog odobravanja iznimke.");
                     return;
                 }
             }
@@ -505,6 +516,10 @@ export function AdminReservationForm({
             const dateStr = formatToSqlDate(requestedDate);
             scheduledStartDate = fromZagreb(dateStr, scheduledTime);
         }
+
+        const effectiveOverrideReason = isAnyOverride
+            ? (overrideReason.trim() || "Ručni dispečerski override")
+            : undefined;
 
         const commonPayload = {
             userId,
@@ -521,9 +536,9 @@ export function AdminReservationForm({
             contactPhone,
             landZoneId: (landZoneId && landZoneId !== "none") ? landZoneId : undefined,
             landWaitingId: initialData?.landWaitingId || undefined,
-            overrideCapacityCheck: overrideCapacityCheck || overrideTeamCapacity || undefined,
-            overrideTeamCapacity: overrideTeamCapacity || undefined,
-            overrideReason: overrideTeamCapacity ? (overrideReason.trim() || undefined) : undefined,
+            overrideCapacityCheck: isAnyOverride || undefined,
+            overrideTeamCapacity: isAnyOverride || undefined,
+            overrideReason: effectiveOverrideReason,
             status: isWaitlisted ? ("waitlisted" as const) : undefined,
             isAutoApprove: !isWaitlisted ? true : undefined,
             craneId: craneId || undefined,
@@ -876,8 +891,14 @@ export function AdminReservationForm({
                                             <label className="flex items-center gap-2 text-[10px] text-amber-900 cursor-pointer select-none">
                                                 <input
                                                     type="checkbox"
-                                                    checked={overrideCapacityCheck}
-                                                    onChange={(e) => setOverrideCapacityCheck(e.target.checked)}
+                                                    checked={overrideCapacityCheck || overrideTeamCapacity}
+                                                    onChange={(e) => {
+                                                        setOverrideCapacityCheck(e.target.checked);
+                                                        setOverrideTeamCapacity(e.target.checked);
+                                                        if (e.target.checked && !overrideReason) {
+                                                            setOverrideReason("Potvrđen ručni override popunjenosti zone / kapaciteta");
+                                                        }
+                                                    }}
                                                     className="h-3.5 w-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
                                                 />
                                                 <span>
@@ -894,6 +915,7 @@ export function AdminReservationForm({
                                                 onClick={() => {
                                                     setIsWaitlisted(true);
                                                     setOverrideCapacityCheck(false);
+                                                    setOverrideTeamCapacity(false);
                                                 }}
                                                 className="text-left text-[10px] text-amber-700 font-semibold hover:underline flex items-center gap-1 focus:outline-none"
                                             >
@@ -1128,55 +1150,90 @@ export function AdminReservationForm({
                             </div>
                         )}
 
-                        {!isWaitlisted && liveDiagnostics.status === "override_required" && (
-                            <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3 space-y-2.5">
-                                <div className="flex items-start gap-2">
-                                    <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                                    <div className="text-xs text-amber-950 space-y-1 flex-1">
-                                        <p className="font-bold">
-                                            Detektirana operativna ograničenja — zahtijeva odobrenje iznimke:
-                                        </p>
-                                        <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900 font-medium">
-                                            {liveDiagnostics.overrideReasons.map((reason, idx) => (
-                                                <li key={idx}>{reason}</li>
-                                            ))}
-                                        </ul>
+                        {!isWaitlisted && liveDiagnostics.status === "override_required" && (() => {
+                            const hasTeamWarning = liveDiagnostics.overrideReasons.some(
+                                (r) => r.toLowerCase().includes("ekip") || r.toLowerCase().includes("tim")
+                            );
+                            const hasZoneWarning = liveDiagnostics.overrideReasons.some(
+                                (r) => r.toLowerCase().includes("zona") || r.toLowerCase().includes("mjesta") || r.toLowerCase().includes("popunjen")
+                            );
 
-                                        <div className="p-2 rounded bg-amber-100/80 text-[11px] text-amber-950 border border-amber-300/60 mt-1">
-                                            <p className="font-semibold mb-0.5">Opseg operativne iznimke:</p>
-                                            <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
-                                                <li><strong>Što se može odobriti iznimkom:</strong> Angažman dodatne operativne ekipe iznad redovnog kapaciteta ili dopušten prolaz u zonu kopna uz nadzor.</li>
-                                                <li><strong>Što se NE MOŽE zaobići:</strong> Fizičko prekoračenje maksimalne nosivosti dizalice &gt; 10%, širina bazena dizalice te aktivne sigurnosne obustave rada.</li>
+                            let overrideLabel = "Odobri dispečerski override za evidentirana ograničenja";
+                            let overrideScopeNote = "Operativno odobrenje iznimke uz dispečerski nadzor.";
+                            let defaultReason = "Ručni dispečerski override";
+                            let placeholder = "Unesite razlog odobravanja iznimke...";
+
+                            if (hasTeamWarning && hasZoneWarning) {
+                                overrideLabel = "Odobri kombiniranu iznimku (dodatna ekipa + smještaj u zoni na kopnu)";
+                                overrideScopeNote = "Angažman dodatne operativne ekipe na dizalicama I smještaj plovila u popunjenu zonu na kopnu (privremeno mjesto / preraspodjela).";
+                                defaultReason = "Potvrđen kombinirani override: osigurana dodatna ekipa i odobren smještaj u zoni";
+                                placeholder = "Npr. Osigurana dodatna ekipa i privremeni smještaj u zoni na kopnu...";
+                            } else if (hasTeamWarning) {
+                                overrideLabel = "Odobri iznimku uz angažman dodatne operativne ekipe";
+                                overrideScopeNote = "Angažman dodatne operativne ekipe na dizalicama iznad redovnog kapaciteta ekipa.";
+                                defaultReason = "Osigurana dodatna ekipa na terenu";
+                                placeholder = "Npr. Osigurana dodatna ekipa na terenu / preraspodjela smjene...";
+                            } else if (hasZoneWarning) {
+                                overrideLabel = "Odobri dispečerski override za smještaj u zoni na kopnu";
+                                overrideScopeNote = "Smještaj plovila u popunjenu zonu na kopnu (privremeno mjesto / preraspodjela).";
+                                defaultReason = "Potvrđen ručni override popunjenosti zone na kopnu";
+                                placeholder = "Npr. Privremeni smještaj / preraspodjela mjesta na kopnu...";
+                            }
+
+                            return (
+                                <div className="bg-amber-50 border-2 border-amber-300 rounded-lg p-3 space-y-2.5">
+                                    <div className="flex items-start gap-2">
+                                        <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                                        <div className="text-xs text-amber-950 space-y-1 flex-1">
+                                            <p className="font-bold">
+                                                Detektirana operativna ograničenja — zahtijeva odobrenje iznimke:
+                                            </p>
+                                            <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-amber-900 font-medium">
+                                                {liveDiagnostics.overrideReasons.map((reason, idx) => (
+                                                    <li key={idx}>{reason}</li>
+                                                ))}
                                             </ul>
+
+                                            <div className="p-2 rounded bg-amber-100/80 text-[11px] text-amber-950 border border-amber-300/60 mt-1">
+                                                <p className="font-semibold mb-0.5">Opseg operativne iznimke:</p>
+                                                <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
+                                                    <li><strong>Što se odobrava ovom iznimkom:</strong> {overrideScopeNote}</li>
+                                                    <li><strong>Što se NE MOŽE zaobići:</strong> Fizičko prekoračenje maksimalne nosivosti dizalice &gt; 10%, širina bazena dizalice te aktivne sigurnosne obustave rada.</li>
+                                                </ul>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                                <label className="flex items-center gap-2 text-xs font-bold text-amber-950 bg-amber-100/80 p-2 rounded border border-amber-300 cursor-pointer select-none">
-                                    <input
-                                        type="checkbox"
-                                        checked={overrideTeamCapacity}
-                                        onChange={(e) => setOverrideTeamCapacity(e.target.checked)}
-                                        className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
-                                    />
-                                    <span>
-                                        Odobri iznimku uz dodatnu ekipu / posebne operativne uvjete
-                                    </span>
-                                </label>
-                                {overrideTeamCapacity && (
-                                    <div className="space-y-1 pt-0.5">
-                                        <Label className="text-xs font-bold text-amber-950">
-                                            Razlog odobravanja iznimke *
-                                        </Label>
-                                        <Input
-                                            value={overrideReason}
-                                            onChange={(e) => setOverrideReason(e.target.value)}
-                                            placeholder="Unesite razlog odobravanja iznimke (npr. Preraspodjela osoblja na terenu)..."
-                                            className="h-8 text-xs bg-white border-amber-300"
+                                    <label className="flex items-center gap-2 text-xs font-bold text-amber-950 bg-amber-100/80 p-2 rounded border border-amber-300 cursor-pointer select-none">
+                                        <input
+                                            type="checkbox"
+                                            checked={overrideTeamCapacity || overrideCapacityCheck}
+                                            onChange={(e) => {
+                                                setOverrideTeamCapacity(e.target.checked);
+                                                setOverrideCapacityCheck(e.target.checked);
+                                                if (e.target.checked && !overrideReason) {
+                                                    setOverrideReason(defaultReason);
+                                                }
+                                            }}
+                                            className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
                                         />
-                                    </div>
-                                )}
-                            </div>
-                        )}
+                                        <span>{overrideLabel}</span>
+                                    </label>
+                                    {(overrideTeamCapacity || overrideCapacityCheck) && (
+                                        <div className="space-y-1 pt-0.5">
+                                            <Label className="text-xs font-bold text-amber-950">
+                                                Razlog odobravanja iznimke (opcijski)
+                                            </Label>
+                                            <Input
+                                                value={overrideReason}
+                                                onChange={(e) => setOverrideReason(e.target.value)}
+                                                placeholder={placeholder}
+                                                className="h-8 text-xs bg-white border-amber-300"
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         {!isWaitlisted && liveDiagnostics.status === "optimal" && (
                             <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 p-2.5 flex items-start gap-2 text-xs text-emerald-900">
@@ -1511,17 +1568,17 @@ export function AdminReservationForm({
                     <Button
                         type="submit"
                         disabled={
-                            createMutation.isPending || 
-                            !userId || 
-                            !serviceTypeId || 
-                            !requestedDate || 
+                            createMutation.isPending ||
+                            !userId ||
+                            !serviceTypeId ||
+                            !requestedDate ||
                             !craneId ||
-                            !vesselType || 
+                            !vesselType ||
                             (!isWaitlisted && (
                                 !durationMin ||
-                                !scheduledTime || 
+                                !scheduledTime ||
                                 liveDiagnostics.status === "blocked" ||
-                                (liveDiagnostics.status === "override_required" && (!overrideTeamCapacity || !overrideReason.trim())) ||
+                                (liveDiagnostics.status === "override_required" && !overrideTeamCapacity && !overrideCapacityCheck) ||
                                 (isLiftFromSea && zoneCapacity?.isOver80 && !overrideCapacityCheck && !overrideTeamCapacity)
                             ))
                         }

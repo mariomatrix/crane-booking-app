@@ -2091,9 +2091,12 @@ export const appRouter = router({
             );
           const queueCount = Number(existingQueue[0]?.count ?? 0);
 
+          const staffCapacityOverride =
+            isAdminOrOperator && !!(input.overrideCapacityCheck || input.overrideTeamCapacity);
+
           if (
             queueCount > 0 &&
-            !input.overrideCapacityCheck &&
+            !staffCapacityOverride &&
             input.status !== "waitlisted"
           ) {
             throw new TRPCError({
@@ -2105,7 +2108,7 @@ export const appRouter = router({
           const cap = await getLandZoneCapacity(input.landZoneId);
           if (
             cap.isOver80 &&
-            !input.overrideCapacityCheck &&
+            !staffCapacityOverride &&
             input.status !== "waitlisted"
           ) {
             throw new TRPCError({
@@ -3684,6 +3687,7 @@ export const appRouter = router({
           adminNote: z.string().optional(),
           landZoneId: z.string().uuid().nullable().optional(),
           durationMin: z.number().int().min(15).max(480).optional(),
+          overrideCapacityCheck: z.boolean().optional(),
           overrideTeamCapacity: z.boolean().optional(),
           overrideReason: z.string().optional(),
         })

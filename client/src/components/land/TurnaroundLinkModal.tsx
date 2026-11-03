@@ -220,7 +220,7 @@ export function TurnaroundLinkModal({
               <SelectContent>
                 {zoneSpotsData.map((s) => (
                   <SelectItem key={s.id} value={s.id} className="text-xs">
-                    {s.code} - max {s.maxLengthM}m × {s.maxBeamM}m
+                    {s.code} (Mjesto #{s.spotNumber})
                   </SelectItem>
                 ))}
               </SelectContent>

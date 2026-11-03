@@ -136,7 +136,7 @@ export function TruckDispatchFromLandDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl md:max-w-3xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center justify-between gap-2 pr-6">
             <DialogTitle className="flex items-center gap-2 text-base font-bold">

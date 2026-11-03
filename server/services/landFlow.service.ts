@@ -786,11 +786,8 @@ export class LandFlowService {
         // Rangiraj mjesta
         return spots.map(({ spot, zone }: { spot: typeof landSpots.$inferSelect; zone: typeof landZones.$inferSelect }) => {
             const aff = affByZoneId.get(zone.id);
-            const maxL = spot.maxLengthM ? parseFloat(spot.maxLengthM) : 999;
-            const maxB = spot.maxBeamM ? parseFloat(spot.maxBeamM) : 999;
-            const maxW = spot.maxWeightTons ? parseFloat(spot.maxWeightTons) : 999;
-
-            const fitsDimensions = (vLength <= maxL) && (vBeam <= maxB) && (vWeight <= maxW);
+            // U lucici je raspored na suhom vezu fleksibilan (Opcija C - bez fiksnih fiktivnih metara po mjestu)
+            const fitsDimensions = true;
             const isBlockedByCrane = aff?.isBlocked ?? false;
             const score = isBlockedByCrane ? 0 : (aff?.affinityScore ?? 50);
 

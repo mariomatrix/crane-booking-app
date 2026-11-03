@@ -461,7 +461,7 @@ export function DispatchGanttTimeline({
                                 {opInSlot.teamOverride && (
                                   <span
                                     className="bg-amber-300 text-amber-950 px-1 rounded font-bold"
-                                    title="Odobrena iznimka za ekipu"
+                                    title={opInSlot.teamOverrideReason || "Dispečerski override"}
                                   >
                                     ★ Ovrd
                                   </span>

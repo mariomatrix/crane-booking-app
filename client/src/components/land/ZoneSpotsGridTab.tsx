@@ -307,12 +307,6 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
                           <span>Spremno za prijem</span>
                         </div>
                       )}
-
-                      {/* Dimensions Footer */}
-                      <div className="pt-1 border-t border-border/50 text-[10px] text-muted-foreground font-mono flex items-center justify-between">
-                        <span>Max: {spot.maxLengthM}m</span>
-                        <span>{spot.maxBeamM}m</span>
-                      </div>
                     </div>
                   );
                 })}
@@ -339,25 +333,6 @@ export function ZoneSpotsGridTab({ onAssignFromWaitlist }: ZoneSpotsGridTabProps
             </DialogHeader>
 
             <div className="space-y-3 py-2 text-xs">
-              {/* Dimensions */}
-              <div className="p-2.5 rounded-lg bg-muted/40 border space-y-1">
-                <p className="font-semibold text-foreground">Fizička ograničenja mjesta:</p>
-                <div className="grid grid-cols-3 gap-2 text-center font-mono pt-1">
-                  <div>
-                    <span className="block text-[10px] text-muted-foreground">Maks. dužina</span>
-                    <span className="font-bold">{selectedSpot.maxLengthM} m</span>
-                  </div>
-                  <div>
-                    <span className="block text-[10px] text-muted-foreground">Maks. širina</span>
-                    <span className="font-bold">{selectedSpot.maxBeamM} m</span>
-                  </div>
-                  <div>
-                    <span className="block text-[10px] text-muted-foreground">Maks. težina</span>
-                    <span className="font-bold">{selectedSpot.maxWeightTons ?? "—"} t</span>
-                  </div>
-                </div>
-              </div>
-
               {/* Occupancy Info */}
               {selectedSpot.isOccupied ? (
                 <div className="p-3 rounded-lg border bg-sky-50/60 dark:bg-sky-950/20 space-y-2">

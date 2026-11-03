@@ -1113,12 +1113,35 @@ export function DispatchCenterTab({ selectedDate, onDateChange }: DispatchCenter
                     {selectedOperation.landZoneCode ? `Zona ${selectedOperation.landZoneCode}` : "Nije dodijeljena"}
                   </span>
                 </div>
-                {selectedOperation.teamOverride && (
-                  <div className="flex justify-between text-amber-600 font-semibold">
-                    <span>Operativna ekipa:</span>
-                    <span>Odobrena iznimka uz dodatnu ekipu</span>
-                  </div>
-                )}
+                {selectedOperation.teamOverride && (() => {
+                  const reason = selectedOperation.teamOverrideReason || "";
+                  const isTeamCapacity = reason.toLowerCase().includes("ekip") || reason.toLowerCase().includes("tim");
+                  const isZoneCapacity = reason.toLowerCase().includes("zona") || reason.toLowerCase().includes("mjesta");
+
+                  let label = "Dispečerski override:";
+                  let text = "Odobrena iznimka";
+                  if (isTeamCapacity && isZoneCapacity) {
+                    label = "Kombinirana iznimka:";
+                    text = "Dodatna ekipa + popunjenost zone";
+                  } else if (isTeamCapacity) {
+                    label = "Operativna ekipa:";
+                    text = "Odobrena iznimka uz dodatnu ekipu";
+                  } else if (isZoneCapacity) {
+                    label = "Zona na kopnu:";
+                    text = "Odobren override popunjenosti zone";
+                  } else if (reason) {
+                    text = reason;
+                  }
+
+                  return (
+                    <div className="flex justify-between text-amber-600 font-semibold text-xs">
+                      <span>{label}</span>
+                      <span className="text-right truncate max-w-[220px]" title={reason || text}>
+                        {text}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {selectedOperation.isAtRiskOrBroken && (
                   <div className="flex justify-between text-rose-600 font-semibold">
                     <span>Upozorenje:</span>

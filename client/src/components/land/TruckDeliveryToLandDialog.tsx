@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UserSearchCombobox } from "@/components/UserSearchCombobox";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
@@ -58,7 +59,6 @@ export function TruckDeliveryToLandDialog({
 }: TruckDeliveryToLandDialogProps) {
   const utils = trpc.useUtils();
 
-  const [userSearch, setUserSearch] = useState("");
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [vesselMode, setVesselMode] = useState<"new" | "existing">("new");
   const [selectedVesselId, setSelectedVesselId] = useState<string>("");
@@ -90,15 +90,10 @@ export function TruckDeliveryToLandDialog({
   );
 
   // Queries
-  const { data: usersData, isLoading: usersLoading } =
-    trpc.user.list.useQuery(
-      {
-        page: 1,
-        pageSize: 100,
-        search: userSearch.trim() || undefined,
-      },
-      { enabled: open }
-    );
+  const { data: usersData } = trpc.user.list.useQuery(
+    { pageSize: 1000 },
+    { enabled: open }
+  );
 
   const usersList = useMemo(() => {
     if (!usersData) return [];
@@ -266,7 +261,7 @@ export function TruckDeliveryToLandDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl md:max-w-3xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl md:max-w-4xl lg:max-w-5xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center justify-between gap-2 pr-6">
             <DialogTitle className="flex items-center gap-2 text-base font-bold">
@@ -328,39 +323,17 @@ export function TruckDeliveryToLandDialog({
               <UserIcon className="w-3.5 h-3.5 text-primary" />
               1. Vlasnik broda (Korisnik) *
             </Label>
-            <Input
-              placeholder="Pretraži korisnika po imenu, prezimenu, tvrtki ili OIB-u..."
-              value={userSearch}
-              onChange={(e) => setUserSearch(e.target.value)}
-              className="h-8 text-xs bg-background w-full"
-            />
-            <Select
+            <UserSearchCombobox
+              users={usersList as any}
               value={selectedUserId}
-              onValueChange={(val) => {
-                setSelectedUserId(val);
+              onChange={(id) => {
+                setSelectedUserId(id);
                 setSelectedVesselId("");
               }}
-            >
-              <SelectTrigger className="h-9 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
-                <SelectValue
-                  placeholder={
-                    usersLoading
-                      ? "Učitavanje korisnika..."
-                      : "Odaberite korisnika s popisa"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {usersList.map((u: any) => (
-                  <SelectItem key={u.id} value={u.id} className="text-xs">
-                    {u.name || u.companyName || u.email}{" "}
-                    {u.clientCategory === "member"
-                      ? "(Član kluba)"
-                      : "(Vanjski korisnik)"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              showAllOption={false}
+              placeholder="Pretraži i odaberi korisnika po imenu, prezimenu ili OIB-u..."
+              className="w-full bg-background"
+            />
           </div>
 
           {/* 2. Način iskrcaja i dizalica */}
@@ -652,9 +625,9 @@ export function TruckDeliveryToLandDialog({
               4. Smještaj na kopnu i početak brojanja dana *
             </Label>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
-              <div className="space-y-1 min-w-0">
-                <Label className="text-[11px] font-medium">Zona na kopnu *</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 min-w-0">
+              <div className="space-y-1.5 min-w-0">
+                <Label className="text-xs font-medium">Zona na kopnu *</Label>
                 <Select
                   value={zoneId}
                   onValueChange={(val) => {
@@ -662,7 +635,7 @@ export function TruckDeliveryToLandDialog({
                     setSpotId("none");
                   }}
                 >
-                  <SelectTrigger className="h-8 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
+                  <SelectTrigger className="h-9 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                     <SelectValue placeholder="Odaberite zonu" />
                   </SelectTrigger>
                   <SelectContent className="max-h-56">
@@ -676,12 +649,12 @@ export function TruckDeliveryToLandDialog({
                 </Select>
               </div>
 
-              <div className="space-y-1 min-w-0">
-                <Label className="text-[11px] font-medium">
+              <div className="space-y-1.5 min-w-0">
+                <Label className="text-xs font-medium">
                   Mjesto u zoni (odabir iz mreže mjesta)
                 </Label>
                 <Select value={spotId} onValueChange={setSpotId}>
-                  <SelectTrigger className="h-8 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
+                  <SelectTrigger className="h-9 text-xs bg-background w-full min-w-0 overflow-hidden [&>span]:truncate">
                     <SelectValue
                       placeholder={
                         spotsLoading
@@ -692,12 +665,11 @@ export function TruckDeliveryToLandDialog({
                   </SelectTrigger>
                   <SelectContent className="max-h-56">
                     <SelectItem value="none" className="text-xs">
-                      — Bez odabira iz mreže (ili ručni broj mjesta) —
+                      — Ručni broj mjesta / bez odabira iz mreže —
                     </SelectItem>
                     {availableSpots.map((s: any) => (
                       <SelectItem key={s.id} value={s.id} className="text-xs">
-                        {s.code} (Mjesto #{s.spotNumber} • max {s.maxLengthM}m ×{" "}
-                        {s.maxBeamM}m)
+                        {s.code} (Mjesto #{s.spotNumber})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -705,10 +677,10 @@ export function TruckDeliveryToLandDialog({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
+            <div className={`grid grid-cols-1 ${spotId === "none" ? "md:grid-cols-2" : "md:grid-cols-1"} gap-3 min-w-0`}>
               {spotId === "none" && (
-                <div className="space-y-1 min-w-0">
-                  <Label className="text-[11px] font-medium">
+                <div className="space-y-1.5 min-w-0">
+                  <Label className="text-xs font-medium">
                     Broj mjesta (opcijski ručni unos)
                   </Label>
                   <Input
@@ -717,28 +689,28 @@ export function TruckDeliveryToLandDialog({
                     value={manualSpotNumber}
                     onChange={(e) => setManualSpotNumber(e.target.value)}
                     placeholder="npr. 12"
-                    className="h-8 text-xs bg-background w-full"
+                    className="h-9 text-xs bg-background w-full"
                   />
                 </div>
               )}
 
-              <div className="space-y-1 min-w-0">
-                <Label className="text-[11px] font-medium flex items-center gap-1">
-                  <Calendar className="w-3 h-3" />
+              <div className="space-y-1.5 min-w-0">
+                <Label className="text-xs font-medium flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" />
                   Datum i vrijeme iskrcaja s kamiona *
                 </Label>
                 <Input
                   type="datetime-local"
                   value={liftedAtStr}
                   onChange={(e) => setLiftedAtStr(e.target.value)}
-                  className="h-8 text-xs bg-background w-full"
+                  className="h-9 text-xs bg-background w-full"
                   required
                 />
               </div>
             </div>
 
-            <div className="space-y-1 min-w-0">
-              <Label className="text-[11px] font-medium">
+            <div className="space-y-1.5 min-w-0">
+              <Label className="text-xs font-medium">
                 Napomena (pripremni radovi / prijevoznik / dizalica)
               </Label>
               <Textarea

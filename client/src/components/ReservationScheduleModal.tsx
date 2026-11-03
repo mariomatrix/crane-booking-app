@@ -533,7 +533,7 @@ export function ReservationScheduleModal({
           else if (busyTeams === 1) score += 3;
           else score -= 25;
 
-          if ( compat?.exceedsNominalInTolerance ) {
+          if (compat?.exceedsNominalInTolerance) {
             score -= 20;
           }
 
@@ -890,6 +890,7 @@ export function ReservationScheduleModal({
         vesselRegistration: vesselRegistration || undefined,
         contactPhone: contactPhone || undefined,
         adminNote: adminNote || undefined,
+        overrideCapacityCheck: (requiresConsciousOverride && overrideConfirmed) || undefined,
         overrideTeamCapacity: (requiresConsciousOverride && overrideConfirmed) || undefined,
         overrideReason: requiresConsciousOverride ? overrideReason.trim() : undefined,
       });
@@ -921,6 +922,7 @@ export function ReservationScheduleModal({
         landZoneId: finalZoneId || undefined,
         isAutoApprove: true,
         adminNote: adminNote || undefined,
+        overrideCapacityCheck: (requiresConsciousOverride && overrideConfirmed) || undefined,
         overrideTeamCapacity: (requiresConsciousOverride && overrideConfirmed) || undefined,
         overrideReason: requiresConsciousOverride ? overrideReason.trim() : undefined,
       });
@@ -1452,35 +1454,80 @@ export function ReservationScheduleModal({
                   </ul>
 
                   {/* Objašnjenje opsega iznimke */}
-                  <div className="p-2 rounded-lg bg-amber-100/70 dark:bg-amber-900/40 text-[11px] text-amber-950 dark:text-amber-200 border border-amber-300/60 dark:border-amber-800">
-                    <p className="font-semibold mb-0.5">Opseg operativne iznimke:</p>
-                    <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
-                      <li><strong>Što se može odobriti iznimkom:</strong> Angažman dodatne operativne ekipe iznad redovnog kapaciteta ili dopušten prolaz u zonu kopna uz dispečerski nadzor.</li>
-                      <li><strong>Što se NE MOŽE zaobići:</strong> Fizičko prekoračenje maksimalne nosivosti dizalice &gt; 10%, širina bazena dizalice te aktivne sigurnosne obustave rada.</li>
-                    </ul>
-                  </div>
+                  {(() => {
+                    const hasTeamWarning = liveDiagnostics.overrideReasons.some(
+                      (r) => r.toLowerCase().includes("ekip") || r.toLowerCase().includes("tim")
+                    );
+                    const hasZoneWarning = liveDiagnostics.overrideReasons.some(
+                      (r) => r.toLowerCase().includes("zona") || r.toLowerCase().includes("mjesta") || r.toLowerCase().includes("popunjen")
+                    );
 
-                  {liveDiagnostics.infoNotes.length > 0 && (
-                    <div className="pt-1 text-[11px] text-amber-800 dark:text-amber-300/80">
-                      {liveDiagnostics.infoNotes.map((n, i) => (
-                        <div key={i}>ℹ️ {n}</div>
-                      ))}
-                    </div>
-                  )}
+                    let overrideScopeNote = "Operativno odobrenje iznimke uz dispečerski nadzor.";
+                    let overrideLabel = "Odobri dispečerski override za evidentirana ograničenja";
+
+                    if (hasTeamWarning && hasZoneWarning) {
+                      overrideScopeNote = "Angažman dodatne operativne ekipe na dizalicama I smještaj plovila u popunjenu zonu na kopnu (privremeno mjesto / preraspodjela).";
+                      overrideLabel = "Odobri kombiniranu iznimku (dodatna ekipa + smještaj u zoni na kopnu)";
+                    } else if (hasTeamWarning) {
+                      overrideScopeNote = "Angažman dodatne operativne ekipe iznad redovnog kapaciteta ekipa.";
+                      overrideLabel = "Odobri iznimku uz angažman dodatne operativne ekipe";
+                    } else if (hasZoneWarning) {
+                      overrideScopeNote = "Smještaj plovila u popunjenu zonu na kopnu (privremeno mjesto / preraspodjela).";
+                      overrideLabel = "Odobri dispečerski override za smještaj u zoni na kopnu";
+                    }
+
+                    return (
+                      <>
+                        <div className="p-2 rounded-lg bg-amber-100/70 dark:bg-amber-900/40 text-[11px] text-amber-950 dark:text-amber-200 border border-amber-300/60 dark:border-amber-800">
+                          <p className="font-semibold mb-0.5">Opseg operativne iznimke:</p>
+                          <ul className="list-disc pl-4 space-y-0.5 text-[10.5px]">
+                            <li><strong>Što se odobrava ovom iznimkom:</strong> {overrideScopeNote}</li>
+                            <li><strong>Što se NE MOŽE zaobići:</strong> Fizičko prekoračenje maksimalne nosivosti dizalice &gt; 10%, širina bazena dizalice te aktivne sigurnosne obustave rada.</li>
+                          </ul>
+                        </div>
+
+                        {liveDiagnostics.infoNotes.length > 0 && (
+                          <div className="pt-1 text-[11px] text-amber-800 dark:text-amber-300/80">
+                            {liveDiagnostics.infoNotes.map((n, i) => (
+                              <div key={i}>ℹ️ {n}</div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 text-xs font-bold text-amber-950 dark:text-amber-100 bg-amber-100/90 dark:bg-amber-900/50 p-2.5 rounded-lg border border-amber-300 dark:border-amber-700 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={overrideConfirmed}
-                  onChange={(e) => setOverrideConfirmed(e.target.checked)}
-                  className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
-                />
-                <span>
-                  Odobri iznimku uz dodatnu ekipu / posebne operativne uvjete
-                </span>
-              </label>
+              {(() => {
+                const hasTeamWarning = liveDiagnostics.overrideReasons.some(
+                  (r) => r.toLowerCase().includes("ekip") || r.toLowerCase().includes("tim")
+                );
+                const hasZoneWarning = liveDiagnostics.overrideReasons.some(
+                  (r) => r.toLowerCase().includes("zona") || r.toLowerCase().includes("mjesta") || r.toLowerCase().includes("popunjen")
+                );
+
+                let overrideLabel = "Odobri dispečerski override za evidentirana ograničenja";
+                if (hasTeamWarning && hasZoneWarning) {
+                  overrideLabel = "Odobri kombiniranu iznimku (dodatna ekipa + smještaj u zoni na kopnu)";
+                } else if (hasTeamWarning) {
+                  overrideLabel = "Odobri iznimku uz angažman dodatne operativne ekipe";
+                } else if (hasZoneWarning) {
+                  overrideLabel = "Odobri dispečerski override za smještaj u zoni na kopnu";
+                }
+
+                return (
+                  <label className="flex items-center gap-2 text-xs font-bold text-amber-950 dark:text-amber-100 bg-amber-100/90 dark:bg-amber-900/50 p-2.5 rounded-lg border border-amber-300 dark:border-amber-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={overrideConfirmed}
+                      onChange={(e) => setOverrideConfirmed(e.target.checked)}
+                      className="h-4 w-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                    />
+                    <span>{overrideLabel}</span>
+                  </label>
+                );
+              })()}
 
               {overrideConfirmed && (
                 <div className="space-y-1.5 pt-0.5">
