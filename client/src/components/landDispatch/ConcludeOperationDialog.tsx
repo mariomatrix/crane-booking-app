@@ -113,7 +113,13 @@ export function ConcludeOperationDialog({
           <div className="flex justify-between">
             <span className="text-muted-foreground">Vrsta operacije:</span>
             <span className="font-semibold text-foreground">
-              {operation.operationCategory === "lift_from_sea" ? "↑ Podizanje na kopno" : "↓ Spuštanje u more"}
+              {operation.operationCategory === "lift_from_sea"
+                ? "↑ Podizanje na kopno"
+                : operation.operationCategory === "lower_to_sea"
+                ? "↓ Spuštanje u more"
+                : operation.operationCategory === "move"
+                ? "↔ Premještanje na kopnu"
+                : operation.serviceTypeName || "Ostala operacija"}
             </span>
           </div>
           <div className="flex justify-between">
@@ -156,7 +162,7 @@ export function ConcludeOperationDialog({
             </div>
           </div>
 
-          {status === "completed" && operation.operationCategory === "lift_from_sea" && (
+          {status === "completed" && operation.operationCategory !== "lower_to_sea" && (
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Potvrda stvarne zone na kopnu</Label>
               <Select value={actualZoneId} onValueChange={setActualZoneId}>

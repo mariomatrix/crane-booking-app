@@ -519,6 +519,8 @@ export async function completeReservationOperation(params: CompleteOperationPara
       const isLift = fin.opCategory === "lift_from_sea";
       const isLower = fin.opCategory === "lower_to_sea";
       const isMove = fin.opCategory === "move";
+      const isTruckDelivery = fin.isTruckDelivery;
+      const isLandPlacement = isLift || isMove || isTruckDelivery;
 
       const isDirectToTruck =
         res.liftPurpose?.toLowerCase().includes("more -> kamion") ||
@@ -528,9 +530,9 @@ export async function completeReservationOperation(params: CompleteOperationPara
         params.operatorNotes?.toLowerCase().includes("direktno na kamion") ||
         res.adminNote?.toLowerCase().includes("direktan ukrcaj");
 
-      // Only manage land occupancy if this is a lift/move AND a land zone is actually designated
+      // Only manage land occupancy if this is a land placement (lift/move/truck arrival) AND a land zone is actually designated
       // If finalZoneId is null or isDirectToTruck, it is "Samo dizalica (bez mjesta na kopnu)" and must NOT occupy dry berth!
-      if ((isLift || isMove) && res.userId && !isDirectToTruck && finalZoneId) {
+      if (isLandPlacement && res.userId && !isDirectToTruck && finalZoneId) {
         const targetZoneId = finalZoneId;
         const [activeOcc] = await tx
           .select()
@@ -566,7 +568,7 @@ export async function completeReservationOperation(params: CompleteOperationPara
           });
         }
         await tx.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, res.id));
-      } else if ((isLift || isMove) && (!finalZoneId || isDirectToTruck)) {
+      } else if (isLandPlacement && (!finalZoneId || isDirectToTruck)) {
         // Samo dizalica (bez mjesta na kopnu) or Direct to truck:
         // Ensure reservation landZoneId is null and no land spot is occupied
         if (res.landZoneId) {
