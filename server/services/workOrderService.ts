@@ -510,7 +510,11 @@ export async function completeReservationOperation(params: CompleteOperationPara
     }
 
     // Land occupancy management inside tx
-    const finalZoneId = params.zoneId !== undefined ? params.zoneId || res.landZoneId : res.landZoneId;
+    const finalZoneId =
+      params.zoneId !== undefined
+        ? (params.zoneId === "none" ? null : params.zoneId)
+        : res.landZoneId;
+
     if (res.vesselId) {
       const isLift = fin.opCategory === "lift_from_sea";
       const isLower = fin.opCategory === "lower_to_sea";
@@ -524,47 +528,49 @@ export async function completeReservationOperation(params: CompleteOperationPara
         params.operatorNotes?.toLowerCase().includes("direktno na kamion") ||
         res.adminNote?.toLowerCase().includes("direktan ukrcaj");
 
-      if ((isLift || isMove) && res.userId && !isDirectToTruck) {
-        let targetZoneId = finalZoneId;
-        if (!targetZoneId && isLift) {
-          const allZones = await tx.select().from(landZones).where(eq(landZones.isActive, true));
-          if (allZones.length > 0) targetZoneId = allZones[0].id;
-        }
-        if (targetZoneId) {
-          const [activeOcc] = await tx
-            .select()
-            .from(landOccupancies)
-            .where(and(eq(landOccupancies.vesselId, res.vesselId), isNull(landOccupancies.returnedAt)))
-            .limit(1);
+      // Only manage land occupancy if this is a lift/move AND a land zone is actually designated
+      // If finalZoneId is null or isDirectToTruck, it is "Samo dizalica (bez mjesta na kopnu)" and must NOT occupy dry berth!
+      if ((isLift || isMove) && res.userId && !isDirectToTruck && finalZoneId) {
+        const targetZoneId = finalZoneId;
+        const [activeOcc] = await tx
+          .select()
+          .from(landOccupancies)
+          .where(and(eq(landOccupancies.vesselId, res.vesselId), isNull(landOccupancies.returnedAt)))
+          .limit(1);
 
-          if (activeOcc) {
-            if (activeOcc.zoneId !== targetZoneId) {
-              await tx
-                .update(landOccupancies)
-                .set({
-                  zoneId: targetZoneId,
-                  updatedAt: new Date(),
-                  note: params.operatorNotes
-                    ? `${activeOcc.note || ""} | Premješteno: ${params.operatorNotes}`.trim()
-                    : activeOcc.note,
-                })
-                .where(eq(landOccupancies.id, activeOcc.id));
-            }
-          } else {
-            await tx.insert(landOccupancies).values({
-              vesselId: res.vesselId,
-              userId: res.userId,
-              zoneId: targetZoneId,
-              spotNumber: params.spotNumber,
-              reservationId: res.id,
-              liftedAt: effectiveCompletedAt,
-              createdBy: params.operatorId,
-              note: fin.isTruckDelivery
-                ? `[KAMION] ${params.operatorNotes || "Iskrcaj novog broda s kamiona na kopno"}`
-                : params.operatorNotes || "Smješteno na kopno po izvršenju operacije",
-            });
+        if (activeOcc) {
+          if (activeOcc.zoneId !== targetZoneId) {
+            await tx
+              .update(landOccupancies)
+              .set({
+                zoneId: targetZoneId,
+                updatedAt: new Date(),
+                note: params.operatorNotes
+                  ? `${activeOcc.note || ""} | Premješteno: ${params.operatorNotes}`.trim()
+                  : activeOcc.note,
+              })
+              .where(eq(landOccupancies.id, activeOcc.id));
           }
-          await tx.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, res.id));
+        } else {
+          await tx.insert(landOccupancies).values({
+            vesselId: res.vesselId,
+            userId: res.userId,
+            zoneId: targetZoneId,
+            spotNumber: params.spotNumber,
+            reservationId: res.id,
+            liftedAt: effectiveCompletedAt,
+            createdBy: params.operatorId,
+            note: fin.isTruckDelivery
+              ? `[KAMION] ${params.operatorNotes || "Iskrcaj novog broda s kamiona na kopno"}`
+              : params.operatorNotes || "Smješteno na kopno po izvršenju operacije",
+          });
+        }
+        await tx.update(reservations).set({ landZoneId: targetZoneId }).where(eq(reservations.id, res.id));
+      } else if ((isLift || isMove) && (!finalZoneId || isDirectToTruck)) {
+        // Samo dizalica (bez mjesta na kopnu) or Direct to truck:
+        // Ensure reservation landZoneId is null and no land spot is occupied
+        if (res.landZoneId) {
+          await tx.update(reservations).set({ landZoneId: null }).where(eq(reservations.id, res.id));
         }
       } else if (isLower) {
         const [activeOcc] = await tx

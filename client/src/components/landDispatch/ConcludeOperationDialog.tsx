@@ -48,7 +48,7 @@ export function ConcludeOperationDialog({
   React.useEffect(() => {
     if (operation) {
       setStatus("completed");
-      setActualZoneId(operation.landZoneId || zones[0]?.zoneId || "");
+      setActualZoneId(operation.landZoneId || "none");
       setNotPerformedReason("Korisnik se nije pojavio");
       setNotes("");
     }
@@ -77,7 +77,7 @@ export function ConcludeOperationDialog({
     concludeMutation.mutate({
       reservationId: operation.id,
       status,
-      actualZoneId: status === "completed" ? actualZoneId : undefined,
+      actualZoneId: status === "completed" ? (actualZoneId === "none" ? null : actualZoneId) : undefined,
       notPerformedReason: status === "not_performed" ? notPerformedReason : undefined,
       notes: notes || undefined,
     });
@@ -164,6 +164,7 @@ export function ConcludeOperationDialog({
                   <SelectValue placeholder="Odaberite zonu" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="none">Samo dizalica (bez mjesta na kopnu)</SelectItem>
                   {zones.map((z) => (
                     <SelectItem key={z.zoneId} value={z.zoneId}>
                       {z.zoneCode} — {z.zoneName}
@@ -172,7 +173,7 @@ export function ConcludeOperationDialog({
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                Ako je plovilo smješteno u drugu zonu od planirane, ovdje odaberite stvarnu zonu.
+                Ako plovilo ostaje na kopnu (suhi vez), odaberite zonu. Za operacije koje se odmah vraćaju u more ili odvoze na prikolici odaberite &quot;Samo dizalica (bez mjesta na kopnu)&quot;.
               </p>
             </div>
           )}

@@ -63,7 +63,7 @@ export const landDispatchRouter = router({
       z.object({
         reservationId: z.string().uuid(),
         status: z.enum(["completed", "not_performed"]),
-        actualZoneId: z.string().uuid().optional(),
+        actualZoneId: z.string().uuid().nullable().optional(),
         notPerformedReason: z.string().optional(),
         notes: z.string().optional(),
       })

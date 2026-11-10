@@ -926,7 +926,7 @@ export class LandDispatchService {
   async concludeOperation(params: {
     reservationId: string;
     status: "completed" | "not_performed";
-    actualZoneId?: string;
+    actualZoneId?: string | null;
     notPerformedReason?: string;
     operatorUserId?: string;
     notes?: string;
@@ -937,10 +937,11 @@ export class LandDispatchService {
     const { reservationId, status, actualZoneId, notPerformedReason, operatorUserId, notes } = params;
 
     if (status === "completed") {
+      const targetZoneId = actualZoneId === "none" ? null : actualZoneId;
       await completeReservationOperation({
         reservationId,
         operatorId: operatorUserId,
-        zoneId: actualZoneId,
+        zoneId: targetZoneId,
         operatorNotes: notes || "Zaključeno kroz Dispečerski centar",
         allowFutureDate: false,
       });

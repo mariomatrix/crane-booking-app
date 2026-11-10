@@ -19,6 +19,8 @@ import {
     auditLog,
     cranes,
     craneZoneAffinities,
+    reservations,
+    workOrders,
 } from "../../drizzle/schema";
 
 const router = Router();
@@ -782,6 +784,200 @@ router.post("/import-land-state", requireSyncApiKey, async (req: Request, res: R
             success: false,
             error: `Greška pri uvozu početnog stanja kopna: ${err?.message || err}`,
         });
+    }
+});
+
+/**
+ * @route POST /api/v1/member-sync/inspect-work-order
+ * Pregled radnog naloga, rezervacije, plovila i zauzeća kopna
+ */
+router.post("/inspect-work-order", requireSyncApiKey, async (req: Request, res: Response) => {
+    try {
+        const db = await getDb();
+        if (!db) return res.status(500).json({ success: false, error: "Baza nije dostupna" });
+
+        const { orderNumber, vesselReg } = req.body;
+
+        let matchedOrders: any[] = [];
+        if (orderNumber) {
+            matchedOrders = await db.select().from(workOrders).where(eq(workOrders.orderNumber, orderNumber));
+        }
+
+        let matchedVessels: any[] = [];
+        if (vesselReg) {
+            matchedVessels = await db.select().from(vessels).where(
+                sql`UPPER(REPLACE(REPLACE(COALESCE(registration, ''), ' ', ''), '-', '')) = UPPER(REPLACE(REPLACE(${vesselReg}, ' ', ''), '-', ''))`
+            );
+        }
+
+        const matchedReservations: any[] = [];
+        const matchedOccupancies: any[] = [];
+
+        for (const order of matchedOrders) {
+            if (order.reservationId) {
+                const [r] = await db.select().from(reservations).where(eq(reservations.id, order.reservationId));
+                if (r) matchedReservations.push(r);
+            }
+            if (order.vesselId) {
+                const occs = await db.select().from(landOccupancies).where(eq(landOccupancies.vesselId, order.vesselId));
+                matchedOccupancies.push(...occs);
+            }
+        }
+
+        for (const v of matchedVessels) {
+            const vRes = await db.select().from(reservations).where(eq(reservations.vesselId, v.id));
+            matchedReservations.push(...vRes);
+            const occs = await db.select().from(landOccupancies).where(eq(landOccupancies.vesselId, v.id));
+            matchedOccupancies.push(...occs);
+        }
+
+        const allZones = await db.select().from(landZones);
+
+        res.json({
+            success: true,
+            workOrders: matchedOrders,
+            vessels: matchedVessels,
+            reservations: matchedReservations,
+            occupancies: matchedOccupancies,
+            zones: allZones,
+        });
+    } catch (err: any) {
+        console.error("[MemberSync API] Greška pri pregledu radnog naloga:", err);
+        res.status(500).json({ success: false, error: err.message || err });
+    }
+});
+
+/**
+ * @route POST /api/v1/member-sync/fix-crane-only-order
+ * Ispravlja radni nalog i rezervaciju koji su trebali biti Samo dizalica (bez mjesta na kopnu),
+ * a pogrešno su dobili mjesto u Servisnoj zoni:
+ * 1. Postavlja reservations.land_zone_id = NULL
+ * 2. Briše pogrešno kreirano aktivno zauzeće u land_occupancies za to plovilo/rezervaciju
+ * 3. Zapisuje audit_log s punim tragom ispravka
+ */
+router.post("/fix-crane-only-order", requireSyncApiKey, async (req: Request, res: Response) => {
+    try {
+        const db = await getDb();
+        if (!db) return res.status(500).json({ success: false, error: "Baza nije dostupna" });
+
+        const { orderNumber, expectedReg } = req.body;
+        if (!orderNumber) {
+            return res.status(400).json({ success: false, error: "Nedostaje parametar 'orderNumber'" });
+        }
+
+        const result = await db.transaction(async (tx) => {
+            const [order] = await tx.select().from(workOrders).where(eq(workOrders.orderNumber, orderNumber)).for("update");
+            if (!order) {
+                throw new Error(`Radni nalog '${orderNumber}' nije pronađen.`);
+            }
+
+            let vessel: any = null;
+            if (order.vesselId) {
+                const [v] = await tx.select().from(vessels).where(eq(vessels.id, order.vesselId));
+                vessel = v;
+            }
+
+            let reservation: any = null;
+            if (order.reservationId) {
+                const [r] = await tx.select().from(reservations).where(eq(reservations.id, order.reservationId)).for("update");
+                reservation = r;
+            }
+
+            // Verify registration if provided
+            if (expectedReg && vessel) {
+                const normExpected = expectedReg.toUpperCase().replace(/[\s-_]/g, "");
+                const normReg = (vessel.registration || vessel.name || "").toUpperCase().replace(/[\s-_]/g, "");
+                if (!normReg.includes(normExpected) && !normExpected.includes(normReg)) {
+                    throw new Error(`Plovilo naloga '${orderNumber}' (${normReg}) ne odgovara očekivanoj registraciji '${expectedReg}'.`);
+                }
+            }
+
+            // Find erroneous active occupancies for this vessel / reservation
+            let deletedOccupancies: any[] = [];
+            if (order.vesselId) {
+                const activeOccs = await tx
+                    .select()
+                    .from(landOccupancies)
+                    .where(and(eq(landOccupancies.vesselId, order.vesselId), isNull(landOccupancies.returnedAt)));
+
+                for (const occ of activeOccs) {
+                    await tx.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+                    deletedOccupancies.push(occ);
+                }
+            }
+
+            // Clear landZoneId on reservation
+            if (reservation) {
+                await tx
+                    .update(reservations)
+                    .set({
+                        landZoneId: null,
+                        adminNote: reservation.adminNote
+                            ? `${reservation.adminNote} | Ispravak: Samo dizalica (uklonjena zona)`.trim()
+                            : "Ispravak: Samo dizalica (uklonjena zona)",
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(reservations.id, reservation.id));
+            }
+
+            // Update work order notes to be clear
+            const updatedNote = order.operatorNotes
+                ? (order.operatorNotes.includes("Samo dizalica") ? order.operatorNotes : `${order.operatorNotes} | Samo dizalica (bez mjesta na kopnu)`).trim()
+                : "Samo dizalica (bez mjesta na kopnu)";
+
+            await tx
+                .update(workOrders)
+                .set({
+                    operatorNotes: updatedNote,
+                    updatedAt: new Date(),
+                })
+                .where(eq(workOrders.id, order.id));
+
+            // Write audit log entry
+            await tx.insert(auditLog).values({
+                actorId: order.operatorId || order.userId,
+                action: "admin_fix_crane_only_order",
+                entityType: "work_orders",
+                entityId: order.id,
+                payload: {
+                    orderNumber: order.orderNumber,
+                    reservationId: reservation?.id,
+                    vesselId: vessel?.id,
+                    vesselRegistration: vessel?.registration || vessel?.name,
+                    previousReservationLandZoneId: reservation?.landZoneId,
+                    deletedOccupanciesCount: deletedOccupancies.length,
+                    deletedOccupancies: deletedOccupancies.map((o) => ({
+                        id: o.id,
+                        zoneId: o.zoneId,
+                        spotNumber: o.spotNumber,
+                        liftedAt: o.liftedAt,
+                    })),
+                    correctedAt: new Date().toISOString(),
+                    reason: "Ispravak pogreške: operacija je bila označena kao Samo dizalica (bez mjesta na kopnu), uklonjeno dodijeljeno mjesto u Servisnoj zoni.",
+                },
+            });
+
+            return {
+                orderNumber: order.orderNumber,
+                vessel: vessel ? { id: vessel.id, name: vessel.name, registration: vessel.registration } : null,
+                reservationId: reservation?.id,
+                previousLandZoneId: reservation?.landZoneId,
+                newLandZoneId: null,
+                deletedOccupanciesCount: deletedOccupancies.length,
+                deletedOccupancies,
+            };
+        });
+
+        console.log(`[MemberSync API] Uspješno ispravljen radni nalog ${orderNumber} (uklonjeno zauzeće kopna).`);
+
+        res.json({
+            success: true,
+            message: `Radni nalog ${orderNumber} i rezervacija su uspješno ispravljeni: uklonjena Servisna zona i obrisano ${result.deletedOccupanciesCount} zauzeće kopna.`,
+            result,
+        });
+    } catch (err: any) {
+        console.error("[MemberSync API] Greška pri ispravku radnog naloga:", err);
+        res.status(500).json({ success: false, error: err.message || err });
     }
 });
 
