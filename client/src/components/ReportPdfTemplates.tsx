@@ -5,11 +5,29 @@ import { toZagreb, formatZagrebDate } from "@shared/timezone";
 // Register custom font to support Latin diacritics in PDF
 Font.register({
     family: "Roboto",
-    src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf"
+    fonts: [
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf",
+            fontWeight: "normal",
+        },
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf",
+            fontWeight: "bold",
+        },
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Italic.ttf",
+            fontStyle: "italic",
+        },
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-MediumItalic.ttf",
+            fontWeight: "bold",
+            fontStyle: "italic",
+        },
+    ],
 });
 Font.register({
     family: "Roboto-Bold",
-    src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf"
+    src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf",
 });
 
 // Stylesheet for A4 documents in PDF

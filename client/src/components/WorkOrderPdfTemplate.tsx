@@ -1,10 +1,38 @@
 import { Document, Page, Text, View, StyleSheet, Font } from "@react-pdf/renderer";
 
+// Register custom font to support Latin Extended diacritics (Č, č, Ć, ć, Đ, đ, Š, š, Ž, ž)
+Font.register({
+    family: "Roboto",
+    fonts: [
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf",
+            fontWeight: "normal",
+        },
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf",
+            fontWeight: "bold",
+        },
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Italic.ttf",
+            fontStyle: "italic",
+        },
+        {
+            src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-MediumItalic.ttf",
+            fontWeight: "bold",
+            fontStyle: "italic",
+        },
+    ],
+});
+Font.register({
+    family: "Roboto-Bold",
+    src: "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf",
+});
+
 const styles = StyleSheet.create({
     page: {
         padding: 36,
         fontSize: 10,
-        fontFamily: "Helvetica",
+        fontFamily: "Roboto",
         color: "#1e293b",
         lineHeight: 1.4,
     },
