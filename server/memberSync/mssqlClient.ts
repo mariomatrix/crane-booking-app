@@ -2,11 +2,20 @@
  * Member Sync — MSSQL Client
  * Connection pool prema legacy MSSQL Server bazi (CLAN03)
  */
-import sql from "mssql";
+import type sql from "mssql";
 import type { MssqlConfig } from "./types";
 
+let sqlModule: typeof sql | null = null;
 let pool: sql.ConnectionPool | null = null;
 let connecting = false;
+
+async function getSql(): Promise<typeof sql> {
+    if (!sqlModule) {
+        const m = await import("mssql");
+        sqlModule = ((m as any).default || m) as typeof sql;
+    }
+    return sqlModule;
+}
 
 /**
  * Čita MSSQL konfiguraciju iz environment varijabli
@@ -52,6 +61,7 @@ export async function getMssqlPool(): Promise<sql.ConnectionPool> {
                 `[MemberSync] MSSQL connecting to ${config.host}:${config.port}/${config.database} (attempt ${attempt}/${maxRetries})`,
             );
 
+            const sql = await getSql();
             pool = new sql.ConnectionPool({
                 server: config.host,
                 port: config.port,
