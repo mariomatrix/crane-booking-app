@@ -4,6 +4,7 @@ import { trpc } from "@/lib/trpc";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -13,13 +14,33 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Anchor, Loader2, Pencil, Plus, Trash2, Ship, Info, Calendar, ListOrdered, ArrowRightLeft, Truck } from "lucide-react";
+import {
+  Anchor,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  Ship,
+  Info,
+  Calendar,
+  ListOrdered,
+  ArrowRightLeft,
+  Truck,
+  Eye,
+  MapPin,
+  Clock,
+  User,
+  Phone,
+  Mail,
+  FileText,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
 import { formatAppDate } from "@/lib/date-utils";
 import { ZoneMoveDialog } from "@/components/landDispatch/ZoneMoveDialog";
 import { TruckDeliveryToLandDialog } from "@/components/land/TruckDeliveryToLandDialog";
+import { TruckDispatchFromLandDialog } from "@/components/land/TruckDispatchFromLandDialog";
 
 type ZoneForm = {
   name: string;
@@ -55,6 +76,31 @@ export default function AdminLandZones() {
     currentZoneId: string;
     currentZoneCode?: string;
   } | null>(null);
+  const [selectedOccupancy, setSelectedOccupancy] = useState<any | null>(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
+  const [dispatchSpot, setDispatchSpot] = useState<any | null>(null);
+
+  const handleOpenDetail = (occ: any) => {
+    setSelectedOccupancy(occ);
+    setDetailDialogOpen(true);
+  };
+
+  const handleOpenDispatch = (occ: any) => {
+    const liftedDate = occ.liftedAt ? new Date(occ.liftedAt) : new Date();
+    const daysOnLand = Math.max(1, Math.ceil((Date.now() - liftedDate.getTime()) / (1000 * 60 * 60 * 24)));
+    const zoneCode = (occ.zone as any)?.code || zones.find(z => z.id === occ.zoneId)?.code || "";
+
+    setDispatchSpot({
+      occupancyId: occ.id,
+      spotNumber: occ.spotNumber || "—",
+      code: zoneCode,
+      currentVesselName: occ.vessel?.name,
+      currentVesselReg: occ.vessel?.registration,
+      daysOnLand,
+    });
+    setDispatchDialogOpen(true);
+  };
 
   const utils = trpc.useUtils();
 
@@ -326,7 +372,7 @@ export default function AdminLandZones() {
                       <TableHead>{isHr ? "Mjesto br." : "Spot No."}</TableHead>
                       <TableHead>{isHr ? "Podignut" : "Lifted At"}</TableHead>
                       <TableHead>{isHr ? "Trajanje boravka" : "Stay Duration"}</TableHead>
-                      <TableHead className="text-right">{isHr ? "Akcija" : "Action"}</TableHead>
+                      <TableHead className="text-right">{isHr ? "Akcije" : "Actions"}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -338,10 +384,16 @@ export default function AdminLandZones() {
                       const isTruckDelivery = !(occ as any).reservationId || !!(occ as any).note?.toLowerCase().includes("kamion");
 
                       return (
-                        <TableRow key={occ.id}>
+                        <TableRow
+                          key={occ.id}
+                          className="cursor-pointer hover:bg-muted/50 transition-colors group"
+                          onClick={() => handleOpenDetail(occ)}
+                        >
                           <TableCell className="font-semibold flex items-center gap-2">
-                            <Ship className="h-4 w-4 text-primary" />
-                            {occ.vessel.name}
+                            <Ship className="h-4 w-4 text-primary shrink-0 group-hover:scale-110 transition-transform" />
+                            <span className="group-hover:text-primary transition-colors underline-offset-2 group-hover:underline">
+                              {occ.vessel.name}
+                            </span>
                             <span className="text-xs text-muted-foreground font-normal">
                               ({occ.vessel.lengthM}m × {occ.vessel.beamM}m)
                             </span>
@@ -378,7 +430,7 @@ export default function AdminLandZones() {
                                   ⏱️ {daysOnLand} {daysOnLand === 1 ? "dan" : "dana"} na kopnu
                                 </Badge>
                                 <div className="text-[10px] text-muted-foreground">
-                                  {isHr ? "Informativno (do spuštanja)" : "Informative (until launch)"}
+                                  {isHr ? "Informativno (do spuštanja/otpreme)" : "Informative (until departure)"}
                                 </div>
                               </div>
                             ) : isMember ? (
@@ -397,12 +449,32 @@ export default function AdminLandZones() {
                               </Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-1.5">
+                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-end gap-1.5 flex-wrap sm:flex-nowrap">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="rounded-lg text-primary hover:bg-primary/10 text-xs font-semibold gap-1 h-8 px-2"
+                                title={isHr ? "Prikaži detalje zapisa" : "View record details"}
+                                onClick={() => handleOpenDetail(occ)}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                {isHr ? "Detalji" : "Details"}
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="rounded-lg text-primary border-primary/20 hover:bg-primary/5 text-xs font-semibold gap-1"
+                                className="rounded-lg text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-950/40 text-xs font-semibold gap-1 h-8 px-2"
+                                title={isHr ? "Otprema plovila kamionom (odvoz iz lučice)" : "Dispatch by truck"}
+                                onClick={() => handleOpenDispatch(occ)}
+                              >
+                                <Truck className="w-3.5 h-3.5" />
+                                {isHr ? "Kamion" : "Truck"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="rounded-lg text-primary border-primary/20 hover:bg-primary/5 text-xs font-semibold gap-1 h-8 px-2"
                                 onClick={() => {
                                   setMoveVessel({
                                     vesselId: occ.vessel.id,
@@ -419,13 +491,14 @@ export default function AdminLandZones() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50 text-xs font-semibold"
+                                className="rounded-lg text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-950/40 text-xs font-semibold gap-1 h-8 px-2"
                                 onClick={() => {
                                   if (confirm(isHr ? "Potvrdite spuštanje plovila u more?" : "Confirm vessel launch?")) {
                                     launchMutation.mutate({ id: occ.id });
                                   }
                                 }}
                               >
+                                <Anchor className="w-3.5 h-3.5" />
                                 {isHr ? "Spusti u more" : "Launch"}
                               </Button>
                             </div>
@@ -597,6 +670,246 @@ export default function AdminLandZones() {
         onOpenChange={setMoveDialogOpen}
         vessel={moveVessel}
         zones={zones.map((z) => ({ id: z.id, code: z.code, name: z.name, totalSpots: z.totalSpots }))}
+        onSuccess={() => {
+          utils.landOccupancy.listActive.invalidate();
+          utils.landZone.list.invalidate();
+        }}
+      />
+
+      {/* Detail Dialog for Active Occupancy */}
+      <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          {selectedOccupancy && (() => {
+            const liftedDate = selectedOccupancy.liftedAt ? new Date(selectedOccupancy.liftedAt) : new Date();
+            const daysOnLand = Math.max(1, Math.ceil((Date.now() - liftedDate.getTime()) / (1000 * 60 * 60 * 24)));
+            const isMember = ((selectedOccupancy.user as any)?.clientCategory || "member") === "member";
+            const isOverLimit = isMember && daysOnLand > 30;
+            const isTruckDelivery = !selectedOccupancy.reservationId || !!selectedOccupancy.note?.toLowerCase().includes("kamion");
+            const zoneName = (selectedOccupancy.zone as any)?.name || zones.find(z => z.id === selectedOccupancy.zoneId)?.name || "—";
+            const zoneCode = (selectedOccupancy.zone as any)?.code || zones.find(z => z.id === selectedOccupancy.zoneId)?.code || "—";
+
+            return (
+              <>
+                <DialogHeader>
+                  <div className="flex items-center justify-between gap-2 pr-6">
+                    <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                      <Ship className="w-5 h-5 text-primary" />
+                      {selectedOccupancy.vessel.name}
+                    </DialogTitle>
+                    <Badge variant="secondary" className="font-mono text-xs">
+                      {selectedOccupancy.vessel.registration || (isHr ? "Bez registracije" : "No reg.")}
+                    </Badge>
+                  </div>
+                  <DialogDescription className="text-xs">
+                    {isHr ? "Detaljni pregled zapisa o plovilu na suhom vezu" : "Detailed view of dry berth occupancy record"}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-2 text-xs">
+                  {/* Plovilo i tehnički podaci */}
+                  <div className="p-3 rounded-lg border bg-muted/20 space-y-2">
+                    <span className="font-bold flex items-center gap-1.5 text-primary">
+                      <Ship className="w-3.5 h-3.5" />
+                      {isHr ? "Tehnički podaci o plovilu" : "Vessel Specifications"}
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Naziv:" : "Name:"}</span>
+                        <span className="font-semibold text-foreground">{selectedOccupancy.vessel.name}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Registracija:" : "Registration:"}</span>
+                        <span className="font-semibold text-foreground">{selectedOccupancy.vessel.registration || "—"}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Dimenzije (D × Š):" : "Dimensions (L × W):"}</span>
+                        <span className="font-semibold text-foreground">{selectedOccupancy.vessel.lengthM}m × {selectedOccupancy.vessel.beamM}m</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Gaz / Težina:" : "Draft / Weight:"}</span>
+                        <span className="font-semibold text-foreground">
+                          {selectedOccupancy.vessel.draftM ? `${selectedOccupancy.vessel.draftM}m` : "—"} / {selectedOccupancy.vessel.weightTons ? `${selectedOccupancy.vessel.weightTons}t` : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Vlasnik / Korisnik */}
+                  <div className="p-3 rounded-lg border bg-muted/20 space-y-2">
+                    <span className="font-bold flex items-center gap-1.5 text-primary">
+                      <User className="w-3.5 h-3.5" />
+                      {isHr ? "Vlasnik / Korisnik" : "Owner / Client"}
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Ime i prezime:" : "Name:"}</span>
+                        <span className="font-semibold text-foreground">{selectedOccupancy.user.name || selectedOccupancy.user.email}</span>
+                        <Badge variant="outline" className="mt-1 text-[10px] block w-fit">
+                          {isMember ? (isHr ? "Stalni član" : "Member") : (isHr ? "Privremeni korisnik" : "Commercial")}
+                        </Badge>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Telefon:" : "Phone:"}</span>
+                        <span className="font-semibold text-foreground flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-muted-foreground" />
+                          {selectedOccupancy.user.phone || "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Email:" : "Email:"}</span>
+                        <span className="font-semibold text-foreground flex items-center gap-1 break-all">
+                          <Mail className="w-3 h-3 text-muted-foreground" />
+                          {selectedOccupancy.user.email || "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Lokacija na kopnu i boravak */}
+                  <div className="p-3 rounded-lg border bg-muted/20 space-y-2">
+                    <span className="font-bold flex items-center gap-1.5 text-primary">
+                      <MapPin className="w-3.5 h-3.5" />
+                      {isHr ? "Lokacija na kopnu i boravak" : "Land Location & Stay"}
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Zona:" : "Zone:"}</span>
+                        <span className="font-semibold text-foreground">{zoneName} ({zoneCode})</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Mjesto br.:" : "Spot No.:"}</span>
+                        <span className="font-semibold text-foreground">{selectedOccupancy.spotNumber || "—"}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Datum podizanja:" : "Lifted Date:"}</span>
+                        <span className="font-semibold text-foreground flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-muted-foreground" />
+                          {formatAppDate(selectedOccupancy.liftedAt)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground block text-[11px]">{isHr ? "Provedeno na kopnu:" : "Days on Land:"}</span>
+                        <span className="font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          {daysOnLand} {daysOnLand === 1 ? "dan" : "dana"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t mt-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs">
+                        <span className="text-muted-foreground mr-1">{isHr ? "Status tarife:" : "Tariff status:"}</span>
+                        {isTruckDelivery ? (
+                          <Badge className="bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300">
+                            🚚 {isHr ? "Iskrcano s kamiona (obračun ležarine po danu)" : "Truck delivery"}
+                          </Badge>
+                        ) : isMember ? (
+                          isOverLimit ? (
+                            <Badge className="bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 font-bold">
+                              ⚠️ {daysOnLand} dana (+{daysOnLand - 30} d doplata)
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 font-semibold">
+                              ✓ {daysOnLand} / 30 dana (Uključeno u godišnju članarinu)
+                            </Badge>
+                          )
+                        ) : (
+                          <Badge className="bg-sky-50 text-sky-800 border-sky-200 dark:bg-sky-950/30 dark:text-sky-300 font-bold">
+                            💰 {(daysOnLand * 15).toFixed(2)} € ({daysOnLand} dana × 15 €)
+                          </Badge>
+                        )}
+                      </div>
+                      {selectedOccupancy.reservationId && (
+                        <div className="text-[11px] text-muted-foreground">
+                          {isHr ? "Povezana rezervacija:" : "Linked reservation:"}{" "}
+                          <span className="font-mono font-medium text-foreground">
+                            {selectedOccupancy.reservationId.slice(0, 8)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Napomene i zabilješke (npr. iz uvoza Excela) */}
+                  <div className="space-y-1.5">
+                    <span className="font-bold flex items-center gap-1.5 text-muted-foreground text-xs">
+                      <FileText className="w-3.5 h-3.5" />
+                      {isHr ? "Zabilješke i podaci iz evidencije (npr. Excel uvoz / nalog):" : "Notes & import record:"}
+                    </span>
+                    {selectedOccupancy.note ? (
+                      <div className="p-3 rounded-lg border bg-muted/40 text-xs font-mono whitespace-pre-wrap text-foreground leading-relaxed">
+                        {selectedOccupancy.note}
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-lg border bg-muted/10 text-xs text-muted-foreground italic">
+                        {isHr ? "Nema dodatnih zabilješki za ovaj zapis." : "No additional notes for this record."}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <DialogFooter className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-3 border-t">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-950/40 text-xs font-semibold gap-1.5"
+                      onClick={() => {
+                        setDetailDialogOpen(false);
+                        handleOpenDispatch(selectedOccupancy);
+                      }}
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      {isHr ? "Otpremi kamionom (Odvoz)" : "Dispatch by Truck"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="text-primary border-primary/20 hover:bg-primary/5 text-xs font-semibold gap-1.5"
+                      onClick={() => {
+                        setDetailDialogOpen(false);
+                        setMoveVessel({
+                          vesselId: selectedOccupancy.vessel.id,
+                          vesselName: selectedOccupancy.vessel.name,
+                          currentZoneId: selectedOccupancy.zoneId || selectedZoneId || "",
+                          currentZoneCode: (selectedOccupancy.zone as any)?.code,
+                        });
+                        setMoveDialogOpen(true);
+                      }}
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      {isHr ? "Promijeni zonu" : "Change Zone"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="text-emerald-600 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800 dark:hover:bg-emerald-950/40 text-xs font-semibold gap-1.5"
+                      onClick={() => {
+                        if (confirm(isHr ? "Potvrdite spuštanje plovila u more?" : "Confirm vessel launch?")) {
+                          setDetailDialogOpen(false);
+                          launchMutation.mutate({ id: selectedOccupancy.id });
+                        }
+                      }}
+                    >
+                      <Anchor className="w-3.5 h-3.5" />
+                      {isHr ? "Spusti u more" : "Launch"}
+                    </Button>
+                  </div>
+                  <Button type="button" variant="secondary" onClick={() => setDetailDialogOpen(false)}>
+                    {isHr ? "Zatvori" : "Close"}
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Truck Dispatch Dialog */}
+      <TruckDispatchFromLandDialog
+        open={dispatchDialogOpen}
+        onOpenChange={setDispatchDialogOpen}
+        spot={dispatchSpot}
         onSuccess={() => {
           utils.landOccupancy.listActive.invalidate();
           utils.landZone.list.invalidate();
