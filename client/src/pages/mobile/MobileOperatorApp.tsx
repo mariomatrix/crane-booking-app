@@ -26,9 +26,11 @@ import {
     XCircle,
     AlertTriangle,
     Layers,
+    Mic,
 } from "lucide-react";
 import { toast } from "sonner";
 import { toZagreb } from "@shared/timezone";
+import { MobileVoiceAssistantModal } from "@/components/mobile/MobileVoiceAssistantModal";
 
 interface OperatorUser {
     id: string;
@@ -183,6 +185,10 @@ export default function MobileOperatorApp() {
     // No-Show Modal State
     const [noShowTask, setNoShowTask] = useState<TaskItem | null>(null);
     const [noShowReason, setNoShowReason] = useState<string>("Korisnik se nije pojavio u terminu na rivi");
+
+    // Voice Field Assistant Modal State
+    const [voiceModalOpen, setVoiceModalOpen] = useState(false);
+    const [voiceActiveTask, setVoiceActiveTask] = useState<TaskItem | null>(null);
     const [isSubmittingNoShow, setIsSubmittingNoShow] = useState(false);
 
     // Available Resources for Operations
@@ -1103,6 +1109,17 @@ export default function MobileOperatorApp() {
                                                 >
                                                     <MessageSquare className="h-3.5 w-3.5" />
                                                 </button>
+                                                <button
+                                                    onClick={() => {
+                                                        setVoiceActiveTask(t);
+                                                        setVoiceModalOpen(true);
+                                                    }}
+                                                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-2 px-2.5 rounded-xl text-xs flex items-center justify-center gap-1 border border-indigo-200 shadow-2xs active:scale-95 transition shrink-0"
+                                                    title="Glasovni nalog za ovo plovilo"
+                                                >
+                                                    <Mic className="h-3.5 w-3.5" />
+                                                    <span className="hidden sm:inline">Glas</span>
+                                                </button>
                                             </div>
                                         </div>
                                     );
@@ -1843,6 +1860,38 @@ export default function MobileOperatorApp() {
                     </div>
                 </div>
             )}
+
+            {/* Floating Voice Assistant FAB */}
+            <button
+                onClick={() => {
+                    setVoiceActiveTask(null);
+                    setVoiceModalOpen(true);
+                }}
+                className="fixed bottom-20 right-4 z-40 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full px-4 py-3.5 shadow-xl shadow-indigo-900/30 border-2 border-indigo-400/60 flex items-center gap-2 font-extrabold text-xs active:scale-95 transition"
+                title="Glasovni terenski zapisnik i upravljanje (Gemini AI)"
+            >
+                <Mic className="h-5 w-5 animate-pulse" />
+                <span>Glasovni nalog</span>
+            </button>
+
+            <MobileVoiceAssistantModal
+                open={voiceModalOpen}
+                onClose={() => setVoiceModalOpen(false)}
+                token={token}
+                selectedDate={selectedDate}
+                activeReservationId={voiceActiveTask?.id || null}
+                activeVesselLabel={
+                    voiceActiveTask
+                        ? `${voiceActiveTask.vessel?.name || ""} (${voiceActiveTask.vessel?.registration || "bez reg."})`
+                        : null
+                }
+                onActionsExecuted={() => {
+                    fetchSchedule();
+                    fetchLandZones();
+                    if (activeTab === "zones") fetchZonesOverview();
+                    if (activeTab === "incidents") fetchActiveIncidents();
+                }}
+            />
 
             {/* Bottom Navigation Bar */}
             <nav className="fixed bottom-0 left-0 right-0 bg-indigo-950 text-white border-t border-indigo-900 shadow-2xl z-40">

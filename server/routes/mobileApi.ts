@@ -22,6 +22,7 @@ import { sendNewMessageNotification } from "../_core/email";
 import { sendSms } from "../_core/sms";
 import { verifyMobileOperatorSession, issueMobileOperatorToken } from "../services/authPolicyService";
 import { startReservationWorkOrder, completeReservationOperation } from "../services/workOrderService";
+import { interpretVoiceCommand, executeConfirmedVoiceActions } from "../services/voiceCommandService";
 import { landDispatchService } from "../landDispatch/landDispatch.service";
 
 const router = Router();
@@ -672,6 +673,52 @@ router.post("/reservations/:id/no-show", requireMobileAuth, async (req: Authenti
     });
 
     return res.json({ success: true, status: "cancelled" });
+});
+
+// 16. Voice Command Interpretation (Gemini 3.5 Flash-Lite / 3.1 Flash-Lite + Local Fallback): POST /api/mobile/v1/voice/interpret
+router.post("/voice/interpret", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { transcript, audioBase64, audioMimeType, activeReservationId, date } = req.body || {};
+
+    if ((!transcript || !String(transcript).trim()) && (!audioBase64 || !String(audioBase64).trim())) {
+        return res.status(400).json({ error: "Molimo izgovorite ili unesite glasovnu naredbu." });
+    }
+
+    try {
+        const result = await interpretVoiceCommand({
+            operatorId: user.id,
+            operatorRole: user.role,
+            transcript: typeof transcript === "string" ? transcript : undefined,
+            audioBase64: typeof audioBase64 === "string" ? audioBase64 : undefined,
+            audioMimeType: typeof audioMimeType === "string" ? audioMimeType : undefined,
+            activeReservationId: typeof activeReservationId === "string" ? activeReservationId : null,
+            dateStr: typeof date === "string" ? date : undefined,
+        });
+        return res.json(result);
+    } catch (err: any) {
+        return res.status(500).json({ error: err?.message || "Greška pri obradi glasovne naredbe." });
+    }
+});
+
+// 17. Execute Confirmed Voice Actions: POST /api/mobile/v1/voice/execute
+router.post("/voice/execute", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const user = req.operatorUser!;
+    const { actions } = req.body || {};
+
+    if (!Array.isArray(actions) || actions.length === 0) {
+        return res.status(400).json({ error: "Nema odabranih akcija za izvršavanje." });
+    }
+
+    try {
+        const result = await executeConfirmedVoiceActions({
+            operatorId: user.id,
+            operatorName: user.name,
+            actions,
+        });
+        return res.json({ success: true, ...result });
+    } catch (err: any) {
+        return res.status(500).json({ error: err?.message || "Greška pri izvršavanju glasovnih akcija." });
+    }
 });
 
 export default router;
