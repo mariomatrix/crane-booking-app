@@ -23,6 +23,7 @@ import { isValidOib } from "../shared/oib";
 import { reportsRouter } from "./reports.router";
 import { workOrdersRouter } from "./workOrders.router";
 import { completeReservationOperation } from "./services/workOrderService";
+import { searchVesselsReadOnly } from "./services/vesselSearchService";
 import { getCraneManipulationPricing } from "./services/statutoryQuotaService";
 import { generateReservationNumber } from "./services/numberingService";
 import { issueTokenPairCookies as issueTokenPair } from "./services/authPolicyService";
@@ -638,6 +639,19 @@ export const appRouter = router({
 
   // ─── Vessels ──────────────────────────────────────────────────────────
   vessel: router({
+    search: operatorProcedure
+      .input(
+        z.object({
+          query: z.string().optional(),
+          filter: z.enum(["all", "on_land", "with_upcoming"]).optional().default("all"),
+          vesselType: z.enum(["all", "jedrilica", "motorni", "katamaran", "ostalo"]).optional().default("all"),
+          limit: z.number().int().min(1).max(200).optional().default(100),
+        })
+      )
+      .query(async ({ input }) => {
+        return searchVesselsReadOnly(input);
+      }),
+
     listMine: protectedProcedure.query(async ({ ctx }) => {
       return listVesselsByUser(ctx.user.id);
     }),

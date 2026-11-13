@@ -54,6 +54,7 @@ import AdminWorkOrders from "@/pages/admin/AdminWorkOrders";
 import AdminPriceList from "@/pages/admin/AdminPriceList";
 import AdminAkvatorijMap from "@/pages/admin/AdminAkvatorijMap";
 import AdminInvoices from "@/pages/admin/AdminInvoices";
+import AdminVessels from "@/pages/admin/AdminVessels";
 
 function Router() {
   return (
@@ -151,6 +152,9 @@ function Router() {
       </Route>
       <Route path="/admin/invoices">
         <AdminLayout><AdminInvoices /></AdminLayout>
+      </Route>
+      <Route path="/admin/vessels">
+        <AdminLayout><AdminVessels /></AdminLayout>
       </Route>
 
       {/* Reports Routes */}

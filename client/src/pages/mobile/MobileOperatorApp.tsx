@@ -27,10 +27,43 @@ import {
     AlertTriangle,
     Layers,
     Mic,
+    X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { toZagreb } from "@shared/timezone";
 import { MobileVoiceAssistantModal } from "@/components/mobile/MobileVoiceAssistantModal";
+
+interface MobileVesselSearchResult {
+    id: string;
+    name: string;
+    registration: string | null;
+    type: "jedrilica" | "motorni" | "katamaran" | "ostalo";
+    lengthM: string | null;
+    beamM: string | null;
+    draftM: string | null;
+    weightTons: string | null;
+    owner: {
+        id: string;
+        name: string | null;
+        phone: string | null;
+        email: string | null;
+    };
+    landOccupancy: {
+        zoneId: string;
+        zoneCode: string;
+        zoneName: string;
+        spotNumber: number | null;
+        liftedAt: string;
+    } | null;
+    nextReservation: {
+        id: string;
+        reservationNumber: string | null;
+        status: string;
+        scheduledStart: string | null;
+        requestedDate: string | null;
+        serviceName: string | null;
+    } | null;
+}
 
 interface OperatorUser {
     id: string;
@@ -159,8 +192,15 @@ export default function MobileOperatorApp() {
     const [pin, setPin] = useState("");
     const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    // Active Navigation Tab: "tasks" | "zones" | "incidents"
-    const [activeTab, setActiveTab] = useState<"tasks" | "zones" | "incidents">("tasks");
+    // Active Navigation Tab: "tasks" | "zones" | "vessels" | "incidents"
+    const [activeTab, setActiveTab] = useState<"tasks" | "zones" | "vessels" | "incidents">("tasks");
+
+    // Read-only Vessel Search state
+    const [vesselQuery, setVesselQuery] = useState("");
+    const [vesselFilter, setVesselFilter] = useState<"all" | "on_land" | "with_upcoming">("all");
+    const [vesselResults, setVesselResults] = useState<MobileVesselSearchResult[]>([]);
+    const [vesselTotalMatched, setVesselTotalMatched] = useState(0);
+    const [isSearchingVessels, setIsSearchingVessels] = useState(false);
 
     // Tasks & Schedule State
     const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -250,6 +290,15 @@ export default function MobileOperatorApp() {
         if (activeTab === "zones") fetchZonesOverview();
         if (activeTab === "incidents") fetchActiveIncidents();
     }, [token, activeTab]);
+
+    // Debounced read-only vessel search when vessels tab is active
+    useEffect(() => {
+        if (!token || activeTab !== "vessels") return;
+        const timer = setTimeout(() => {
+            fetchVesselsSearch(vesselQuery, vesselFilter);
+        }, 200);
+        return () => clearTimeout(timer);
+    }, [token, activeTab, vesselQuery, vesselFilter]);
 
     // Auto-scroll chat to bottom
     useEffect(() => {
@@ -351,6 +400,29 @@ export default function MobileOperatorApp() {
             console.error("Failed to load zones overview", e);
         } finally {
             setIsLoadingZones(false);
+        }
+    };
+
+    const fetchVesselsSearch = async (q: string, filter: "all" | "on_land" | "with_upcoming") => {
+        setIsSearchingVessels(true);
+        try {
+            const qs = new URLSearchParams({
+                q: q.trim(),
+                filter,
+                limit: "60",
+            });
+            const res = await fetch(`/api/mobile/v1/vessels/search?${qs.toString()}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                setVesselResults(data.items || []);
+                setVesselTotalMatched(data.totalMatched ?? 0);
+            }
+        } catch (e) {
+            console.error("Failed to search vessels", e);
+        } finally {
+            setIsSearchingVessels(false);
         }
     };
 
@@ -1238,7 +1310,198 @@ export default function MobileOperatorApp() {
                     </div>
                 )}
 
-                {/* Tab 3: Prijavi problem / Vjetar */}
+                {/* Tab 3: Pretraga brodova (samo pregled) */}
+                {activeTab === "vessels" && (
+                    <div className="space-y-4">
+                        <div className="bg-white border-2 border-slate-200 rounded-3xl p-4 shadow-sm space-y-3">
+                            <div className="flex items-center justify-between">
+                                <h2 className="font-bold text-base text-slate-900 flex items-center gap-2">
+                                    <Ship className="h-5 w-5 text-indigo-600" />
+                                    Pretraga brodova
+                                </h2>
+                                <span className="text-[11px] font-semibold text-slate-500">
+                                    {isSearchingVessels
+                                        ? "Tražim..."
+                                        : `${vesselResults.length} / ${vesselTotalMatched}`}
+                                </span>
+                            </div>
+
+                            <div className="relative">
+                                <Search className="h-4 w-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                                <input
+                                    type="text"
+                                    value={vesselQuery}
+                                    onChange={(e) => setVesselQuery(e.target.value)}
+                                    placeholder="Registracija (npr. 5150), ime broda ili vlasnik..."
+                                    className="w-full pl-10 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                />
+                                {vesselQuery && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setVesselQuery("")}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                                        aria-label="Očisti pretragu"
+                                    >
+                                        <X className="h-4 w-4" />
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                                {[
+                                    { id: "all", label: "Svi brodovi" },
+                                    { id: "on_land", label: "Na kopnu" },
+                                    { id: "with_upcoming", label: "S terminom" },
+                                ].map((chip) => (
+                                    <button
+                                        key={chip.id}
+                                        type="button"
+                                        onClick={() => setVesselFilter(chip.id as any)}
+                                        className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border transition ${
+                                            vesselFilter === chip.id
+                                                ? "bg-indigo-600 text-white border-indigo-600"
+                                                : "bg-slate-50 text-slate-700 border-slate-200"
+                                        }`}
+                                    >
+                                        {chip.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {isSearchingVessels && vesselResults.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                                <Loader2 className="h-7 w-7 animate-spin mb-2 text-indigo-600" />
+                                <span className="text-sm">Pretražujem brodove...</span>
+                            </div>
+                        ) : vesselResults.length === 0 ? (
+                            <div className="bg-white border border-slate-200 rounded-3xl p-8 text-center text-slate-500">
+                                <Ship className="h-9 w-9 mx-auto mb-2 text-slate-300" />
+                                <p className="text-sm font-semibold text-slate-700">Nema pronađenih plovila</p>
+                                <p className="text-xs mt-1">
+                                    Pokušajte unijeti dio registracije (npr. 5150) ili prezime vlasnika.
+                                </p>
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {vesselResults.map((vessel) => {
+                                    const dims: string[] = [];
+                                    if (vessel.lengthM) dims.push(`L ${vessel.lengthM}m`);
+                                    if (vessel.beamM) dims.push(`B ${vessel.beamM}m`);
+                                    if (vessel.draftM) dims.push(`T ${vessel.draftM}m`);
+                                    if (vessel.weightTons) dims.push(`${vessel.weightTons}t`);
+
+                                    return (
+                                        <div
+                                            key={vessel.id}
+                                            className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm space-y-3"
+                                        >
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div>
+                                                    <h3 className="font-bold text-base text-slate-900 leading-tight">
+                                                        {vessel.name}
+                                                    </h3>
+                                                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                                        {vessel.registration && (
+                                                            <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 font-mono text-xs font-bold text-slate-800">
+                                                                {vessel.registration}
+                                                            </span>
+                                                        )}
+                                                        <span className="text-[11px] font-medium text-slate-500 uppercase">
+                                                            {vessel.type}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                {dims.length > 0 && (
+                                                    <span className="text-[11px] font-semibold text-slate-600 bg-slate-50 border border-slate-200 px-2 py-1 rounded-xl text-right">
+                                                        {dims.join(" · ")}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Land occupancy status */}
+                                            <div className="rounded-2xl px-3 py-2 bg-slate-50 border border-slate-200 text-xs">
+                                                {vessel.landOccupancy ? (
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <span className="font-bold text-emerald-700 flex items-center gap-1.5">
+                                                            <MapPin className="h-3.5 w-3.5 shrink-0" />
+                                                            {vessel.landOccupancy.zoneName} ({vessel.landOccupancy.zoneCode})
+                                                            {vessel.landOccupancy.spotNumber
+                                                                ? ` · #${vessel.landOccupancy.spotNumber}`
+                                                                : ""}
+                                                        </span>
+                                                        <span className="text-[11px] text-slate-500">
+                                                            od{" "}
+                                                            {new Date(vessel.landOccupancy.liftedAt).toLocaleDateString("hr-HR")}
+                                                        </span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-slate-500 flex items-center gap-1.5">
+                                                        <Anchor className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                                        Nema evidentiranog boravka na kopnu
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Next / Active Reservation */}
+                                            {vessel.nextReservation && (
+                                                <div className="rounded-2xl px-3 py-2 bg-indigo-50/70 border border-indigo-200 text-xs flex items-center justify-between gap-2">
+                                                    <span className="font-semibold text-indigo-900 flex items-center gap-1.5">
+                                                        <Calendar className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                                                        {vessel.nextReservation.reservationNumber || "Termin"}
+                                                        {vessel.nextReservation.serviceName
+                                                            ? ` · ${vessel.nextReservation.serviceName}`
+                                                            : ""}
+                                                    </span>
+                                                    <span className="text-[11px] font-medium text-indigo-700">
+                                                        {vessel.nextReservation.scheduledStart
+                                                            ? new Date(vessel.nextReservation.scheduledStart).toLocaleDateString("hr-HR")
+                                                            : vessel.nextReservation.requestedDate || ""}
+                                                    </span>
+                                                </div>
+                                            )}
+
+                                            {/* Owner & quick contact */}
+                                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+                                                <div className="min-w-0">
+                                                    <div className="text-xs font-semibold text-slate-800 flex items-center gap-1.5 truncate">
+                                                        <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                                        <span className="truncate">{vessel.owner.name || "—"}</span>
+                                                    </div>
+                                                    {vessel.owner.phone && (
+                                                        <div className="text-[11px] text-slate-500 pl-5">
+                                                            {vessel.owner.phone}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {vessel.owner.phone && (
+                                                    <div className="flex items-center gap-1.5 shrink-0">
+                                                        <a
+                                                            href={`tel:${vessel.owner.phone}`}
+                                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold"
+                                                        >
+                                                            <Phone className="h-3.5 w-3.5" />
+                                                            Nazovi
+                                                        </a>
+                                                        <a
+                                                            href={`sms:${vessel.owner.phone}`}
+                                                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold"
+                                                        >
+                                                            <MessageSquare className="h-3.5 w-3.5" />
+                                                            SMS
+                                                        </a>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* Tab 4: Prijavi problem / Vjetar */}
                 {activeTab === "incidents" && (
                     <div className="space-y-4">
                         <div className="bg-white border-2 border-amber-200 rounded-3xl p-4 shadow-sm space-y-1">
@@ -1913,7 +2176,17 @@ export default function MobileOperatorApp() {
                         }`}
                     >
                         <Layers className="h-5 w-5" />
-                        <span className="text-[11px]">Pregled zona</span>
+                        <span className="text-[11px]">Zone</span>
+                    </button>
+
+                    <button
+                        onClick={() => setActiveTab("vessels")}
+                        className={`flex flex-col items-center justify-center flex-1 h-full gap-1 transition-all ${
+                            activeTab === "vessels" ? "text-indigo-400 font-bold" : "text-slate-400 hover:text-slate-200"
+                        }`}
+                    >
+                        <Ship className="h-5 w-5" />
+                        <span className="text-[11px]">Brodovi</span>
                     </button>
 
                     <button
@@ -1923,7 +2196,7 @@ export default function MobileOperatorApp() {
                         }`}
                     >
                         <AlertTriangle className="h-5 w-5" />
-                        <span className="text-[11px]">Prijavi problem</span>
+                        <span className="text-[11px]">Problem</span>
                     </button>
                 </div>
             </nav>

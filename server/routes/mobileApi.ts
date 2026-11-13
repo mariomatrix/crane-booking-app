@@ -23,6 +23,7 @@ import { sendSms } from "../_core/sms";
 import { verifyMobileOperatorSession, issueMobileOperatorToken } from "../services/authPolicyService";
 import { startReservationWorkOrder, completeReservationOperation } from "../services/workOrderService";
 import { interpretVoiceCommand, executeConfirmedVoiceActions } from "../services/voiceCommandService";
+import { searchVesselsReadOnly } from "../services/vesselSearchService";
 import { landDispatchService } from "../landDispatch/landDispatch.service";
 
 const router = Router();
@@ -719,6 +720,23 @@ router.post("/voice/execute", requireMobileAuth, async (req: AuthenticatedReques
         return res.json({ success: true, ...result });
     } catch (err: any) {
         return res.status(500).json({ error: err?.message || "Greška pri izvršavanju glasovnih akcija." });
+    }
+});
+
+// 18. Read-only vessel search: GET /api/mobile/v1/vessels/search
+router.get("/vessels/search", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const rawFilter = typeof req.query.filter === "string" ? req.query.filter : "all";
+    const filter =
+        rawFilter === "on_land" || rawFilter === "with_upcoming" ? rawFilter : "all";
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 150) : 60;
+
+    try {
+        const result = await searchVesselsReadOnly({ query: q, filter, limit });
+        return res.json(result);
+    } catch (err: any) {
+        return res.status(500).json({ error: err?.message || "Greška pri pretraživanju plovila." });
     }
 });
 
