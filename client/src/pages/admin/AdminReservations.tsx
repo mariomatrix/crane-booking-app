@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link } from "wouter";
 import { trpc } from "@/lib/trpc";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -196,6 +197,25 @@ export default function AdminReservations() {
       toast.success("Rezervacija je vraćena u obradu.");
       utils.reservation.listAll.invalidate();
       utils.reservation.listDailyOperations.invalidate();
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
+  const [adminRevertRes, setAdminRevertRes] = useState<any | null>(null);
+  const [adminRevertReason, setAdminRevertReason] = useState("");
+  const [adminRevertTargetStatus, setAdminRevertTargetStatus] = useState<"approved" | "pending">("approved");
+
+  const adminRevertCompletionMutation = trpc.reservation.adminRevertCompletion.useMutation({
+    onSuccess: (res) => {
+      toast.success(`Zaključenje za ${res.reservationNumber || "rezervaciju"} je poništeno.`);
+      setAdminRevertRes(null);
+      setAdminRevertReason("");
+      utils.reservation.listAll.invalidate();
+      utils.reservation.listDailyOperations.invalidate();
+      utils.workOrders.list.invalidate();
+      utils.landOccupancy.listActive.invalidate();
     },
     onError: (error) => toast.error(error.message),
   });
@@ -984,14 +1004,17 @@ export default function AdminReservations() {
                           </>
                         )}
 
-                        {reservation.status === "completed" && (
+                        {reservation.status === "completed" && isAdmin && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => revertMutation.mutate({ id: reservation.id })}
-                            disabled={revertMutation.isPending}
-                            className="h-7 rounded-lg text-xs text-amber-700 border-amber-300 hover:bg-amber-50 px-2"
-                            title="Vrati u obradu"
+                            onClick={() => {
+                              setAdminRevertRes(reservation);
+                              setAdminRevertReason("");
+                              setAdminRevertTargetStatus("approved");
+                            }}
+                            className="h-7 rounded-lg text-xs text-rose-700 border-rose-300 hover:bg-rose-50 px-2"
+                            title="Poništi zaključenje operacije i vrati u odobreno/obradu"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
                           </Button>
@@ -1240,6 +1263,79 @@ export default function AdminReservations() {
               {deleteMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               <Trash2 className="h-4 w-4 mr-1.5" />
               Trajno obriši
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Admin Revert Completed Operation Dialog ────────────────────────── */}
+      <Dialog open={!!adminRevertRes} onOpenChange={(open) => !open && setAdminRevertRes(null)}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-rose-700">
+              <RotateCcw className="h-5 w-5" />
+              Poništi zaključenje operacije
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed">
+              Rezervacija{" "}
+              <span className="font-mono font-bold text-foreground">
+                {adminRevertRes?.reservationNumber || adminRevertRes?.id}
+              </span>
+              {adminRevertRes?.vesselName && ` (${adminRevertRes.vesselName})`} bit će vraćena iz statusa „Završeno”, a pripadajući radni nalog, statutarna kvota, karton i zauzeće suhog veza bit će poništeni.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-1 text-xs">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Vrati u status</Label>
+              <Select
+                value={adminRevertTargetStatus}
+                onValueChange={(v) => setAdminRevertTargetStatus(v as "approved" | "pending")}
+              >
+                <SelectTrigger className="rounded-xl text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="approved">Odobreno (zadrži termin za ponovno zaključenje/uređivanje)</SelectItem>
+                  <SelectItem value="pending">U obradi (ponovno zakazivanje)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-bold text-rose-800">Razlog poništenja *</Label>
+              <Input
+                value={adminRevertReason}
+                onChange={(e) => setAdminRevertReason(e.target.value)}
+                placeholder="Npr. Pogrešno odabrano plovilo ili termin"
+                className="rounded-xl text-xs"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 pt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setAdminRevertRes(null)}
+              disabled={adminRevertCompletionMutation.isPending}
+            >
+              Odustani
+            </Button>
+            <Button
+              variant="destructive"
+              className="rounded-xl font-semibold"
+              disabled={adminRevertCompletionMutation.isPending || adminRevertReason.trim().length < 3}
+              onClick={() => {
+                if (!adminRevertRes) return;
+                adminRevertCompletionMutation.mutate({
+                  id: adminRevertRes.id,
+                  reason: adminRevertReason.trim(),
+                  targetStatus: adminRevertTargetStatus,
+                });
+              }}
+            >
+              {adminRevertCompletionMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Potvrdi poništenje
             </Button>
           </DialogFooter>
         </DialogContent>

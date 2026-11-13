@@ -24,6 +24,7 @@ import {
   landOccupancies,
   landZones,
   operationDependencies,
+  invoices,
 } from "../../drizzle/schema";
 import { generateWorkOrderNumber } from "./numberingService";
 import {
@@ -725,4 +726,494 @@ export async function completeReservationOperation(params: CompleteOperationPara
   }
 
   return result;
+}
+
+/**
+ * Shared transaction helper to verify no invoice/ERP sync blocks modification,
+ * delete pending userCardEntries for the work order, and restore memberStatutoryRights.
+ */
+async function reverseWorkOrderFinancialEffectsTx(
+  tx: any,
+  order: typeof workOrders.$inferSelect,
+  reservationId?: string | null
+) {
+  if (reservationId) {
+    const existingInvoices = await tx
+      .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })
+      .from(invoices)
+      .where(eq(invoices.reservationId, reservationId))
+      .limit(1);
+    if (existingInvoices.length > 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Za ovu rezervaciju već je izdan dokument/račun (${existingInvoices[0].invoiceNumber}). Prvo ga uklonite ili stornirajte prije ispravka naloga.`,
+      });
+    }
+  }
+
+  const syncedEntries = await tx
+    .select({ id: userCardEntries.id })
+    .from(userCardEntries)
+    .where(and(eq(userCardEntries.workOrderId, order.id), eq(userCardEntries.erpStatus, "synced")))
+    .limit(1);
+  if (syncedEntries.length > 0) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Stavka na kartonu korisnika je već sinkronizirana s e-Računima i ne može se automatski poništiti.",
+    });
+  }
+
+  await tx.delete(userCardEntries).where(eq(userCardEntries.workOrderId, order.id));
+
+  if (order.clientType === "member" && order.userId) {
+    if (order.isStatutoryCovered) {
+      if (order.quotaOperationType === "lift") {
+        await tx
+          .update(memberStatutoryRights)
+          .set({ liftAvailable: true, updatedAt: new Date() })
+          .where(eq(memberStatutoryRights.userId, order.userId));
+      } else if (order.quotaOperationType === "lower") {
+        await tx
+          .update(memberStatutoryRights)
+          .set({ lowerAvailable: true, updatedAt: new Date() })
+          .where(eq(memberStatutoryRights.userId, order.userId));
+      }
+    } else {
+      await tx
+        .update(memberStatutoryRights)
+        .set({
+          pendingFeeAdjustmentsCount: sql`GREATEST(0, ${memberStatutoryRights.pendingFeeAdjustmentsCount} - 1)`,
+          updatedAt: new Date(),
+        })
+        .where(eq(memberStatutoryRights.userId, order.userId));
+    }
+  }
+}
+
+export interface AdminRevertCompletionParams {
+  reservationId: string;
+  adminId: string;
+  reason: string;
+  targetStatus?: "approved" | "pending";
+}
+
+/**
+ * Atomically reverts a completed reservation / work order back to approved or pending:
+ * restores statutory rights, deletes pending card entries, reverses land occupancy changes,
+ * cancels the work order, and logs full before/after audit trail.
+ */
+export async function adminRevertReservationCompletion(params: AdminRevertCompletionParams) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
+
+  const targetStatus = params.targetStatus || "approved";
+
+  const result = await db.transaction(async (tx) => {
+    const [res] = await tx
+      .select()
+      .from(reservations)
+      .where(eq(reservations.id, params.reservationId))
+      .for("update");
+
+    if (!res) throw new TRPCError({ code: "NOT_FOUND", message: "Rezervacija nije pronađena." });
+    if (res.status !== "completed") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Samo završene rezervacije mogu se poništiti ovim alatom.",
+      });
+    }
+
+    const activeOrders = await tx
+      .select()
+      .from(workOrders)
+      .where(and(eq(workOrders.reservationId, res.id), ne(workOrders.status, "cancelled")))
+      .for("update");
+
+    for (const order of activeOrders) {
+      await reverseWorkOrderFinancialEffectsTx(tx, order, res.id);
+      await tx
+        .update(workOrders)
+        .set({
+          status: "cancelled",
+          operatorNotes: order.operatorNotes
+            ? `${order.operatorNotes}\n[ADMIN PONIŠTENJE]: ${params.reason}`
+            : `[ADMIN PONIŠTENJE]: ${params.reason}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(workOrders.id, order.id));
+    }
+
+    // Reverse land occupancies created or closed by this reservation
+    const createdOccs = await tx
+      .select()
+      .from(landOccupancies)
+      .where(eq(landOccupancies.reservationId, res.id))
+      .for("update");
+
+    for (const occ of createdOccs) {
+      if (occ.returnedAt) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "Plovilo je nakon ovog vađenja već spušteno u more kasnijim nalogom. Prvo poništite nalog spuštanja.",
+        });
+      }
+      await tx.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+    }
+
+    const closedOccs = await tx
+      .select()
+      .from(landOccupancies)
+      .where(eq(landOccupancies.returnReservationId, res.id))
+      .for("update");
+
+    for (const occ of closedOccs) {
+      await tx
+        .update(landOccupancies)
+        .set({
+          returnedAt: null,
+          returnReservationId: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(landOccupancies.id, occ.id));
+    }
+
+    await tx.delete(craneOperationLog).where(eq(craneOperationLog.reservationId, res.id));
+
+    const updatedAdminNote = res.adminNote
+      ? `${res.adminNote}\n[ADMIN PONIŠTENJE]: ${params.reason}`
+      : `[ADMIN PONIŠTENJE]: ${params.reason}`;
+
+    await tx
+      .update(reservations)
+      .set({
+        status: targetStatus,
+        completedAt: null,
+        landZoneId: targetStatus === "pending" ? null : res.landZoneId,
+        craneId: targetStatus === "pending" ? null : res.craneId,
+        scheduledStart: targetStatus === "pending" ? null : res.scheduledStart,
+        scheduledEnd: targetStatus === "pending" ? null : res.scheduledEnd,
+        adminNote: updatedAdminNote,
+        updatedAt: new Date(),
+      })
+      .where(eq(reservations.id, res.id));
+
+    return {
+      reservationId: res.id,
+      reservationNumber: res.reservationNumber,
+      cancelledWorkOrders: activeOrders.map((o) => o.orderNumber),
+      deletedOccupancies: createdOccs.length,
+      reopenedOccupancies: closedOccs.length,
+      targetStatus,
+    };
+  });
+
+  await createAuditEntry({
+    actorId: params.adminId,
+    action: "admin_reverted_completion",
+    entityType: "reservation",
+    entityId: params.reservationId,
+    payload: { ...result, reason: params.reason },
+  });
+
+  return { success: true, ...result };
+}
+
+export interface AdminCorrectWorkOrderParams {
+  workOrderId: string;
+  adminId: string;
+  reason: string;
+  userId?: string;
+  vesselId?: string;
+  craneId?: string;
+  startedAt?: Date;
+  actualDurationMin?: number;
+  craneOnly?: boolean;
+  zoneId?: string | null;
+  spotNumber?: number | null;
+  operatorNotes?: string;
+}
+
+/**
+ * Allows an admin to correct a completed (or in-progress) work order in place:
+ * swap owner/vessel (recomputing statutory rights & card entries), change crane,
+ * adjust start/completion time & duration, or toggle land zone / "Samo dizalica".
+ */
+export async function adminCorrectCompletedWorkOrder(params: AdminCorrectWorkOrderParams) {
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Baza nije dostupna." });
+
+  const result = await db.transaction(async (tx) => {
+    const [order] = await tx
+      .select()
+      .from(workOrders)
+      .where(eq(workOrders.id, params.workOrderId))
+      .for("update");
+
+    if (!order) throw new TRPCError({ code: "NOT_FOUND", message: "Radni nalog nije pronađen." });
+    if (order.status === "cancelled") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Stornirani radni nalog nije moguće uređivati." });
+    }
+
+    const res = order.reservationId
+      ? (await tx.select().from(reservations).where(eq(reservations.id, order.reservationId)).for("update"))[0]
+      : null;
+
+    const targetUserId = params.userId || order.userId;
+    const targetVesselId = params.vesselId !== undefined ? params.vesselId : order.vesselId;
+    const targetCraneId = params.craneId || order.craneId;
+    const targetStartedAt = params.startedAt || order.startedAt || new Date();
+    const targetDurationMin = params.actualDurationMin ?? order.actualDurationMin ?? 30;
+    const targetCompletedAt =
+      order.status === "completed"
+        ? new Date(targetStartedAt.getTime() + targetDurationMin * 60 * 1000)
+        : order.completedAt;
+
+    const [newUser] = await tx.select().from(users).where(eq(users.id, targetUserId)).limit(1);
+    if (!newUser) throw new TRPCError({ code: "NOT_FOUND", message: "Odabrani korisnik nije pronađen." });
+
+    const [newVessel] = targetVesselId
+      ? await tx.select().from(vessels).where(eq(vessels.id, targetVesselId)).limit(1)
+      : [null];
+    if (targetVesselId && !newVessel) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Odabrano plovilo nije pronađeno." });
+    }
+
+    const ownerOrVesselChanged =
+      targetUserId !== order.userId ||
+      targetVesselId !== order.vesselId ||
+      targetCraneId !== order.craneId;
+
+    let finUpdates: Partial<typeof workOrders.$inferInsert> = {};
+
+    if (order.status === "completed" && ownerOrVesselChanged && res) {
+      await reverseWorkOrderFinancialEffectsTx(tx, order, res.id);
+
+      const resSnapshot = {
+        ...res,
+        userId: targetUserId,
+        vesselId: targetVesselId,
+        vesselLengthM: newVessel?.lengthM || res.vesselLengthM,
+        craneId: targetCraneId,
+      };
+      const effectiveYear = targetCompletedAt ? targetCompletedAt.getFullYear() : new Date().getFullYear();
+      const fin = await evaluateWorkOrderFinancials(tx, resSnapshot, newUser, newVessel, effectiveYear, targetCraneId);
+
+      finUpdates = {
+        clientType: fin.clientType,
+        isStatutoryCovered: fin.isStatutoryCovered,
+        quotaOperationType: fin.quotaOperationType,
+        chargeItemCode: fin.chargeItemCode,
+        chargeItemName: fin.chargeItemName,
+        commercialPricePerMeter: fin.commercialPricePerMeter,
+        commercialTotal: fin.commercialTotal,
+        vesselLengthM: fin.vesselLengthM,
+      };
+
+      const vName = newVessel?.name || res.vesselName || "Plovilo";
+      const vReg = newVessel?.registration || res.vesselRegistration || "";
+      const eventDt = targetCompletedAt || new Date();
+
+      if (fin.clientType === "member") {
+        if (fin.isStatutoryCovered) {
+          if (fin.quotaOperationType === "lift") {
+            await tx
+              .update(memberStatutoryRights)
+              .set({ liftAvailable: false, liftAcquiredYear: effectiveYear, updatedAt: new Date() })
+              .where(eq(memberStatutoryRights.userId, newUser.id));
+          } else if (fin.quotaOperationType === "lower") {
+            await tx
+              .update(memberStatutoryRights)
+              .set({ lowerAvailable: false, lowerAcquiredYear: effectiveYear, updatedAt: new Date() })
+              .where(eq(memberStatutoryRights.userId, newUser.id));
+          }
+          await tx.insert(userCardEntries).values({
+            userId: newUser.id,
+            workOrderId: order.id,
+            entryType: "statutory_quota_used",
+            serviceItemCode: fin.quotaOperationType === "lift" ? "STAT-LIFT" : "STAT-LOWER",
+            serviceItemName:
+              fin.quotaOperationType === "lift"
+                ? "Statutarno pravo: Vađenje iz mora (0,00 €)"
+                : "Statutarno pravo: Spuštanje u more (0,00 €)",
+            vesselName: vName,
+            vesselRegistration: vReg,
+            eventDate: eventDt,
+            note: `Radni nalog ${order.orderNumber} (Ispravak admina) - Pokriveno godišnjom članarinom`,
+            erpStatus: "pending",
+          });
+        } else {
+          await tx
+            .update(memberStatutoryRights)
+            .set({
+              pendingFeeAdjustmentsCount: sql`${memberStatutoryRights.pendingFeeAdjustmentsCount} + 1`,
+              updatedAt: new Date(),
+            })
+            .where(eq(memberStatutoryRights.userId, newUser.id));
+
+          await tx.insert(userCardEntries).values({
+            userId: newUser.id,
+            workOrderId: order.id,
+            entryType: "fee_adjustment_charge",
+            serviceItemCode: fin.chargeItemCode || "USL-D9T",
+            serviceItemName: fin.chargeItemName || "Korištenje dizalice (Doplata članarine)",
+            vesselName: vName,
+            vesselRegistration: vReg,
+            eventDate: eventDt,
+            note: `Radni nalog ${order.orderNumber} (Ispravak admina) - Prekoračenje statutarne kvote`,
+            erpStatus: "pending",
+          });
+        }
+      } else {
+        await tx.insert(userCardEntries).values({
+          userId: newUser.id,
+          workOrderId: order.id,
+          entryType: "commercial_service",
+          serviceItemCode: "USL-VANJSKI-M",
+          serviceItemName: `Komercijalno korištenje dizalice (${fin.vesselLengthM}m)`,
+          vesselName: vName,
+          vesselRegistration: vReg,
+          eventDate: eventDt,
+          note: `Radni nalog ${order.orderNumber} (Ispravak admina) - Iznos: ${fin.commercialTotal || "0.00"} EUR`,
+          erpStatus: "pending",
+        });
+      }
+    } else if (params.startedAt && order.status === "completed") {
+      await tx
+        .update(userCardEntries)
+        .set({ eventDate: targetCompletedAt || targetStartedAt })
+        .where(eq(userCardEntries.workOrderId, order.id));
+    }
+
+    const updatedNotes =
+      params.operatorNotes !== undefined
+        ? params.operatorNotes
+        : order.operatorNotes
+          ? `${order.operatorNotes}\n[ADMIN ISPRAVAK]: ${params.reason}`
+          : `[ADMIN ISPRAVAK]: ${params.reason}`;
+
+    await tx
+      .update(workOrders)
+      .set({
+        userId: targetUserId,
+        vesselId: targetVesselId,
+        craneId: targetCraneId,
+        startedAt: targetStartedAt,
+        completedAt: targetCompletedAt,
+        actualDurationMin: targetDurationMin,
+        operatorNotes: updatedNotes,
+        updatedAt: new Date(),
+        ...finUpdates,
+      })
+      .where(eq(workOrders.id, order.id));
+
+    // Sync reservation fields if linked
+    const finalLandZoneId = params.craneOnly
+      ? null
+      : params.zoneId !== undefined
+        ? params.zoneId
+        : res?.landZoneId ?? null;
+
+    if (res) {
+      await tx
+        .update(reservations)
+        .set({
+          userId: targetUserId,
+          vesselId: targetVesselId,
+          vesselName: newVessel?.name || res.vesselName,
+          vesselRegistration: newVessel?.registration || res.vesselRegistration,
+          vesselLengthM: newVessel?.lengthM || res.vesselLengthM,
+          contactPhone: newUser.phone || res.contactPhone,
+          craneId: targetCraneId,
+          landZoneId: finalLandZoneId,
+          scheduledStart: targetStartedAt,
+          scheduledEnd: targetCompletedAt || new Date(targetStartedAt.getTime() + targetDurationMin * 60 * 1000),
+          durationMin: targetDurationMin,
+          completedAt: order.status === "completed" ? targetCompletedAt : res.completedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(reservations.id, res.id));
+
+      await tx
+        .update(craneOperationLog)
+        .set({
+          craneId: targetCraneId || undefined,
+          startTime: targetStartedAt,
+          endTime: targetCompletedAt || targetStartedAt,
+          durationMinutes: targetDurationMin,
+        })
+        .where(eq(craneOperationLog.reservationId, res.id));
+    }
+
+    // Sync landOccupancies created by this reservation
+    if (res) {
+      const [occ] = await tx
+        .select()
+        .from(landOccupancies)
+        .where(eq(landOccupancies.reservationId, res.id))
+        .for("update")
+        .limit(1);
+
+      if (params.craneOnly) {
+        if (occ && !occ.returnedAt) {
+          await tx.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+        }
+      } else if (occ) {
+        await tx
+          .update(landOccupancies)
+          .set({
+            userId: targetUserId,
+            vesselId: targetVesselId || occ.vesselId,
+            zoneId: finalLandZoneId || occ.zoneId,
+            spotNumber: params.spotNumber !== undefined ? params.spotNumber : occ.spotNumber,
+            liftedAt: targetCompletedAt || targetStartedAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(landOccupancies.id, occ.id));
+      } else if (finalLandZoneId && targetVesselId && order.status === "completed") {
+        await tx.insert(landOccupancies).values({
+          vesselId: targetVesselId,
+          userId: targetUserId,
+          zoneId: finalLandZoneId,
+          spotNumber: params.spotNumber ?? undefined,
+          reservationId: res.id,
+          liftedAt: targetCompletedAt || targetStartedAt,
+          createdBy: params.adminId,
+          note: `Ispravak radnog naloga ${order.orderNumber}: ${params.reason}`,
+        });
+      }
+    }
+
+    return {
+      workOrderId: order.id,
+      orderNumber: order.orderNumber,
+      before: {
+        userId: order.userId,
+        vesselId: order.vesselId,
+        craneId: order.craneId,
+        startedAt: order.startedAt,
+        actualDurationMin: order.actualDurationMin,
+        landZoneId: res?.landZoneId ?? null,
+      },
+      after: {
+        userId: targetUserId,
+        vesselId: targetVesselId,
+        craneId: targetCraneId,
+        startedAt: targetStartedAt,
+        actualDurationMin: targetDurationMin,
+        landZoneId: finalLandZoneId,
+        craneOnly: !!params.craneOnly,
+      },
+    };
+  });
+
+  await createAuditEntry({
+    actorId: params.adminId,
+    action: "admin_work_order_corrected",
+    entityType: "work_orders",
+    entityId: params.workOrderId,
+    payload: { ...result, reason: params.reason },
+  });
+
+  return { success: true, ...result };
 }

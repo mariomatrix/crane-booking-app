@@ -3578,6 +3578,39 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    // Admin: Revert a completed reservation + work order (atomic rollback)
+    adminRevertCompletion: adminProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          reason: z.string().min(3, "Unesite razlog poništenja zaključenja"),
+          targetStatus: z.enum(["approved", "pending"]).default("approved"),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const { adminRevertReservationCompletion } = await import("./services/workOrderService");
+        const res = await adminRevertReservationCompletion({
+          reservationId: input.id,
+          adminId: ctx.user.id,
+          reason: input.reason,
+          targetStatus: input.targetStatus,
+        });
+
+        try {
+          const { calendarSync } = await import("./services/calendarSync");
+          calendarSync.broadcast({
+            type: "CALENDAR_UPDATED",
+            actorId: ctx.user.id,
+            actorName: ctx.user.name || ctx.user.email || "Administrator",
+            reservationId: input.id,
+            actionText: "je poništio/la zaključenje operacije",
+            timestamp: new Date().toISOString(),
+          });
+        } catch (e) {}
+
+        return res;
+      }),
+
     // Revert reservation to pending
     revertToPending: operatorProcedure
       .input(z.object({ id: z.string().uuid() }))
@@ -3679,6 +3712,8 @@ export const appRouter = router({
       .input(
         z.object({
           id: z.string().uuid(),
+          userId: z.string().uuid().optional(),
+          vesselId: z.string().uuid().optional(),
           craneId: z.string().uuid().optional(),
           scheduledStart: z.date().optional(),
           vesselRegistration: z.string().optional(),
@@ -3708,22 +3743,44 @@ export const appRouter = router({
           .limit(1);
 
         const isCompleted = reservation.status === "completed" || attachedWo?.status === "completed";
-        if (isCompleted && (input.scheduledStart || input.craneId || input.durationMin)) {
+        if (isCompleted && (input.scheduledStart || input.craneId || input.durationMin || input.userId || input.vesselId)) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Nije moguće mijenjati termin, dizalicu ili trajanje jer je radni nalog ${attachedWo?.orderNumber || "operacije"} već zaključen.`,
+            message: `Nije moguće mijenjati termin, dizalicu, plovilo ili trajanje jer je radni nalog ${attachedWo?.orderNumber || "operacije"} već zaključen. Koristite „Ispravi nalog” u Radnim nalozima.`,
           });
         }
 
+        let resolvedUser = null;
+        if (input.userId && input.userId !== reservation.userId) {
+          resolvedUser = await getUserById(input.userId);
+          if (!resolvedUser) throw new TRPCError({ code: "NOT_FOUND", message: "Odabrani korisnik nije pronađen." });
+        }
+
+        let resolvedVessel = null;
+        if (input.vesselId && input.vesselId !== reservation.vesselId) {
+          resolvedVessel = await getVesselById(input.vesselId);
+          if (!resolvedVessel) throw new TRPCError({ code: "NOT_FOUND", message: "Odabrano plovilo nije pronađeno." });
+        }
+
         const updates: Record<string, any> = {
+          userId: resolvedUser ? resolvedUser.id : reservation.userId,
+          vesselId: resolvedVessel ? resolvedVessel.id : reservation.vesselId,
+          vesselName: resolvedVessel ? resolvedVessel.name : reservation.vesselName,
+          vesselLengthM: resolvedVessel ? resolvedVessel.lengthM : reservation.vesselLengthM,
+          vesselBeamM: resolvedVessel ? resolvedVessel.beamM : reservation.vesselBeamM,
+          vesselWeightTons: resolvedVessel ? resolvedVessel.weightTons : reservation.vesselWeightTons,
           vesselRegistration:
             input.vesselRegistration !== undefined
               ? input.vesselRegistration
-              : reservation.vesselRegistration,
+              : resolvedVessel
+                ? resolvedVessel.registration
+                : reservation.vesselRegistration,
           contactPhone:
             input.contactPhone !== undefined
               ? input.contactPhone
-              : reservation.contactPhone,
+              : resolvedUser
+                ? resolvedUser.phone
+                : reservation.contactPhone,
           userNote:
             input.userNote !== undefined
               ? input.userNote
@@ -5699,6 +5756,127 @@ export const appRouter = router({
           limit: pageSize,
           offset,
         });
+      }),
+
+    // Admin: Ispravi datum dolaska (liftedAt), zonu, mjesto ili napomenu na aktivnom/povijesnom zauzeću
+    adminUpdate: adminProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          liftedAt: z.date().optional(),
+          zoneId: z.string().uuid().optional(),
+          spotNumber: z.number().int().positive().nullable().optional(),
+          note: z.string().optional(),
+          reason: z.string().min(3, "Unesite razlog ispravka"),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [occ] = await db
+          .select()
+          .from(landOccupancies)
+          .where(eq(landOccupancies.id, input.id))
+          .limit(1);
+        if (!occ) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Zapis o boravku na kopnu nije pronađen." });
+        }
+
+        const newZoneId = input.zoneId ?? occ.zoneId;
+        const newSpotNumber = input.spotNumber !== undefined ? input.spotNumber : occ.spotNumber;
+
+        let resolvedSpotId = occ.spotId;
+        if (newZoneId && newSpotNumber) {
+          const [spotRow] = await db
+            .select({ id: landSpots.id })
+            .from(landSpots)
+            .where(and(eq(landSpots.zoneId, newZoneId), eq(landSpots.spotNumber, newSpotNumber)))
+            .limit(1);
+          resolvedSpotId = spotRow?.id ?? null;
+        } else if (input.spotNumber === null) {
+          resolvedSpotId = null;
+        }
+
+        const newNote =
+          input.note !== undefined
+            ? input.note
+            : occ.note
+              ? `${occ.note} | [ADMIN ISPRAVAK]: ${input.reason}`
+              : `[ADMIN ISPRAVAK]: ${input.reason}`;
+
+        await db
+          .update(landOccupancies)
+          .set({
+            liftedAt: input.liftedAt ?? occ.liftedAt,
+            zoneId: newZoneId,
+            spotNumber: newSpotNumber,
+            spotId: resolvedSpotId,
+            note: newNote,
+            updatedAt: new Date(),
+          })
+          .where(eq(landOccupancies.id, occ.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "admin_land_occupancy_updated",
+          entityType: "land_occupancy",
+          entityId: occ.id,
+          payload: {
+            reason: input.reason,
+            before: { liftedAt: occ.liftedAt, zoneId: occ.zoneId, spotNumber: occ.spotNumber },
+            after: {
+              liftedAt: input.liftedAt ?? occ.liftedAt,
+              zoneId: newZoneId,
+              spotNumber: newSpotNumber,
+            },
+          },
+        });
+
+        return { success: true };
+      }),
+
+    // Admin: Ukloni pogrešno evidentirano zauzeće kopna
+    adminDelete: adminProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          reason: z.string().min(3, "Unesite razlog uklanjanja zauzeća"),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+
+        const [occ] = await db
+          .select()
+          .from(landOccupancies)
+          .where(eq(landOccupancies.id, input.id))
+          .limit(1);
+        if (!occ) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "Zapis o boravku na kopnu nije pronađen." });
+        }
+
+        await db.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+
+        await createAuditEntry({
+          actorId: ctx.user.id,
+          action: "admin_land_occupancy_deleted",
+          entityType: "land_occupancy",
+          entityId: occ.id,
+          payload: {
+            reason: input.reason,
+            deletedOccupancy: {
+              vesselId: occ.vesselId,
+              userId: occ.userId,
+              zoneId: occ.zoneId,
+              spotNumber: occ.spotNumber,
+              liftedAt: occ.liftedAt,
+            },
+          },
+        });
+
+        return { success: true };
       }),
   }),
 

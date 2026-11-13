@@ -37,6 +37,7 @@ import {
 import { useState } from "react";
 import { toast } from "sonner";
 import { useLang } from "@/contexts/LangContext";
+import { useAuth } from "@/_core/hooks/useAuth";
 import { formatAppDate } from "@/lib/date-utils";
 import { ZoneMoveDialog } from "@/components/landDispatch/ZoneMoveDialog";
 import { TruckDeliveryToLandDialog } from "@/components/land/TruckDeliveryToLandDialog";
@@ -63,6 +64,8 @@ const emptyForm: ZoneForm = {
 export default function AdminLandZones() {
   const { lang } = useLang();
   const isHr = lang === "hr";
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ZoneForm>(emptyForm);
@@ -81,8 +84,28 @@ export default function AdminLandZones() {
   const [dispatchDialogOpen, setDispatchDialogOpen] = useState(false);
   const [dispatchSpot, setDispatchSpot] = useState<any | null>(null);
 
+  // Admin occupancy edit state
+  const [occEditOpen, setOccEditOpen] = useState(false);
+  const [occEditLiftedAt, setOccEditLiftedAt] = useState("");
+  const [occEditZoneId, setOccEditZoneId] = useState("");
+  const [occEditSpotNumber, setOccEditSpotNumber] = useState("");
+  const [occEditNote, setOccEditNote] = useState("");
+  const [occEditReason, setOccEditReason] = useState("");
+
   const handleOpenDetail = (occ: any) => {
     setSelectedOccupancy(occ);
+    setOccEditOpen(false);
+    if (occ.liftedAt) {
+      const d = new Date(occ.liftedAt);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      setOccEditLiftedAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    } else {
+      setOccEditLiftedAt("");
+    }
+    setOccEditZoneId(occ.zoneId || "");
+    setOccEditSpotNumber(occ.spotNumber ? String(occ.spotNumber) : "");
+    setOccEditNote(occ.note || "");
+    setOccEditReason("");
     setDetailDialogOpen(true);
   };
 
@@ -103,6 +126,27 @@ export default function AdminLandZones() {
   };
 
   const utils = trpc.useUtils();
+
+  const adminUpdateOccupancyMutation = trpc.landOccupancy.adminUpdate.useMutation({
+    onSuccess: () => {
+      toast.success("Zauzeće na suhom vezu je uspješno ažurirano.");
+      setOccEditOpen(false);
+      setDetailDialogOpen(false);
+      utils.landOccupancy.listActive.invalidate();
+      utils.landZone.list.invalidate();
+    },
+    onError: (err: any) => toast.error(err.message || "Greška pri ažuriranju zauzeća."),
+  });
+
+  const adminDeleteOccupancyMutation = trpc.landOccupancy.adminDelete.useMutation({
+    onSuccess: () => {
+      toast.success("Zauzeće je uklonjeno sa suhog veza.");
+      setDetailDialogOpen(false);
+      utils.landOccupancy.listActive.invalidate();
+      utils.landZone.list.invalidate();
+    },
+    onError: (err: any) => toast.error(err.message || "Greška pri uklanjanju zauzeća."),
+  });
 
   const { data: zones = [], isLoading: zonesLoading } = trpc.landZone.list.useQuery();
   const { data: occupancies = [], isLoading: occupanciesLoading } = trpc.landOccupancy.listActive.useQuery(
@@ -846,10 +890,135 @@ export default function AdminLandZones() {
                       </div>
                     )}
                   </div>
+
+                  {/* Admin: Inline edit liftedAt / zone / spotNumber / note */}
+                  {isAdmin && occEditOpen && (
+                    <div className="p-3 rounded-lg border-2 border-amber-300 bg-amber-50/50 dark:bg-amber-950/20 space-y-3">
+                      <div className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                        <Pencil className="w-3.5 h-3.5" />
+                        Administratorski ispravak zauzeća
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-semibold">Datum podizanja (liftedAt)</Label>
+                          <Input
+                            type="date"
+                            value={occEditLiftedAt}
+                            onChange={(e) => setOccEditLiftedAt(e.target.value)}
+                            className="h-8 text-xs bg-white"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-semibold">Zona</Label>
+                          <select
+                            value={occEditZoneId}
+                            onChange={(e) => setOccEditZoneId(e.target.value)}
+                            className="w-full h-8 rounded-md border bg-white px-2 text-xs"
+                          >
+                            {zones.map((z: any) => (
+                              <option key={z.id} value={z.id}>
+                                {z.name} ({z.code})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-semibold">Mjesto br.</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            placeholder="Opcionalno"
+                            value={occEditSpotNumber}
+                            onChange={(e) => setOccEditSpotNumber(e.target.value)}
+                            className="h-8 text-xs bg-white"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-semibold">Napomena</Label>
+                        <Textarea
+                          value={occEditNote}
+                          onChange={(e) => setOccEditNote(e.target.value)}
+                          rows={2}
+                          className="text-xs bg-white"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-bold text-amber-900">Razlog ispravka *</Label>
+                        <Input
+                          value={occEditReason}
+                          onChange={(e) => setOccEditReason(e.target.value)}
+                          placeholder="Npr. Ispravak godine iz Excel uvoza (09.12.2025.)"
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => setOccEditOpen(false)}
+                        >
+                          Odustani
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white"
+                          disabled={adminUpdateOccupancyMutation.isPending || occEditReason.trim().length < 3}
+                          onClick={() => {
+                            adminUpdateOccupancyMutation.mutate({
+                              id: selectedOccupancy.id,
+                              liftedAt: occEditLiftedAt ? new Date(`${occEditLiftedAt}T08:00:00`) : undefined,
+                              zoneId: occEditZoneId || undefined,
+                              spotNumber: occEditSpotNumber ? Number(occEditSpotNumber) : null,
+                              note: occEditNote,
+                              reason: occEditReason.trim(),
+                            });
+                          }}
+                        >
+                          {adminUpdateOccupancyMutation.isPending && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                          Spremi ispravak
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <DialogFooter className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-3 border-t">
                   <div className="flex flex-wrap items-center gap-2">
+                    {isAdmin && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="text-amber-700 border-amber-300 hover:bg-amber-50 text-xs font-semibold gap-1.5"
+                          onClick={() => setOccEditOpen((v) => !v)}
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                          {isHr ? "Uredi datum / zauzeće" : "Edit Occupancy"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="text-rose-700 border-rose-300 hover:bg-rose-50 text-xs font-semibold gap-1.5"
+                          disabled={adminDeleteOccupancyMutation.isPending}
+                          onClick={() => {
+                            const reason = window.prompt("Unesite razlog uklanjanja pogrešnog zauzeća:");
+                            if (reason && reason.trim().length >= 3) {
+                              adminDeleteOccupancyMutation.mutate({
+                                id: selectedOccupancy.id,
+                                reason: reason.trim(),
+                              });
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          {isHr ? "Ukloni zauzeće" : "Delete"}
+                        </Button>
+                      </>
+                    )}
                     <Button
                       type="button"
                       variant="outline"

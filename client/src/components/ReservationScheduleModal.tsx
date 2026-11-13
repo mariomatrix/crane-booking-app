@@ -111,13 +111,17 @@ export function ReservationScheduleModal({
   const { data: affinitiesMatrix = [] } = trpc.landDispatch.getAffinitiesMatrix.useQuery(undefined, {
     enabled: open,
   });
-  const { data: usersListRes } = trpc.user.list.useQuery({ pageSize: 1000 }, { enabled: isCreate && open });
+  const { data: usersListRes } = trpc.user.list.useQuery(
+    { pageSize: 1000 },
+    { enabled: (isCreate || isEdit) && open }
+  );
   const usersList = usersListRes?.data || [];
 
   const { data: userVessels = [], isLoading: vesselsLoading } = trpc.vessel.listByUser.useQuery(
     { userId: selectedUserId },
-    { enabled: isCreate && !!selectedUserId && open }
+    { enabled: (isCreate || isEdit) && !!selectedUserId && open }
   );
+  const [showEditOwnerVessel, setShowEditOwnerVessel] = useState(false);
 
   const dateStr = selectedDate ? formatToSqlDate(selectedDate) : "";
 
@@ -278,6 +282,9 @@ export function ReservationScheduleModal({
     if (!open) return;
 
     if (reservation) {
+      setSelectedUserId(reservation.userId || reservation.user?.id || "");
+      setSelectedVesselId(reservation.vesselId || reservation.vessel?.id || "");
+      setShowEditOwnerVessel(false);
       setVesselRegistration(reservation.vesselRegistration || reservation.vessel?.registration || "");
       setContactPhone(reservation.contactPhone || reservation.user?.phone || "");
       setAdminNote(reservation.adminNote || "");
@@ -883,6 +890,11 @@ export function ReservationScheduleModal({
       if (!reservation?.id) return;
       updateDetailsMutation.mutate({
         id: reservation.id,
+        userId: selectedUserId && selectedUserId !== reservation.userId ? selectedUserId : undefined,
+        vesselId:
+          selectedVesselId && selectedVesselId !== "new" && selectedVesselId !== reservation.vesselId
+            ? selectedVesselId
+            : undefined,
         craneId,
         scheduledStart,
         durationMin: durNum,
@@ -1028,6 +1040,65 @@ export function ReservationScheduleModal({
               <p className="text-[11px] text-muted-foreground italic bg-white dark:bg-slate-800/80 p-1.5 rounded border">
                 "{reservation.userNote}"
               </p>
+            )}
+
+            {isEdit && (
+              <div className="pt-1 border-t border-slate-200/70">
+                <button
+                  type="button"
+                  onClick={() => setShowEditOwnerVessel((v) => !v)}
+                  className="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 underline"
+                >
+                  {showEditOwnerVessel ? "Sakrij promjenu klijenta/plovila" : "Promijeni klijenta / plovilo na ovoj rezervaciji"}
+                </button>
+                {showEditOwnerVessel && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold">Novi korisnik / vlasnik</Label>
+                      <Select
+                        value={selectedUserId}
+                        onValueChange={(val) => {
+                          setSelectedUserId(val);
+                          setSelectedVesselId("");
+                        }}
+                      >
+                        <SelectTrigger className="rounded-lg h-8 text-xs bg-white">
+                          <SelectValue placeholder="Odaberite korisnika" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {usersList.map((u: any) => (
+                            <SelectItem key={u.id} value={u.id}>
+                              {u.name || u.email} {u.oib ? `(${u.oib})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[11px] font-semibold">Novo plovilo</Label>
+                      <Select
+                        value={selectedVesselId}
+                        onValueChange={(val) => {
+                          setSelectedVesselId(val);
+                          const vObj = userVessels.find((x: any) => x.id === val);
+                          if (vObj?.registration) setVesselRegistration(vObj.registration);
+                        }}
+                      >
+                        <SelectTrigger className="rounded-lg h-8 text-xs bg-white">
+                          <SelectValue placeholder="Odaberite plovilo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {userVessels.map((v: any) => (
+                            <SelectItem key={v.id} value={v.id}>
+                              {v.name} {v.registration ? `[${v.registration}]` : ""} ({v.lengthM}m)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         ) : isCreate ? (

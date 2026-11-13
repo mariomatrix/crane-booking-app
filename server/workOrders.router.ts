@@ -23,7 +23,12 @@ import {
 } from "../drizzle/schema";
 import { eq, desc, and, gte, lte, sql, count, ne, or } from "drizzle-orm";
 import { generateWorkOrderNumber, generateInvoiceNumber } from "./services/numberingService";
-import { startReservationWorkOrder, completeReservationOperation } from "./services/workOrderService";
+import {
+    startReservationWorkOrder,
+    completeReservationOperation,
+    adminRevertReservationCompletion,
+    adminCorrectCompletedWorkOrder,
+} from "./services/workOrderService";
 import { parseStrictVesselLength, getCraneManipulationPricing } from "./services/statutoryQuotaService";
 
 export { completeReservationOperation, startReservationWorkOrder };
@@ -929,5 +934,47 @@ export const workOrdersRouter = router({
             });
 
             return { success: true };
+        }),
+
+    // ─── Admin: Poništi zaključenje naloga i rezervacije (Rollback) ──────
+    adminRevertCompletion: adminProcedure
+        .input(
+            z.object({
+                reservationId: z.string().uuid(),
+                reason: z.string().min(3, "Unesite razlog poništenja zaključenja"),
+                targetStatus: z.enum(["approved", "pending"]).default("approved"),
+            })
+        )
+        .mutation(async ({ input, ctx }) => {
+            return await adminRevertReservationCompletion({
+                reservationId: input.reservationId,
+                adminId: ctx.user.id,
+                reason: input.reason,
+                targetStatus: input.targetStatus,
+            });
+        }),
+
+    // ─── Admin: Ispravi zaključeni ili aktivni radni nalog ───────────────
+    adminCorrect: adminProcedure
+        .input(
+            z.object({
+                workOrderId: z.string().uuid(),
+                reason: z.string().min(3, "Unesite razlog ispravka"),
+                userId: z.string().uuid().optional(),
+                vesselId: z.string().uuid().optional(),
+                craneId: z.string().uuid().optional(),
+                startedAt: z.date().optional(),
+                actualDurationMin: z.number().int().min(5).max(600).optional(),
+                craneOnly: z.boolean().optional(),
+                zoneId: z.string().uuid().nullable().optional(),
+                spotNumber: z.number().int().positive().nullable().optional(),
+                operatorNotes: z.string().optional(),
+            })
+        )
+        .mutation(async ({ input, ctx }) => {
+            return await adminCorrectCompletedWorkOrder({
+                ...input,
+                adminId: ctx.user.id,
+            });
         }),
 });

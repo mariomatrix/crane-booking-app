@@ -26,14 +26,21 @@ import {
     Ship,
     Calendar,
     Loader2,
+    Pencil,
+    RotateCcw,
 } from "lucide-react";
 import { PDFDownloadLink, PDFViewer } from "@react-pdf/renderer";
 import { WorkOrderPdf } from "@/components/WorkOrderPdfTemplate";
 import { Link } from "wouter";
 import * as XLSX from "xlsx";
 import { toast } from "sonner";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function AdminWorkOrders() {
+    const { user: currentUser } = useAuth();
+    const isAdmin = currentUser?.role === "admin";
+
     const [clientTypeFilter, setClientTypeFilter] = useState<string>("all");
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [search, setSearch] = useState<string>("");
@@ -44,7 +51,87 @@ export default function AdminWorkOrders() {
     const [quoteDocumentType, setQuoteDocumentType] = useState<"proforma" | "invoice">("proforma");
     const [quotePaymentMethod, setQuotePaymentMethod] = useState<"bank_transfer" | "cash" | "card" | "compensation">("bank_transfer");
 
+    // Admin Correct Work Order Modal State
+    const [correctingOrder, setCorrectingOrder] = useState<any | null>(null);
+    const [corrUserId, setCorrUserId] = useState<string>("");
+    const [corrVesselId, setCorrVesselId] = useState<string>("");
+    const [corrCraneId, setCorrCraneId] = useState<string>("");
+    const [corrStartDateTime, setCorrStartDateTime] = useState<string>("");
+    const [corrDurationMin, setCorrDurationMin] = useState<string>("30");
+    const [corrCraneOnly, setCorrCraneOnly] = useState<boolean>(false);
+    const [corrZoneId, setCorrZoneId] = useState<string>("keep");
+    const [corrSpotNumber, setCorrSpotNumber] = useState<string>("");
+    const [corrNotes, setCorrNotes] = useState<string>("");
+    const [corrReason, setCorrReason] = useState<string>("");
+
+    // Admin Revert Completion Modal State
+    const [revertingOrder, setRevertingOrder] = useState<any | null>(null);
+    const [revertTargetStatus, setRevertTargetStatus] = useState<"approved" | "pending">("approved");
+    const [revertReason, setRevertReason] = useState<string>("");
+
     const utils = trpc.useUtils();
+
+    const { data: usersListRes } = trpc.user.list.useQuery(
+        { pageSize: 1000 },
+        { enabled: isAdmin && !!correctingOrder }
+    );
+    const usersList = usersListRes?.data || [];
+
+    const { data: corrUserVessels = [] } = trpc.vessel.listByUser.useQuery(
+        { userId: corrUserId },
+        { enabled: isAdmin && !!correctingOrder && !!corrUserId }
+    );
+
+    const { data: cranesList = [] } = trpc.crane.list.useQuery(undefined, {
+        enabled: isAdmin && !!correctingOrder,
+    });
+    const { data: landZones = [] } = trpc.landZone.list.useQuery(undefined, {
+        enabled: isAdmin && !!correctingOrder,
+    });
+
+    const adminCorrectMutation = trpc.workOrders.adminCorrect.useMutation({
+        onSuccess: (res) => {
+            toast.success(`Radni nalog ${res.orderNumber} je uspješno ispravljen.`);
+            setCorrectingOrder(null);
+            utils.workOrders.list.invalidate();
+            utils.reservation.listAll.invalidate();
+            utils.landOccupancy.listActive.invalidate();
+        },
+        onError: (err: any) => toast.error(err.message || "Greška pri ispravku radnog naloga."),
+    });
+
+    const adminRevertMutation = trpc.workOrders.adminRevertCompletion.useMutation({
+        onSuccess: (res) => {
+            toast.success(`Zaključenje za ${res.reservationNumber || "rezervaciju"} je poništeno.`);
+            setRevertingOrder(null);
+            utils.workOrders.list.invalidate();
+            utils.reservation.listAll.invalidate();
+            utils.landOccupancy.listActive.invalidate();
+        },
+        onError: (err: any) => toast.error(err.message || "Greška pri poništenju zaključenja."),
+    });
+
+    const openCorrectModal = (o: any) => {
+        setCorrectingOrder(o);
+        setCorrUserId(o.userId || "");
+        setCorrVesselId(o.vesselId || "");
+        setCorrCraneId(o.craneId || "");
+        if (o.startedAt) {
+            const d = new Date(o.startedAt);
+            const pad = (n: number) => String(n).padStart(2, "0");
+            setCorrStartDateTime(
+                `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+            );
+        } else {
+            setCorrStartDateTime("");
+        }
+        setCorrDurationMin(String(o.actualDurationMin || 30));
+        setCorrCraneOnly(false);
+        setCorrZoneId("keep");
+        setCorrSpotNumber("");
+        setCorrNotes(o.operatorNotes || "");
+        setCorrReason("");
+    };
 
     const { data: orders = [], isLoading } = trpc.workOrders.list.useQuery({
         clientType: clientTypeFilter === "all" ? undefined : (clientTypeFilter as any),
@@ -322,6 +409,36 @@ export default function AdminWorkOrders() {
                                                     <Printer className="h-3.5 w-3.5" />
                                                     A4
                                                 </Button>
+                                                {isAdmin && o.status !== "cancelled" && (
+                                                    <>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-8 px-2 text-xs gap-1 rounded-lg border-amber-300 text-amber-800 hover:bg-amber-50"
+                                                            onClick={() => openCorrectModal(o)}
+                                                            title="Ispravi radni nalog (klijent, plovilo, dizalica, vrijeme, zona)"
+                                                        >
+                                                            <Pencil className="h-3.5 w-3.5" />
+                                                            Ispravi
+                                                        </Button>
+                                                        {o.reservationId && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                className="h-8 px-2 text-xs gap-1 rounded-lg border-rose-300 text-rose-700 hover:bg-rose-50"
+                                                                onClick={() => {
+                                                                    setRevertingOrder(o);
+                                                                    setRevertTargetStatus("approved");
+                                                                    setRevertReason("");
+                                                                }}
+                                                                title="Poništi zaključenje i vrati kvotu/karton/suhi vez"
+                                                            >
+                                                                <RotateCcw className="h-3.5 w-3.5" />
+                                                                Poništi
+                                                            </Button>
+                                                        )}
+                                                    </>
+                                                )}
                                             </div>
                                         </TableCell>
                                     </TableRow>
@@ -536,6 +653,263 @@ export default function AdminWorkOrders() {
                                 <WorkOrderPdf order={selectedOrderForPdf} />
                             </PDFViewer>
                         </div>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Admin Correct Work Order Dialog */}
+            {correctingOrder && (
+                <Dialog open={!!correctingOrder} onOpenChange={() => setCorrectingOrder(null)}>
+                    <DialogContent className="max-w-xl rounded-3xl p-6 max-h-[90vh] overflow-y-auto">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                                <Pencil className="h-5 w-5 text-amber-600" />
+                                Ispravak radnog naloga {correctingOrder.orderNumber}
+                            </DialogTitle>
+                            <DialogDescription className="text-xs">
+                                Zamijenite klijenta/plovilo (automatski preračunava statutarnu kvotu i karton), dizalicu, vrijeme ili zonu na kopnu.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4 py-2 text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-semibold">Korisnik / Vlasnik</Label>
+                                    <Select
+                                        value={corrUserId}
+                                        onValueChange={(val) => {
+                                            setCorrUserId(val);
+                                            setCorrVesselId("");
+                                        }}
+                                    >
+                                        <SelectTrigger className="rounded-xl text-xs">
+                                            <SelectValue placeholder="Odaberite korisnika" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {usersList.map((u: any) => (
+                                                <SelectItem key={u.id} value={u.id}>
+                                                    {u.name || u.email} {u.oib ? `(${u.oib})` : ""}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-semibold">Plovilo</Label>
+                                    <Select value={corrVesselId} onValueChange={setCorrVesselId}>
+                                        <SelectTrigger className="rounded-xl text-xs">
+                                            <SelectValue placeholder="Odaberite plovilo" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {corrUserVessels.map((v: any) => (
+                                                <SelectItem key={v.id} value={v.id}>
+                                                    {v.name} {v.registration ? `[${v.registration}]` : ""} ({v.lengthM}m)
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-semibold">Dizalica</Label>
+                                    <Select value={corrCraneId} onValueChange={setCorrCraneId}>
+                                        <SelectTrigger className="rounded-xl text-xs">
+                                            <SelectValue placeholder="Odaberite dizalicu" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {(cranesList as any[]).map((c: any) => (
+                                                <SelectItem key={c.id} value={c.id}>
+                                                    {c.name}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-semibold">Početak operacije</Label>
+                                    <Input
+                                        type="datetime-local"
+                                        value={corrStartDateTime}
+                                        onChange={(e) => setCorrStartDateTime(e.target.value)}
+                                        className="rounded-xl text-xs"
+                                    />
+                                </div>
+
+                                <div className="space-y-1">
+                                    <Label className="text-xs font-semibold">Trajanje (min)</Label>
+                                    <Input
+                                        type="number"
+                                        min={5}
+                                        max={600}
+                                        value={corrDurationMin}
+                                        onChange={(e) => setCorrDurationMin(e.target.value)}
+                                        className="rounded-xl text-xs"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="p-3 rounded-2xl border bg-slate-50 space-y-3">
+                                <label className="flex items-center gap-2 font-semibold text-xs cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={corrCraneOnly}
+                                        onChange={(e) => setCorrCraneOnly(e.target.checked)}
+                                        className="rounded"
+                                    />
+                                    <span>Samo dizalica (ukloni mjesto na kopnu / briše zauzeće suhog veza)</span>
+                                </label>
+
+                                {!corrCraneOnly && (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <Label className="text-xs font-semibold">Zona suhog veza</Label>
+                                            <Select value={corrZoneId} onValueChange={setCorrZoneId}>
+                                                <SelectTrigger className="rounded-xl text-xs bg-white">
+                                                    <SelectValue placeholder="Zadrži postojeću" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="keep">Zadrži postojeću zonu</SelectItem>
+                                                    {(landZones as any[]).map((z: any) => (
+                                                        <SelectItem key={z.id} value={z.id}>
+                                                            {z.name} ({z.code})
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs font-semibold">Broj mjesta (opcionalno)</Label>
+                                            <Input
+                                                type="number"
+                                                min={1}
+                                                placeholder="Npr. 12"
+                                                value={corrSpotNumber}
+                                                onChange={(e) => setCorrSpotNumber(e.target.value)}
+                                                className="rounded-xl text-xs bg-white"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label className="text-xs font-semibold">Napomena operatera</Label>
+                                <Textarea
+                                    value={corrNotes}
+                                    onChange={(e) => setCorrNotes(e.target.value)}
+                                    rows={2}
+                                    className="rounded-xl text-xs"
+                                />
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label className="text-xs font-bold text-amber-800">Razlog ispravka (obvezno za reviziju) *</Label>
+                                <Input
+                                    value={corrReason}
+                                    onChange={(e) => setCorrReason(e.target.value)}
+                                    placeholder="Npr. Operater greškom odabrao brata / krivo plovilo"
+                                    className="rounded-xl text-xs border-amber-300"
+                                />
+                            </div>
+                        </div>
+
+                        <DialogFooter className="gap-2 pt-2">
+                            <Button variant="outline" className="rounded-xl" onClick={() => setCorrectingOrder(null)}>
+                                Odustani
+                            </Button>
+                            <Button
+                                className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                                disabled={adminCorrectMutation.isPending || corrReason.trim().length < 3}
+                                onClick={() => {
+                                    adminCorrectMutation.mutate({
+                                        workOrderId: correctingOrder.id,
+                                        reason: corrReason.trim(),
+                                        userId: corrUserId || undefined,
+                                        vesselId: corrVesselId || undefined,
+                                        craneId: corrCraneId || undefined,
+                                        startedAt: corrStartDateTime ? new Date(corrStartDateTime) : undefined,
+                                        actualDurationMin: Number(corrDurationMin) || undefined,
+                                        craneOnly: corrCraneOnly,
+                                        zoneId: !corrCraneOnly && corrZoneId !== "keep" ? corrZoneId : undefined,
+                                        spotNumber: corrSpotNumber ? Number(corrSpotNumber) : undefined,
+                                        operatorNotes: corrNotes,
+                                    });
+                                }}
+                            >
+                                {adminCorrectMutation.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                                Spremi ispravak
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Admin Revert Completion Dialog */}
+            {revertingOrder && (
+                <Dialog open={!!revertingOrder} onOpenChange={() => setRevertingOrder(null)}>
+                    <DialogContent className="max-w-md rounded-3xl p-6">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-lg font-bold text-rose-700">
+                                <RotateCcw className="h-5 w-5" />
+                                Poništi zaključenje naloga {revertingOrder.orderNumber}
+                            </DialogTitle>
+                            <DialogDescription className="text-xs">
+                                Sustav će vratiti statutarnu kvotu korisniku, obrisati nesinkroniziranu stavku s kartona, poništiti promjenu na suhom vezu i vratiti rezervaciju u odabran status.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-3 py-2 text-xs">
+                            <div className="space-y-1">
+                                <Label className="text-xs font-semibold">Ciljani status rezervacije</Label>
+                                <Select
+                                    value={revertTargetStatus}
+                                    onValueChange={(v) => setRevertTargetStatus(v as "approved" | "pending")}
+                                >
+                                    <SelectTrigger className="rounded-xl text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="approved">Odobreno (ostaje termin u kalendaru)</SelectItem>
+                                        <SelectItem value="pending">U obradi (ponovno planiranje)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="space-y-1">
+                                <Label className="text-xs font-bold text-rose-800">Razlog poništenja *</Label>
+                                <Input
+                                    value={revertReason}
+                                    onChange={(e) => setRevertReason(e.target.value)}
+                                    placeholder="Npr. Zaključeno greškom za krivu rezervaciju"
+                                    className="rounded-xl text-xs border-rose-300"
+                                />
+                            </div>
+                        </div>
+
+                        <DialogFooter className="gap-2 pt-2">
+                            <Button variant="outline" className="rounded-xl" onClick={() => setRevertingOrder(null)}>
+                                Odustani
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                className="rounded-xl font-semibold"
+                                disabled={adminRevertMutation.isPending || revertReason.trim().length < 3}
+                                onClick={() => {
+                                    adminRevertMutation.mutate({
+                                        reservationId: revertingOrder.reservationId,
+                                        reason: revertReason.trim(),
+                                        targetStatus: revertTargetStatus,
+                                    });
+                                }}
+                            >
+                                {adminRevertMutation.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                                Potvrdi poništenje
+                            </Button>
+                        </DialogFooter>
                     </DialogContent>
                 </Dialog>
             )}
