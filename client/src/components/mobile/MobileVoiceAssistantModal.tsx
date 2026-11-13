@@ -20,6 +20,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+export interface VoiceCandidateVessel {
+  vesselId: string;
+  vesselName: string;
+  vesselRegistration: string | null;
+  userId: string;
+  ownerName: string | null;
+  ownerPhone: string | null;
+  reservationId?: string | null;
+  reservationNumber?: string | null;
+}
+
 export interface ProposedVoiceAction {
   id: string;
   type:
@@ -36,6 +47,8 @@ export interface ProposedVoiceAction {
   description: string;
   confidence: number;
   requiresConfirmation: boolean;
+  needsDisambiguation?: boolean;
+  candidateVessels?: VoiceCandidateVessel[];
   reservationId?: string | null;
   vesselId?: string | null;
   vesselName?: string | null;
@@ -57,6 +70,7 @@ export interface ProposedVoiceAction {
 }
 
 interface VoiceInterpretResponse {
+  requestId?: string;
   modelUsed: string;
   transcript: string;
   spokenResponse: string;
@@ -191,7 +205,8 @@ export function MobileVoiceAssistantModal({
           ? new MediaRecorder(stream, { mimeType })
           : new MediaRecorder(stream);
 
-        setAudioMimeType(recorder.mimeType || "audio/webm");
+        const baseMime = (recorder.mimeType || "audio/webm").split(";")[0].trim() || "audio/webm";
+        setAudioMimeType(baseMime);
 
         recorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) {
@@ -203,12 +218,14 @@ export function MobileVoiceAssistantModal({
           stream.getTracks().forEach((t) => t.stop());
           if (audioChunksRef.current.length > 0) {
             const blob = new Blob(audioChunksRef.current, {
-              type: recorder.mimeType || "audio/webm",
+              type: baseMime,
             });
             const reader = new FileReader();
             reader.onloadend = () => {
-              const base64data = reader.result as string;
-              setAudioBase64(base64data);
+              const result = typeof reader.result === "string" ? reader.result : "";
+              const commaIdx = result.indexOf(",");
+              const rawBase64 = commaIdx !== -1 ? result.slice(commaIdx + 1) : result;
+              setAudioBase64(rawBase64 || null);
             };
             reader.readAsDataURL(blob);
           }
@@ -306,7 +323,10 @@ export function MobileVoiceAssistantModal({
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ actions: actionsToRun }),
+        body: JSON.stringify({
+          actions: actionsToRun,
+          idempotencyKey: interpretResult.requestId,
+        }),
       });
 
       const data = await res.json();
@@ -572,6 +592,51 @@ export function MobileVoiceAssistantModal({
                         <p className="text-[11px] text-slate-600 leading-snug">
                           {act.description}
                         </p>
+                        {act.needsDisambiguation && act.candidateVessels && act.candidateVessels.length > 0 && (
+                          <div className="pt-1.5 space-y-1">
+                            <span className="text-[10px] font-bold text-amber-800 block">
+                              Pronađeno više plovila — odaberite točno:
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {act.candidateVessels.map((cand) => (
+                                <button
+                                  key={cand.vesselId}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setInterpretResult((prev) => {
+                                      if (!prev) return prev;
+                                      return {
+                                        ...prev,
+                                        actions: prev.actions.map((item) =>
+                                          item.id === act.id
+                                            ? {
+                                                ...item,
+                                                needsDisambiguation: false,
+                                                vesselId: cand.vesselId,
+                                                vesselName: cand.vesselName,
+                                                vesselRegistration: cand.vesselRegistration,
+                                                userId: cand.userId,
+                                                ownerName: cand.ownerName,
+                                                ownerPhone: cand.ownerPhone,
+                                                reservationId: cand.reservationId || null,
+                                                title: `${cand.vesselName}${cand.vesselRegistration ? ` [${cand.vesselRegistration}]` : ""}`,
+                                                description: `Vlasnik: ${cand.ownerName || "—"}${cand.ownerPhone ? ` · Tel: ${cand.ownerPhone}` : ""}`,
+                                              }
+                                            : item
+                                        ),
+                                      };
+                                    });
+                                  }}
+                                  className="text-[10px] font-bold px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 transition"
+                                >
+                                  {cand.vesselName} {cand.vesselRegistration ? `[${cand.vesselRegistration}]` : ""} · {cand.ownerName || "—"}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </label>
                   );
@@ -594,7 +659,8 @@ export function MobileVoiceAssistantModal({
                   onClick={handleExecuteSelected}
                   disabled={
                     isExecuting ||
-                    interpretResult.actions.filter((a) => selectedActionIds[a.id]).length === 0
+                    interpretResult.actions.filter((a) => selectedActionIds[a.id]).length === 0 ||
+                    interpretResult.actions.some((a) => selectedActionIds[a.id] && a.needsDisambiguation)
                   }
                   className="flex-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md flex items-center justify-center gap-1.5 active:scale-95 transition"
                 >

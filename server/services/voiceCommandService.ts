@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { randomUUID } from "crypto";
 import { ENV } from "../_core/env";
 import { invokeLLM } from "../_core/llm";
 import {
@@ -23,6 +25,7 @@ import { eq, and, inArray, isNull, desc, asc, ne, sql } from "drizzle-orm";
 import {
   startReservationWorkOrder,
   completeReservationOperation,
+  resolveCanonicalSpotTx,
 } from "./workOrderService";
 import { landDispatchService } from "../landDispatch/landDispatch.service";
 import { sendNewMessageNotification } from "../_core/email";
@@ -48,6 +51,17 @@ export interface ProposedVoiceResourceItem {
   unitPriceEur: number;
 }
 
+export interface VoiceCandidateVessel {
+  vesselId: string;
+  vesselName: string;
+  vesselRegistration: string | null;
+  userId: string;
+  ownerName: string | null;
+  ownerPhone: string | null;
+  reservationId?: string | null;
+  reservationNumber?: string | null;
+}
+
 export interface ProposedVoiceAction {
   id: string;
   type: VoiceActionType;
@@ -55,6 +69,8 @@ export interface ProposedVoiceAction {
   description: string;
   confidence: number;
   requiresConfirmation: boolean;
+  needsDisambiguation?: boolean;
+  candidateVessels?: VoiceCandidateVessel[];
   // Resolved DB references & payload
   reservationId?: string | null;
   reservationNumber?: string | null;
@@ -84,12 +100,38 @@ export interface ProposedVoiceAction {
 }
 
 export interface VoiceInterpretResult {
+  requestId: string;
   modelUsed: string;
   transcript: string;
   spokenResponse: string;
   actions: ProposedVoiceAction[];
   warnings: string[];
 }
+
+const VoicePlanOutputSchema = z.object({
+  transcript: z.string().default(""),
+  spokenResponse: z.string().default("Naredba je obrađena."),
+  warnings: z.array(z.string()).optional().default([]),
+  rawActions: z
+    .array(
+      z
+        .object({
+          type: z.enum([
+            "start_work_order",
+            "complete_work_order",
+            "update_work_order_notes",
+            "assign_land_zone",
+            "add_card_charge",
+            "send_owner_message",
+            "report_stoppage",
+            "resolve_stoppage",
+            "vessel_lookup",
+          ]),
+        })
+        .passthrough()
+    )
+    .default([]),
+});
 
 export interface VoiceContextSnapshot {
   dateStr: string;
@@ -361,7 +403,7 @@ export async function loadVoiceContextSnapshot(
     })
     .from(vessels)
     .leftJoin(users, eq(vessels.ownerId, users.id))
-    .limit(600);
+    .orderBy(asc(vessels.name));
 
   const occByVessel = new Map(activeOccs.map((o) => [o.vesselId, o]));
   const allVessels = vesselRows.map((v) => {
@@ -416,6 +458,41 @@ export async function loadVoiceContextSnapshot(
 }
 
 /**
+ * Normalizes audio base64 & MIME type for Gemini Interactions API and LLM fallbacks.
+ * Handles data URLs containing codec parameters such as `data:audio/webm;codecs=opus;base64,...`.
+ */
+export function normalizeAudioPayload(
+  audioBase64?: string,
+  audioMimeType?: string
+): { base64: string; mimeType: string } | null {
+  if (!audioBase64) return null;
+  const trimmed = audioBase64.trim();
+  if (!trimmed) return null;
+
+  let extractedMime = audioMimeType;
+  let rawBase64 = trimmed;
+
+  const dataUrlMatch = /^data:([^,]*);base64,([\s\S]*)$/i.exec(trimmed);
+  if (dataUrlMatch) {
+    if (!extractedMime && dataUrlMatch[1]) {
+      extractedMime = dataUrlMatch[1];
+    }
+    rawBase64 = dataUrlMatch[2] || "";
+  } else if (trimmed.startsWith("data:")) {
+    const commaIdx = trimmed.indexOf(",");
+    if (commaIdx !== -1) {
+      rawBase64 = trimmed.slice(commaIdx + 1);
+    }
+  }
+
+  const cleanBase64 = rawBase64.replace(/\s+/g, "");
+  if (!cleanBase64) return null;
+
+  const cleanMimeType = (extractedMime || "audio/webm").split(";")[0].trim() || "audio/webm";
+  return { base64: cleanBase64, mimeType: cleanMimeType };
+}
+
+/**
  * Calls Google Gemini Interactions API directly when GEMINI_API_KEY is configured,
  * or falls back to ENV.forgeApiKey via invokeLLM.
  */
@@ -433,15 +510,16 @@ async function callGeminiForVoicePlan(params: {
 }> {
   const { model, systemPrompt, userPrompt, audioBase64, audioMimeType } = params;
 
+  const normalizedAudio = normalizeAudioPayload(audioBase64, audioMimeType);
+
   // 1. Direct Google Gemini Interactions API (v1beta/interactions)
   if (ENV.geminiApiKey && ENV.geminiApiKey.trim().length > 0) {
     const inputParts: Array<Record<string, unknown>> = [];
-    if (audioBase64 && audioBase64.trim().length > 0) {
-      const cleanedBase64 = audioBase64.replace(/^data:[^;]+;base64,/, "");
+    if (normalizedAudio) {
       inputParts.push({
         type: "audio",
-        mime_type: audioMimeType || "audio/webm",
-        data: cleanedBase64,
+        mime_type: normalizedAudio.mimeType,
+        data: normalizedAudio.base64,
       });
     }
     inputParts.push({
@@ -468,6 +546,7 @@ async function callGeminiForVoicePlan(params: {
             schema: VOICE_COMMAND_JSON_SCHEMA,
           },
         }),
+        signal: AbortSignal.timeout(15000),
       }
     );
 
@@ -488,21 +567,24 @@ async function callGeminiForVoicePlan(params: {
       throw new Error("Gemini API nije vratio strukturirani JSON odgovor.");
     }
 
-    return JSON.parse(outputText);
+    const parsedJson = JSON.parse(outputText);
+    const validated = VoicePlanOutputSchema.safeParse(parsedJson);
+    if (!validated.success) {
+      throw new Error("Gemini API vratio je neispravnu strukturu odgovora.");
+    }
+    return validated.data;
   }
 
   // 2. Fallback to server/_core/llm.ts (BUILT_IN_FORGE_API_KEY)
   if (ENV.forgeApiKey && ENV.forgeApiKey.trim().length > 0) {
     const contentParts: any[] = [];
-    if (audioBase64 && audioBase64.trim().length > 0) {
-      const dataUrl = audioBase64.startsWith("data:")
-        ? audioBase64
-        : `data:${audioMimeType || "audio/webm"};base64,${audioBase64}`;
+    if (normalizedAudio) {
+      const dataUrl = `data:${normalizedAudio.mimeType};base64,${normalizedAudio.base64}`;
       contentParts.push({
         type: "file_url",
         file_url: {
           url: dataUrl,
-          mime_type: (audioMimeType as any) || "audio/mp4",
+          mime_type: normalizedAudio.mimeType as any,
         },
       });
     }
@@ -794,10 +876,25 @@ export function resolveVoiceActionsAgainstContext(
       const normQ = normalizeRegString(vesselQuery);
       const lowerQ = vesselQuery.trim().toLowerCase();
 
-      // First look in today's tasks
-      const taskMatch = context.todayTasks.find(
+      // Exact registration match is always unambiguous
+      const exactTask = context.todayTasks.find(
+        (t) => t.vesselRegistration && normalizeRegString(t.vesselRegistration) === normQ
+      );
+      const exactVessel = context.allVessels.find(
+        (v) => v.registration && normalizeRegString(v.registration) === normQ
+      );
+      if (exactTask || exactVessel) {
+        const vessel =
+          exactVessel ||
+          (exactTask?.vesselId ? context.allVessels.find((v) => v.id === exactTask.vesselId) : undefined);
+        const task =
+          exactTask || (vessel ? context.todayTasks.find((t) => t.vesselId === vessel.id) : undefined);
+        return { task, vessel, ambiguousCandidates: [] as VoiceCandidateVessel[] };
+      }
+
+      // Otherwise check all matching tasks & vessels to detect ambiguity (e.g. two Drinković brothers)
+      const matchingTasks = context.todayTasks.filter(
         (t) =>
-          (t.vesselRegistration && normalizeRegString(t.vesselRegistration) === normQ) ||
           (t.vesselRegistration &&
             normQ.length >= 3 &&
             normalizeRegString(t.vesselRegistration).includes(normQ)) ||
@@ -805,9 +902,8 @@ export function resolveVoiceActionsAgainstContext(
           (t.ownerName && t.ownerName.toLowerCase().includes(lowerQ))
       );
 
-      const vesselMatch = context.allVessels.find(
+      const matchingVessels = context.allVessels.filter(
         (v) =>
-          (v.registration && normalizeRegString(v.registration) === normQ) ||
           (v.registration &&
             normQ.length >= 3 &&
             normalizeRegString(v.registration).includes(normQ)) ||
@@ -815,19 +911,58 @@ export function resolveVoiceActionsAgainstContext(
           (v.ownerName && v.ownerName.toLowerCase().includes(lowerQ))
       );
 
-      if (taskMatch) {
-        const vessel =
-          vesselMatch ||
-          (taskMatch.vesselId
-            ? context.allVessels.find((v) => v.id === taskMatch.vesselId)
-            : undefined);
-        return { task: taskMatch, vessel };
+      // Deduplicate candidates by vesselId
+      const candidateMap = new Map<string, VoiceCandidateVessel>();
+      for (const t of matchingTasks) {
+        if (!t.vesselId) continue;
+        candidateMap.set(t.vesselId, {
+          vesselId: t.vesselId,
+          vesselName: t.vesselName || "Plovilo",
+          vesselRegistration: t.vesselRegistration || null,
+          userId: t.userId,
+          ownerName: t.ownerName || null,
+          ownerPhone: t.ownerPhone || null,
+          reservationId: t.reservationId,
+          reservationNumber: t.reservationNumber,
+        });
+      }
+      for (const v of matchingVessels) {
+        if (!candidateMap.has(v.id)) {
+          const linkedTask = context.todayTasks.find((t) => t.vesselId === v.id);
+          candidateMap.set(v.id, {
+            vesselId: v.id,
+            vesselName: v.name,
+            vesselRegistration: v.registration || null,
+            userId: v.ownerId,
+            ownerName: v.ownerName || null,
+            ownerPhone: v.ownerPhone || null,
+            reservationId: linkedTask?.reservationId || null,
+            reservationNumber: linkedTask?.reservationNumber || null,
+          });
+        }
       }
 
-      if (vesselMatch) {
-        const task = context.todayTasks.find((t) => t.vesselId === vesselMatch.id);
-        return { task, vessel: vesselMatch };
+      const candidates = Array.from(candidateMap.values());
+      if (candidates.length > 1) {
+        return { task: undefined, vessel: undefined, ambiguousCandidates: candidates.slice(0, 6) };
       }
+
+      if (matchingTasks.length === 1) {
+        const taskMatch = matchingTasks[0];
+        const vessel =
+          matchingVessels[0] ||
+          (taskMatch.vesselId ? context.allVessels.find((v) => v.id === taskMatch.vesselId) : undefined);
+        return { task: taskMatch, vessel, ambiguousCandidates: [] as VoiceCandidateVessel[] };
+      }
+
+      if (matchingVessels.length === 1) {
+        const vesselMatch = matchingVessels[0];
+        const task = context.todayTasks.find((t) => t.vesselId === vesselMatch.id);
+        return { task, vessel: vesselMatch, ambiguousCandidates: [] as VoiceCandidateVessel[] };
+      }
+
+      // Explicit vesselQuery was provided but did not match anything: do NOT silently fall back to activeReservationId
+      return { task: undefined, vessel: undefined, ambiguousCandidates: [] as VoiceCandidateVessel[] };
     }
 
     // Fallback to currently opened reservation in mobile UI if provided
@@ -883,7 +1018,8 @@ export function resolveVoiceActionsAgainstContext(
 
   rawActions.forEach((raw, idx) => {
     const actionId = `voice-act-${idx + 1}`;
-    const { task, vessel } = findVesselAndTask(raw.vesselQuery, raw.reservationId);
+    const { task, vessel, ambiguousCandidates = [] } = findVesselAndTask(raw.vesselQuery, raw.reservationId);
+    const isAmbiguous = ambiguousCandidates.length > 1;
     const zone =
       findZone(raw.zoneQuery) ||
       (task?.zoneId ? context.zones.find((z) => z.id === task.zoneId) : undefined);
@@ -893,6 +1029,37 @@ export function resolveVoiceActionsAgainstContext(
     const ownerName = vessel?.ownerName || task?.ownerName || null;
     const ownerPhone = vessel?.ownerPhone || task?.ownerPhone || null;
     const userId = vessel?.ownerId || task?.userId || null;
+
+    if (
+      isAmbiguous &&
+      raw.type !== "report_stoppage" &&
+      raw.type !== "resolve_stoppage"
+    ) {
+      warnings.push(
+        `Pronađeno je više plovila za "${raw.vesselQuery}" (${ambiguousCandidates.map((c) => `${c.vesselName} [${c.vesselRegistration || "—"}]`).join(", ")}). Odaberite točno plovilo prije izvršenja.`
+      );
+      resolved.push({
+        id: actionId,
+        type: raw.type,
+        title: `Odaberite točno plovilo (${raw.vesselQuery})`,
+        description: `Više podudaranja u bazi — dodirnite ispravno plovilo ispod prije potvrde.`,
+        confidence: 0.5,
+        requiresConfirmation: true,
+        needsDisambiguation: true,
+        candidateVessels: ambiguousCandidates,
+        zoneId: zone?.id || null,
+        zoneCode: zone?.code || null,
+        zoneName: zone?.name || null,
+        spotNumber: raw.spotNumber ?? null,
+        durationMin: raw.durationMin || 30,
+        operatorNotes: raw.operatorNotes || null,
+        messageText: raw.messageText || null,
+        serviceItemName: raw.resourceQuery || null,
+        quantity: raw.quantity || 1,
+        unit: raw.unit || null,
+      });
+      return;
+    }
 
     if (raw.type === "start_work_order") {
       if (!task) {
@@ -1107,7 +1274,7 @@ export function resolveVoiceActionsAgainstContext(
       }
       const locationInfo = vessel?.currentZoneCode
         ? `Na kopnu: ${vessel.currentZoneName} (${vessel.currentZoneCode})${vessel.currentSpotNumber ? `, mjesto #${vessel.currentSpotNumber}` : ""}`
-        : "U moru (nije evidentirano na suhom vezu)";
+        : "Nema evidentiranog boravka na kopnu";
       resolved.push({
         id: actionId,
         type: "vessel_lookup",
@@ -1236,7 +1403,14 @@ ${transcript ? `PREPOZNATI TEKST / BILJEŠKA MORNARA: "${transcript}"` : "Analiz
     finalSpoken = `${lookupAct.title}. ${lookupAct.description}`;
   }
 
+  const requestId = randomUUID();
+  pendingVoicePlans.set(`${operatorId}:${requestId}`, {
+    expiresAt: Date.now() + 30 * 60 * 1000,
+    actions,
+  });
+
   return {
+    requestId,
     modelUsed: usedModelLabel,
     transcript: rawResult.transcript || transcript || "",
     spokenResponse: finalSpoken,
@@ -1245,6 +1419,34 @@ ${transcript ? `PREPOZNATI TEKST / BILJEŠKA MORNARA: "${transcript}"` : "Analiz
   };
 }
 
+// Server-side short-lived store of interpreted voice plans (prevents trusting tampered client payloads)
+const pendingVoicePlans = new Map<
+  string,
+  { expiresAt: number; actions: ProposedVoiceAction[] }
+>();
+
+// Per-action execution idempotency cache (planId:actionId -> result)
+const executedVoiceActionCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    result: { id: string; type: VoiceActionType; success: boolean; message: string };
+  }
+>();
+
+// In-memory TTL cache for whole-request voice execution idempotency
+const executedVoiceRequestCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    response: {
+      executedCount: number;
+      alreadyExecuted?: boolean;
+      results: Array<{ id: string; type: VoiceActionType; success: boolean; message: string }>;
+    };
+  }
+>();
+
 /**
  * Executes a list of operator-confirmed voice actions atomically and logs them in audit_log.
  */
@@ -1252,18 +1454,77 @@ export async function executeConfirmedVoiceActions(params: {
   operatorId: string;
   operatorName?: string | null;
   actions: ProposedVoiceAction[];
+  idempotencyKey?: string;
 }): Promise<{
   executedCount: number;
+  alreadyExecuted?: boolean;
   results: Array<{ id: string; type: VoiceActionType; success: boolean; message: string }>;
 }> {
-  const { operatorId, actions } = params;
+  const { operatorId, actions, idempotencyKey } = params;
+
+  const now = Date.now();
+  pendingVoicePlans.forEach((v, k) => {
+    if (v.expiresAt < now) pendingVoicePlans.delete(k);
+  });
+  executedVoiceActionCache.forEach((v, k) => {
+    if (v.expiresAt < now) executedVoiceActionCache.delete(k);
+  });
+  executedVoiceRequestCache.forEach((v, k) => {
+    if (v.expiresAt < now) executedVoiceRequestCache.delete(k);
+  });
+
+  if (idempotencyKey) {
+    const cached = executedVoiceRequestCache.get(`${operatorId}:${idempotencyKey}`);
+    if (cached) {
+      return { ...cached.response, alreadyExecuted: true };
+    }
+  }
+
+  // If a server-side plan exists for this idempotencyKey (requestId), resolve authoritative actions from it
+  const serverPlan = idempotencyKey ? pendingVoicePlans.get(`${operatorId}:${idempotencyKey}`) : undefined;
+  const authoritativeActions: ProposedVoiceAction[] = serverPlan
+    ? actions.map((clientAct) => {
+        const planAct = serverPlan.actions.find((p) => p.id === clientAct.id);
+        if (!planAct) return clientAct;
+        // Only allow client to resolve disambiguation from server-provided candidateVessels
+        if (planAct.needsDisambiguation && clientAct.vesselId && planAct.candidateVessels) {
+          const picked = planAct.candidateVessels.find((c) => c.vesselId === clientAct.vesselId);
+          if (picked) {
+            return {
+              ...planAct,
+              needsDisambiguation: false,
+              vesselId: picked.vesselId,
+              vesselName: picked.vesselName,
+              vesselRegistration: picked.vesselRegistration,
+              userId: picked.userId,
+              ownerName: picked.ownerName,
+              ownerPhone: picked.ownerPhone,
+              reservationId: picked.reservationId || null,
+            };
+          }
+        }
+        return planAct;
+      })
+    : actions;
+
   const db = await getDb();
   if (!db) throw new Error("Baza podataka nije dostupna.");
 
   const results: Array<{ id: string; type: VoiceActionType; success: boolean; message: string }> = [];
 
-  for (const action of actions) {
+  for (const action of authoritativeActions) {
+    const actionKey = idempotencyKey ? `${operatorId}:${idempotencyKey}:${action.id}` : null;
+    if (actionKey) {
+      const prevAction = executedVoiceActionCache.get(actionKey);
+      if (prevAction && prevAction.result.success) {
+        results.push(prevAction.result);
+        continue;
+      }
+    }
     try {
+      if (action.needsDisambiguation) {
+        throw new Error("Potrebno je prvo odabrati točno plovilo između više kandidata.");
+      }
       if (action.type === "start_work_order") {
         if (!action.reservationId) throw new Error("Nedostaje ID rezervacije.");
         const res = await startReservationWorkOrder({
@@ -1339,39 +1600,104 @@ export async function executeConfirmedVoiceActions(params: {
         if (!action.vesselId || !action.zoneId) {
           throw new Error("Nedostaje plovilo ili zona za smještaj.");
         }
-        const [vessel] = await db
-          .select()
-          .from(vessels)
-          .where(eq(vessels.id, action.vesselId))
-          .limit(1);
-        if (!vessel) throw new Error("Plovilo nije pronađeno.");
+        const moveOutcome = await db.transaction(async (tx) => {
+          const [vessel] = await tx
+            .select()
+            .from(vessels)
+            .where(eq(vessels.id, action.vesselId!))
+            .limit(1);
+          if (!vessel) throw new Error("Plovilo nije pronađeno.");
 
-        await db
-          .update(landOccupancies)
-          .set({ returnedAt: new Date(), updatedAt: new Date() })
-          .where(
-            and(
-              eq(landOccupancies.vesselId, action.vesselId),
-              isNull(landOccupancies.returnedAt)
+          const spotNum = action.spotNumber ? Number(action.spotNumber) : null;
+          const [activeOcc] = await tx
+            .select()
+            .from(landOccupancies)
+            .where(
+              and(
+                eq(landOccupancies.vesselId, action.vesselId!),
+                isNull(landOccupancies.returnedAt)
+              )
             )
+            .for("update")
+            .limit(1);
+
+          const resolvedSpotId = await resolveCanonicalSpotTx(
+            tx,
+            action.zoneId!,
+            spotNum,
+            activeOcc?.id
           );
 
-        await db.insert(landOccupancies).values({
-          vesselId: action.vesselId,
-          userId: vessel.ownerId,
-          zoneId: action.zoneId,
-          spotNumber: action.spotNumber ? Number(action.spotNumber) : null,
-          reservationId: action.reservationId || null,
-          liftedAt: new Date(),
-          note: action.operatorNotes || "Glasovni unos smještaja putem mobilne aplikacije",
-          createdBy: operatorId,
+          if (activeOcc) {
+            // Preserve original liftedAt and stay identity when relocating an already-landed vessel
+            const moveNote = action.operatorNotes
+              ? `${activeOcc.note ? `${activeOcc.note} | ` : ""}[Glasovni premještaj]: ${action.operatorNotes}`
+              : activeOcc.note;
+            await tx
+              .update(landOccupancies)
+              .set({
+                zoneId: action.zoneId!,
+                spotNumber: spotNum,
+                spotId: resolvedSpotId,
+                note: moveNote,
+                updatedAt: new Date(),
+              })
+              .where(eq(landOccupancies.id, activeOcc.id));
+
+            await createAuditEntry(
+              {
+                actorId: operatorId,
+                action: "mobile_voice_vessel_relocated",
+                entityType: "land_occupancy",
+                entityId: activeOcc.id,
+                payload: {
+                  vesselId: vessel.id,
+                  fromZoneId: activeOcc.zoneId,
+                  toZoneId: action.zoneId,
+                  spotNumber: spotNum,
+                  preservedLiftedAt: activeOcc.liftedAt,
+                },
+              },
+              tx
+            );
+            return { vesselName: vessel.name, relocated: true };
+          }
+
+          const [inserted] = await tx
+            .insert(landOccupancies)
+            .values({
+              vesselId: action.vesselId!,
+              userId: vessel.ownerId,
+              zoneId: action.zoneId!,
+              spotNumber: spotNum,
+              spotId: resolvedSpotId,
+              reservationId: action.reservationId || null,
+              liftedAt: new Date(),
+              note: action.operatorNotes || "Glasovni unos smještaja putem mobilne aplikacije",
+              createdBy: operatorId,
+            })
+            .returning({ id: landOccupancies.id });
+
+          await createAuditEntry(
+            {
+              actorId: operatorId,
+              action: "mobile_voice_land_occupancy_created",
+              entityType: "land_occupancy",
+              entityId: inserted?.id,
+              payload: { vesselId: vessel.id, zoneId: action.zoneId, spotNumber: spotNum },
+            },
+            tx
+          );
+          return { vesselName: vessel.name, relocated: false };
         });
 
         results.push({
           id: action.id,
           type: action.type,
           success: true,
-          message: `Plovilo ${vessel.name} smješteno u zonu ${action.zoneCode || ""}`,
+          message: moveOutcome.relocated
+            ? `Plovilo ${moveOutcome.vesselName} premješteno u zonu ${action.zoneCode || ""} (zadržan izvorni dolazak)`
+            : `Plovilo ${moveOutcome.vesselName} smješteno u zonu ${action.zoneCode || ""}`,
         });
       } else if (action.type === "add_card_charge") {
         if (!action.userId) throw new Error("Nedostaje ID vlasnika plovila.");
@@ -1410,6 +1736,8 @@ export async function executeConfirmedVoiceActions(params: {
         const msgBody = (action.messageText || "").trim();
         if (!msgBody) throw new Error("Prazan tekst obavijesti.");
 
+        const deliveredChannels: string[] = [];
+
         if (action.reservationId) {
           await db.insert(messages).values({
             reservationId: action.reservationId,
@@ -1417,6 +1745,7 @@ export async function executeConfirmedVoiceActions(params: {
             body: msgBody,
             isRead: false,
           });
+          deliveredChannels.push("in-app");
         }
 
         if (action.userId) {
@@ -1426,22 +1755,38 @@ export async function executeConfirmedVoiceActions(params: {
             .where(eq(users.id, action.userId))
             .limit(1);
 
-          if (owner?.email) {
-            sendNewMessageNotification({
-              to: owner.email,
-              userName: owner.name || owner.firstName || "Korisnik",
-              reservationNumber: action.reservationNumber || action.vesselRegistration || "TEREN",
-              messageBody: msgBody,
-              lang: "hr",
-            }).catch((err) => console.warn("[Voice Email] Failed:", err?.message || err));
+          if (!owner) {
+            throw new Error("Vlasnik plovila nije pronađen u bazi.");
           }
 
-          if (owner?.phone) {
-            const smsText = `PŠD ŠPINUT (${action.vesselRegistration || action.vesselName || "Obavijest"}): ${msgBody}`;
-            sendSms(owner.phone, smsText).catch((err) =>
-              console.warn("[Voice SMS] Failed:", err?.message || err)
-            );
+          if (owner.email) {
+            try {
+              await sendNewMessageNotification({
+                to: owner.email,
+                userName: owner.name || owner.firstName || "Korisnik",
+                reservationNumber: action.reservationNumber || action.vesselRegistration || "TEREN",
+                messageBody: msgBody,
+                lang: "hr",
+              });
+              deliveredChannels.push("email");
+            } catch (err: any) {
+              console.warn("[Voice Email] Failed:", err?.message || err);
+            }
           }
+
+          if (owner.phone) {
+            try {
+              const smsText = `PŠD ŠPINUT (${action.vesselRegistration || action.vesselName || "Obavijest"}): ${msgBody}`;
+              const smsOk = await sendSms(owner.phone, smsText);
+              if (smsOk !== false) deliveredChannels.push("sms");
+            } catch (err: any) {
+              console.warn("[Voice SMS] Failed:", err?.message || err);
+            }
+          }
+        }
+
+        if (deliveredChannels.length === 0) {
+          throw new Error("Vlasnik nema evidentiran e-mail ni broj mobitela za slanje obavijesti.");
         }
 
         await createAuditEntry({
@@ -1452,6 +1797,7 @@ export async function executeConfirmedVoiceActions(params: {
           payload: {
             vesselRegistration: action.vesselRegistration,
             messageText: msgBody,
+            deliveredChannels,
           },
         });
 
@@ -1459,7 +1805,7 @@ export async function executeConfirmedVoiceActions(params: {
           id: action.id,
           type: action.type,
           success: true,
-          message: `Poslana obavijest vlasniku (${action.ownerName || "vlasnik"})`,
+          message: `Poslana obavijest vlasniku (${action.ownerName || "vlasnik"}) putem: ${deliveredChannels.join(", ")}`,
         });
       } else if (action.type === "report_stoppage") {
         const stoppage = await landDispatchService.createWorkStoppage({
@@ -1495,6 +1841,15 @@ export async function executeConfirmedVoiceActions(params: {
           message: action.description,
         });
       }
+      if (actionKey && results.length > 0) {
+        const lastRes = results[results.length - 1];
+        if (lastRes.id === action.id && lastRes.success) {
+          executedVoiceActionCache.set(actionKey, {
+            expiresAt: Date.now() + 15 * 60 * 1000,
+            result: lastRes,
+          });
+        }
+      }
     } catch (err: any) {
       results.push({
         id: action.id,
@@ -1505,8 +1860,17 @@ export async function executeConfirmedVoiceActions(params: {
     }
   }
 
-  return {
+  const response = {
     executedCount: results.filter((r) => r.success).length,
     results,
   };
+
+  if (idempotencyKey && response.executedCount > 0) {
+    executedVoiceRequestCache.set(`${operatorId}:${idempotencyKey}`, {
+      expiresAt: Date.now() + 15 * 60 * 1000,
+      response,
+    });
+  }
+
+  return response;
 }

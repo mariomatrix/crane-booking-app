@@ -137,16 +137,18 @@ export async function verifyMobileOperatorSession(authHeader?: string): Promise<
     }
 
     // Fallback only if DB is offline in unit test context
-    const dbInstance = await db.getDb();
-    if (!dbInstance) {
-      const role = (payload.role as string) || "operator";
-      if (role !== "operator" && role !== "admin") return null;
-      return {
-        id: userId,
-        email: (payload.email as string) || "",
-        name: (payload.name as string) || null,
-        role,
-      };
+    if (process.env.NODE_ENV === "test") {
+      const dbInstance = await db.getDb();
+      if (!dbInstance) {
+        const role = (payload.role as string) || "operator";
+        if (role !== "operator" && role !== "admin") return null;
+        return {
+          id: userId,
+          email: (payload.email as string) || "",
+          name: (payload.name as string) || null,
+          role,
+        };
+      }
     }
 
     return null;

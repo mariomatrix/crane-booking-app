@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as dbModule from "./db";
 import {
   normalizeRegString,
+  normalizeAudioPayload,
   parseVoiceTranscriptLocally,
   resolveVoiceActionsAgainstContext,
+  executeConfirmedVoiceActions,
   type VoiceContextSnapshot,
 } from "./services/voiceCommandService";
 import { ENV } from "./_core/env";
@@ -162,5 +165,134 @@ describe("Voice Command Service & Gemini Model Configuration", () => {
     expect(actions[0].vesselName).toBe("BALERINA");
     expect(actions[0].ownerPhone).toBe("+385911234567");
     expect(actions[0].zoneCode).toBe("A3");
+  });
+
+  it("flags ambiguity and returns candidate vessels when multiple owners/vessels match", () => {
+    const contextWithBrothers: VoiceContextSnapshot = {
+      ...mockContext,
+      allVessels: [
+        ...mockContext.allVessels,
+        {
+          id: "v-martin",
+          name: "MORE 1",
+          registration: "ST-240008",
+          lengthM: "6.50",
+          ownerId: "u-martin",
+          ownerName: "Martin Drinković",
+          ownerPhone: "+385911111111",
+          currentZoneCode: null,
+          currentZoneName: null,
+          currentSpotNumber: null,
+        },
+        {
+          id: "v-ivan",
+          name: "MORE 2",
+          registration: "ST-247206",
+          lengthM: "7.00",
+          ownerId: "u-ivan",
+          ownerName: "Ivan Drinković",
+          ownerPhone: "+385922222222",
+          currentZoneCode: "A1",
+          currentZoneName: "Arla 1",
+          currentSpotNumber: 4,
+        },
+      ],
+    };
+
+    const { actions, warnings } = resolveVoiceActionsAgainstContext(
+      [{ type: "add_card_charge", vesselQuery: "Drinković", resourceQuery: "struja", quantity: 2 }],
+      contextWithBrothers
+    );
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].needsDisambiguation).toBe(true);
+    expect(actions[0].candidateVessels).toHaveLength(2);
+    expect(warnings.some((w) => w.includes("više plovila"))).toBe(true);
+  });
+
+  it("does not fall back to activeReservationId when explicit vesselQuery matches nothing (G-15)", () => {
+    const { actions, warnings } = resolveVoiceActionsAgainstContext(
+      [{ type: "add_card_charge", vesselQuery: "NEPOSTOJECI-999", resourceQuery: "struja", quantity: 1 }],
+      mockContext,
+      "res-balerina-1"
+    );
+
+    expect(actions).toHaveLength(0);
+    expect(warnings.some((w) => w.includes("NEPOSTOJECI-999"))).toBe(true);
+  });
+
+  it("reports 'Nema evidentiranog boravka na kopnu' instead of 'U moru' when vessel has no active land occupancy (G-25)", () => {
+    const contextNoLand: VoiceContextSnapshot = {
+      ...mockContext,
+      allVessels: [
+        {
+          id: "v-martin",
+          name: "MORE 1",
+          registration: "ST-240008",
+          lengthM: "6.50",
+          ownerId: "u-martin",
+          ownerName: "Martin Drinković",
+          ownerPhone: "+385911111111",
+          currentZoneCode: null,
+          currentZoneName: null,
+          currentSpotNumber: null,
+        },
+      ],
+    };
+
+    const { actions } = resolveVoiceActionsAgainstContext(
+      [{ type: "vessel_lookup", vesselQuery: "ST-240008" }],
+      contextNoLand
+    );
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].type).toBe("vessel_lookup");
+    expect(actions[0].description).toContain("Nema evidentiranog boravka na kopnu");
+    expect(actions[0].description).not.toContain("U moru");
+  });
+
+  it("refuses to execute actions that still require disambiguation (G-11)", async () => {
+    const dbSpy = vi.spyOn(dbModule, "getDb").mockResolvedValueOnce({} as any);
+    try {
+      const res = await executeConfirmedVoiceActions({
+        operatorId: "op-test",
+        actions: [
+          {
+            id: "act-1",
+            type: "add_card_charge",
+            title: "Naplata struje",
+            description: "Naplata struje",
+            requiresConfirmation: true,
+            needsDisambiguation: true,
+            confidence: 0.5,
+          },
+        ],
+      });
+
+      expect(res.results).toHaveLength(1);
+      expect(res.results[0].success).toBe(false);
+      expect(res.results[0].message).toContain("odabrati točno plovilo");
+    } finally {
+      dbSpy.mockRestore();
+    }
+  });
+
+  it("strips codec-parameterized data URL prefixes and normalizes MIME type for Gemini audio input", () => {
+    const webm = normalizeAudioPayload(
+      "data:audio/webm;codecs=opus;base64,GkXfo59ChoEBQveBAULygQ==",
+      "audio/webm;codecs=opus"
+    );
+    expect(webm).toEqual({
+      base64: "GkXfo59ChoEBQveBAULygQ==",
+      mimeType: "audio/webm",
+    });
+
+    const mp4 = normalizeAudioPayload("data:audio/mp4;codecs=mp4a.40.2;base64,AAAA\nBBBB");
+    expect(mp4).toEqual({
+      base64: "AAAABBBB",
+      mimeType: "audio/mp4",
+    });
+
+    expect(normalizeAudioPayload("data:audio/webm;base64,   ")).toBeNull();
   });
 });

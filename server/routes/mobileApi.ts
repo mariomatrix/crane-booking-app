@@ -703,7 +703,7 @@ router.post("/voice/interpret", requireMobileAuth, async (req: AuthenticatedRequ
 // 17. Execute Confirmed Voice Actions: POST /api/mobile/v1/voice/execute
 router.post("/voice/execute", requireMobileAuth, async (req: AuthenticatedRequest, res: Response) => {
     const user = req.operatorUser!;
-    const { actions } = req.body || {};
+    const { actions, idempotencyKey } = req.body || {};
 
     if (!Array.isArray(actions) || actions.length === 0) {
         return res.status(400).json({ error: "Nema odabranih akcija za izvršavanje." });
@@ -714,6 +714,7 @@ router.post("/voice/execute", requireMobileAuth, async (req: AuthenticatedReques
             operatorId: user.id,
             operatorName: user.name,
             actions,
+            idempotencyKey: typeof idempotencyKey === "string" ? idempotencyKey : undefined,
         });
         return res.json({ success: true, ...result });
     } catch (err: any) {

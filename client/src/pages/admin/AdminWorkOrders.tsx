@@ -57,6 +57,7 @@ export default function AdminWorkOrders() {
     const [corrVesselId, setCorrVesselId] = useState<string>("");
     const [corrCraneId, setCorrCraneId] = useState<string>("");
     const [corrStartDateTime, setCorrStartDateTime] = useState<string>("");
+    const [corrInitialStartDateTime, setCorrInitialStartDateTime] = useState<string>("");
     const [corrDurationMin, setCorrDurationMin] = useState<string>("30");
     const [corrCraneOnly, setCorrCraneOnly] = useState<boolean>(false);
     const [corrZoneId, setCorrZoneId] = useState<string>("keep");
@@ -119,11 +120,12 @@ export default function AdminWorkOrders() {
         if (o.startedAt) {
             const d = new Date(o.startedAt);
             const pad = (n: number) => String(n).padStart(2, "0");
-            setCorrStartDateTime(
-                `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-            );
+            const formatted = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            setCorrStartDateTime(formatted);
+            setCorrInitialStartDateTime(formatted);
         } else {
             setCorrStartDateTime("");
+            setCorrInitialStartDateTime("");
         }
         setCorrDurationMin(String(o.actualDurationMin || 30));
         setCorrCraneOnly(false);
@@ -823,20 +825,30 @@ export default function AdminWorkOrders() {
                             </Button>
                             <Button
                                 className="rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold"
-                                disabled={adminCorrectMutation.isPending || corrReason.trim().length < 3}
+                                disabled={
+                                    adminCorrectMutation.isPending ||
+                                    corrReason.trim().length < 3 ||
+                                    (corrUserId !== correctingOrder.userId && !corrVesselId)
+                                }
                                 onClick={() => {
                                     adminCorrectMutation.mutate({
                                         workOrderId: correctingOrder.id,
                                         reason: corrReason.trim(),
-                                        userId: corrUserId || undefined,
-                                        vesselId: corrVesselId || undefined,
-                                        craneId: corrCraneId || undefined,
-                                        startedAt: corrStartDateTime ? new Date(corrStartDateTime) : undefined,
-                                        actualDurationMin: Number(corrDurationMin) || undefined,
-                                        craneOnly: corrCraneOnly,
+                                        userId: corrUserId !== correctingOrder.userId ? corrUserId : undefined,
+                                        vesselId: corrVesselId && corrVesselId !== correctingOrder.vesselId ? corrVesselId : undefined,
+                                        craneId: corrCraneId !== correctingOrder.craneId ? corrCraneId : undefined,
+                                        startedAt:
+                                            corrStartDateTime && corrStartDateTime !== corrInitialStartDateTime
+                                                ? new Date(corrStartDateTime)
+                                                : undefined,
+                                        actualDurationMin:
+                                            Number(corrDurationMin) && Number(corrDurationMin) !== correctingOrder.actualDurationMin
+                                                ? Number(corrDurationMin)
+                                                : undefined,
+                                        craneOnly: corrCraneOnly || undefined,
                                         zoneId: !corrCraneOnly && corrZoneId !== "keep" ? corrZoneId : undefined,
                                         spotNumber: corrSpotNumber ? Number(corrSpotNumber) : undefined,
-                                        operatorNotes: corrNotes,
+                                        operatorNotes: corrNotes !== (correctingOrder.operatorNotes || "") ? corrNotes : undefined,
                                     });
                                 }}
                             >

@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { eq, and, ne, sql, isNull } from "drizzle-orm";
+import { eq, and, ne, sql, isNull, inArray, or } from "drizzle-orm";
 import {
   getDb,
   createAuditEntry,
@@ -23,6 +23,7 @@ import {
   serviceTypes,
   landOccupancies,
   landZones,
+  landSpots,
   operationDependencies,
   invoices,
 } from "../../drizzle/schema";
@@ -424,7 +425,7 @@ export async function completeReservationOperation(params: CompleteOperationPara
       throw new TRPCError({ code: "BAD_REQUEST", message: "Dizalica mora biti odabrana za zaključenje operacije." });
     }
 
-    const currentYear = new Date().getFullYear();
+    const currentYear = effectiveCompletedAt.getFullYear();
     const fin = await evaluateWorkOrderFinancials(tx, res, user, vessel, currentYear, chosenCraneId);
 
     const alreadyHadCompletedOrder = !!(existing && existing.status === "completed");
@@ -729,6 +730,126 @@ export async function completeReservationOperation(params: CompleteOperationPara
 }
 
 /**
+ * Verifies that no invoice (including unified cycle invoices via returnReservationId)
+ * or finalized card entry blocks modification of the given reservation/work order.
+ */
+export async function assertNoIssuedDocumentsTx(
+  tx: any,
+  reservationIds: Array<string | null | undefined>,
+  workOrderId?: string | null
+) {
+  const validResIds = Array.from(new Set(reservationIds.filter((x): x is string => !!x)));
+
+  if (validResIds.length > 0) {
+    // Also check any returnReservationId linked from landOccupancies created by these reservations
+    const linkedOccs = await tx
+      .select({
+        reservationId: landOccupancies.reservationId,
+        returnReservationId: landOccupancies.returnReservationId,
+      })
+      .from(landOccupancies)
+      .where(
+        or(
+          inArray(landOccupancies.reservationId, validResIds),
+          inArray(landOccupancies.returnReservationId, validResIds)
+        )
+      );
+
+    for (const o of linkedOccs) {
+      if (o.reservationId) validResIds.push(o.reservationId);
+      if (o.returnReservationId) validResIds.push(o.returnReservationId);
+    }
+
+    const allResIds = Array.from(new Set(validResIds));
+    const existingInvoices = await tx
+      .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })
+      .from(invoices)
+      .where(inArray(invoices.reservationId, allResIds))
+      .limit(1);
+
+    if (existingInvoices.length > 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Za povezani ciklus već je izdan dokument/račun (${existingInvoices[0].invoiceNumber}). Prvo provedite odobreni postupak storna računa.`,
+      });
+    }
+  }
+
+  if (workOrderId) {
+    const lockedEntries = await tx
+      .select({ id: userCardEntries.id, erpStatus: userCardEntries.erpStatus })
+      .from(userCardEntries)
+      .where(
+        and(
+          eq(userCardEntries.workOrderId, workOrderId),
+          inArray(userCardEntries.erpStatus, ["synced", "invoiced", "processed_in_membership_renewal"])
+        )
+      )
+      .limit(1);
+
+    if (lockedEntries.length > 0) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Stavka na kartonu korisnika ima zaključan status (${lockedEntries[0].erpStatus}) i ne može se automatski mijenjati ili poništiti.`,
+      });
+    }
+  }
+}
+
+/**
+ * Resolves canonical spotId from (zoneId, spotNumber) and ensures the spot exists,
+ * is active, and is not occupied by another vessel.
+ */
+export async function resolveCanonicalSpotTx(
+  tx: any,
+  zoneId: string,
+  spotNumber: number | null | undefined,
+  excludeOccupancyId?: string
+): Promise<string | null> {
+  if (!spotNumber) return null;
+
+  const [spotRow] = await tx
+    .select()
+    .from(landSpots)
+    .where(and(eq(landSpots.zoneId, zoneId), eq(landSpots.spotNumber, spotNumber)))
+    .limit(1);
+
+  if (!spotRow) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Mjesto broj #${spotNumber} ne postoji u odabranoj zoni.`,
+    });
+  }
+  if (!spotRow.isActive) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Mjesto broj #${spotNumber} je trenutno blokirano/neaktivno.`,
+    });
+  }
+
+  const conflictingOccs = await tx
+    .select({ id: landOccupancies.id })
+    .from(landOccupancies)
+    .where(
+      and(
+        eq(landOccupancies.zoneId, zoneId),
+        or(eq(landOccupancies.spotId, spotRow.id), eq(landOccupancies.spotNumber, spotNumber)),
+        isNull(landOccupancies.returnedAt)
+      )
+    );
+
+  const conflict = conflictingOccs.find((o: any) => o.id !== excludeOccupancyId);
+  if (conflict) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `Mjesto broj #${spotNumber} u odabranoj zoni već je zauzeto drugim plovilom.`,
+    });
+  }
+
+  return spotRow.id;
+}
+
+/**
  * Shared transaction helper to verify no invoice/ERP sync blocks modification,
  * delete pending userCardEntries for the work order, and restore memberStatutoryRights.
  */
@@ -737,31 +858,7 @@ async function reverseWorkOrderFinancialEffectsTx(
   order: typeof workOrders.$inferSelect,
   reservationId?: string | null
 ) {
-  if (reservationId) {
-    const existingInvoices = await tx
-      .select({ id: invoices.id, invoiceNumber: invoices.invoiceNumber })
-      .from(invoices)
-      .where(eq(invoices.reservationId, reservationId))
-      .limit(1);
-    if (existingInvoices.length > 0) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: `Za ovu rezervaciju već je izdan dokument/račun (${existingInvoices[0].invoiceNumber}). Prvo ga uklonite ili stornirajte prije ispravka naloga.`,
-      });
-    }
-  }
-
-  const syncedEntries = await tx
-    .select({ id: userCardEntries.id })
-    .from(userCardEntries)
-    .where(and(eq(userCardEntries.workOrderId, order.id), eq(userCardEntries.erpStatus, "synced")))
-    .limit(1);
-  if (syncedEntries.length > 0) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Stavka na kartonu korisnika je već sinkronizirana s e-Računima i ne može se automatski poništiti.",
-    });
-  }
+  await assertNoIssuedDocumentsTx(tx, [reservationId], order.id);
 
   await tx.delete(userCardEntries).where(eq(userCardEntries.workOrderId, order.id));
 
@@ -898,7 +995,7 @@ export async function adminRevertReservationCompletion(params: AdminRevertComple
       })
       .where(eq(reservations.id, res.id));
 
-    return {
+    const revertSummary = {
       reservationId: res.id,
       reservationNumber: res.reservationNumber,
       cancelledWorkOrders: activeOrders.map((o) => o.orderNumber),
@@ -906,14 +1003,19 @@ export async function adminRevertReservationCompletion(params: AdminRevertComple
       reopenedOccupancies: closedOccs.length,
       targetStatus,
     };
-  });
 
-  await createAuditEntry({
-    actorId: params.adminId,
-    action: "admin_reverted_completion",
-    entityType: "reservation",
-    entityId: params.reservationId,
-    payload: { ...result, reason: params.reason },
+    await createAuditEntry(
+      {
+        actorId: params.adminId,
+        action: "admin_reverted_completion",
+        entityType: "reservation",
+        entityId: params.reservationId,
+        payload: { ...revertSummary, reason: params.reason },
+      },
+      tx
+    );
+
+    return revertSummary;
   });
 
   return { success: true, ...result };
@@ -979,14 +1081,33 @@ export async function adminCorrectCompletedWorkOrder(params: AdminCorrectWorkOrd
       throw new TRPCError({ code: "NOT_FOUND", message: "Odabrano plovilo nije pronađeno." });
     }
 
+    const dateOrDurationChanged =
+      params.startedAt !== undefined || params.actualDurationMin !== undefined;
+
+    const oldEffectiveYear = (order.completedAt || order.startedAt || new Date()).getFullYear();
+    const newEffectiveYear = (targetCompletedAt || targetStartedAt).getFullYear();
+    const yearChanged = oldEffectiveYear !== newEffectiveYear;
+
     const ownerOrVesselChanged =
       targetUserId !== order.userId ||
       targetVesselId !== order.vesselId ||
       targetCraneId !== order.craneId;
 
+    const isMaterialChange =
+      ownerOrVesselChanged ||
+      yearChanged ||
+      dateOrDurationChanged ||
+      params.craneOnly !== undefined ||
+      params.zoneId !== undefined ||
+      params.spotNumber !== undefined;
+
+    if (order.status === "completed" && isMaterialChange) {
+      await assertNoIssuedDocumentsTx(tx, [res?.id], order.id);
+    }
+
     let finUpdates: Partial<typeof workOrders.$inferInsert> = {};
 
-    if (order.status === "completed" && ownerOrVesselChanged && res) {
+    if (order.status === "completed" && (ownerOrVesselChanged || yearChanged) && res) {
       await reverseWorkOrderFinancialEffectsTx(tx, order, res.id);
 
       const resSnapshot = {
@@ -996,7 +1117,7 @@ export async function adminCorrectCompletedWorkOrder(params: AdminCorrectWorkOrd
         vesselLengthM: newVessel?.lengthM || res.vesselLengthM,
         craneId: targetCraneId,
       };
-      const effectiveYear = targetCompletedAt ? targetCompletedAt.getFullYear() : new Date().getFullYear();
+      const effectiveYear = newEffectiveYear;
       const fin = await evaluateWorkOrderFinancials(tx, resSnapshot, newUser, newVessel, effectiveYear, targetCraneId);
 
       finUpdates = {
@@ -1145,46 +1266,87 @@ export async function adminCorrectCompletedWorkOrder(params: AdminCorrectWorkOrd
         .where(eq(craneOperationLog.reservationId, res.id));
     }
 
-    // Sync landOccupancies created by this reservation
+    // Sync landOccupancies according to operation type (lift/move vs. lower)
     if (res) {
-      const [occ] = await tx
-        .select()
-        .from(landOccupancies)
-        .where(eq(landOccupancies.reservationId, res.id))
-        .for("update")
-        .limit(1);
+      const isLowerOp = order.quotaOperationType === "lower";
 
-      if (params.craneOnly) {
-        if (occ && !occ.returnedAt) {
-          await tx.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+      if (isLowerOp) {
+        // Lowering operation closes an occupancy via returnReservationId; never creates a new active occupancy
+        if (dateOrDurationChanged) {
+          const [closedOcc] = await tx
+            .select()
+            .from(landOccupancies)
+            .where(eq(landOccupancies.returnReservationId, res.id))
+            .for("update")
+            .limit(1);
+          if (closedOcc) {
+            await tx
+              .update(landOccupancies)
+              .set({
+                returnedAt: targetCompletedAt || targetStartedAt,
+                updatedAt: new Date(),
+              })
+              .where(eq(landOccupancies.id, closedOcc.id));
+          }
         }
-      } else if (occ) {
-        await tx
-          .update(landOccupancies)
-          .set({
+      } else {
+        const [occ] = await tx
+          .select()
+          .from(landOccupancies)
+          .where(eq(landOccupancies.reservationId, res.id))
+          .for("update")
+          .limit(1);
+
+        if (params.craneOnly) {
+          if (occ && !occ.returnedAt) {
+            await tx.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+          }
+        } else if (occ) {
+          const nextZoneId = finalLandZoneId || occ.zoneId;
+          const nextSpotNumber = params.spotNumber !== undefined ? params.spotNumber : occ.spotNumber;
+          const nextSpotId =
+            params.spotNumber !== undefined || (finalLandZoneId && finalLandZoneId !== occ.zoneId)
+              ? await resolveCanonicalSpotTx(tx, nextZoneId, nextSpotNumber, occ.id)
+              : occ.spotId;
+
+          const occUpdates: Partial<typeof landOccupancies.$inferInsert> = {
             userId: targetUserId,
             vesselId: targetVesselId || occ.vesselId,
-            zoneId: finalLandZoneId || occ.zoneId,
-            spotNumber: params.spotNumber !== undefined ? params.spotNumber : occ.spotNumber,
-            liftedAt: targetCompletedAt || targetStartedAt,
+            zoneId: nextZoneId,
+            spotNumber: nextSpotNumber,
+            spotId: nextSpotId,
             updatedAt: new Date(),
-          })
-          .where(eq(landOccupancies.id, occ.id));
-      } else if (finalLandZoneId && targetVesselId && order.status === "completed") {
-        await tx.insert(landOccupancies).values({
-          vesselId: targetVesselId,
-          userId: targetUserId,
-          zoneId: finalLandZoneId,
-          spotNumber: params.spotNumber ?? undefined,
-          reservationId: res.id,
-          liftedAt: targetCompletedAt || targetStartedAt,
-          createdBy: params.adminId,
-          note: `Ispravak radnog naloga ${order.orderNumber}: ${params.reason}`,
-        });
+          };
+          if (dateOrDurationChanged) {
+            occUpdates.liftedAt = targetCompletedAt || targetStartedAt;
+          }
+
+          await tx
+            .update(landOccupancies)
+            .set(occUpdates)
+            .where(eq(landOccupancies.id, occ.id));
+        } else if (finalLandZoneId && targetVesselId && order.status === "completed") {
+          const resolvedSpotId = await resolveCanonicalSpotTx(
+            tx,
+            finalLandZoneId,
+            params.spotNumber ?? null
+          );
+          await tx.insert(landOccupancies).values({
+            vesselId: targetVesselId,
+            userId: targetUserId,
+            zoneId: finalLandZoneId,
+            spotNumber: params.spotNumber ?? undefined,
+            spotId: resolvedSpotId ?? undefined,
+            reservationId: res.id,
+            liftedAt: targetCompletedAt || targetStartedAt,
+            createdBy: params.adminId,
+            note: `Ispravak radnog naloga ${order.orderNumber}: ${params.reason}`,
+          });
+        }
       }
     }
 
-    return {
+    const correctionSummary = {
       workOrderId: order.id,
       orderNumber: order.orderNumber,
       before: {
@@ -1194,6 +1356,7 @@ export async function adminCorrectCompletedWorkOrder(params: AdminCorrectWorkOrd
         startedAt: order.startedAt,
         actualDurationMin: order.actualDurationMin,
         landZoneId: res?.landZoneId ?? null,
+        operatorNotes: order.operatorNotes,
       },
       after: {
         userId: targetUserId,
@@ -1203,16 +1366,22 @@ export async function adminCorrectCompletedWorkOrder(params: AdminCorrectWorkOrd
         actualDurationMin: targetDurationMin,
         landZoneId: finalLandZoneId,
         craneOnly: !!params.craneOnly,
+        operatorNotes: updatedNotes,
       },
     };
-  });
 
-  await createAuditEntry({
-    actorId: params.adminId,
-    action: "admin_work_order_corrected",
-    entityType: "work_orders",
-    entityId: params.workOrderId,
-    payload: { ...result, reason: params.reason },
+    await createAuditEntry(
+      {
+        actorId: params.adminId,
+        action: "admin_work_order_corrected",
+        entityType: "work_orders",
+        entityId: params.workOrderId,
+        payload: { ...correctionSummary, reason: params.reason },
+      },
+      tx
+    );
+
+    return correctionSummary;
   });
 
   return { success: true, ...result };

@@ -5774,63 +5774,79 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        const [occ] = await db
-          .select()
-          .from(landOccupancies)
-          .where(eq(landOccupancies.id, input.id))
-          .limit(1);
-        if (!occ) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Zapis o boravku na kopnu nije pronađen." });
-        }
+        const { assertNoIssuedDocumentsTx, resolveCanonicalSpotTx } = await import(
+          "./services/workOrderService"
+        );
 
-        const newZoneId = input.zoneId ?? occ.zoneId;
-        const newSpotNumber = input.spotNumber !== undefined ? input.spotNumber : occ.spotNumber;
-
-        let resolvedSpotId = occ.spotId;
-        if (newZoneId && newSpotNumber) {
-          const [spotRow] = await db
-            .select({ id: landSpots.id })
-            .from(landSpots)
-            .where(and(eq(landSpots.zoneId, newZoneId), eq(landSpots.spotNumber, newSpotNumber)))
+        await db.transaction(async (tx) => {
+          const [occ] = await tx
+            .select()
+            .from(landOccupancies)
+            .where(eq(landOccupancies.id, input.id))
+            .for("update")
             .limit(1);
-          resolvedSpotId = spotRow?.id ?? null;
-        } else if (input.spotNumber === null) {
-          resolvedSpotId = null;
-        }
+          if (!occ) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Zapis o boravku na kopnu nije pronađen.",
+            });
+          }
 
-        const newNote =
-          input.note !== undefined
-            ? input.note
-            : occ.note
-              ? `${occ.note} | [ADMIN ISPRAVAK]: ${input.reason}`
-              : `[ADMIN ISPRAVAK]: ${input.reason}`;
+          await assertNoIssuedDocumentsTx(tx, [occ.reservationId, occ.returnReservationId]);
 
-        await db
-          .update(landOccupancies)
-          .set({
-            liftedAt: input.liftedAt ?? occ.liftedAt,
-            zoneId: newZoneId,
-            spotNumber: newSpotNumber,
-            spotId: resolvedSpotId,
-            note: newNote,
-            updatedAt: new Date(),
-          })
-          .where(eq(landOccupancies.id, occ.id));
+          const newZoneId = input.zoneId ?? occ.zoneId;
+          const newSpotNumber = input.spotNumber !== undefined ? input.spotNumber : occ.spotNumber;
 
-        await createAuditEntry({
-          actorId: ctx.user.id,
-          action: "admin_land_occupancy_updated",
-          entityType: "land_occupancy",
-          entityId: occ.id,
-          payload: {
-            reason: input.reason,
-            before: { liftedAt: occ.liftedAt, zoneId: occ.zoneId, spotNumber: occ.spotNumber },
-            after: {
+          const resolvedSpotId =
+            input.spotNumber !== undefined || (input.zoneId && input.zoneId !== occ.zoneId)
+              ? await resolveCanonicalSpotTx(tx, newZoneId, newSpotNumber, occ.id)
+              : occ.spotId;
+
+          const newNote =
+            input.note !== undefined
+              ? input.note
+              : occ.note
+                ? `${occ.note} | [ADMIN ISPRAVAK]: ${input.reason}`
+                : `[ADMIN ISPRAVAK]: ${input.reason}`;
+
+          await tx
+            .update(landOccupancies)
+            .set({
               liftedAt: input.liftedAt ?? occ.liftedAt,
               zoneId: newZoneId,
               spotNumber: newSpotNumber,
+              spotId: resolvedSpotId,
+              note: newNote,
+              updatedAt: new Date(),
+            })
+            .where(eq(landOccupancies.id, occ.id));
+
+          await createAuditEntry(
+            {
+              actorId: ctx.user.id,
+              action: "admin_land_occupancy_updated",
+              entityType: "land_occupancy",
+              entityId: occ.id,
+              payload: {
+                reason: input.reason,
+                before: {
+                  liftedAt: occ.liftedAt,
+                  zoneId: occ.zoneId,
+                  spotNumber: occ.spotNumber,
+                  spotId: occ.spotId,
+                  note: occ.note,
+                },
+                after: {
+                  liftedAt: input.liftedAt ?? occ.liftedAt,
+                  zoneId: newZoneId,
+                  spotNumber: newSpotNumber,
+                  spotId: resolvedSpotId,
+                  note: newNote,
+                },
+              },
             },
-          },
+            tx
+          );
         });
 
         return { success: true };
@@ -5848,32 +5864,49 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
 
-        const [occ] = await db
-          .select()
-          .from(landOccupancies)
-          .where(eq(landOccupancies.id, input.id))
-          .limit(1);
-        if (!occ) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Zapis o boravku na kopnu nije pronađen." });
-        }
+        const { assertNoIssuedDocumentsTx } = await import("./services/workOrderService");
 
-        await db.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+        await db.transaction(async (tx) => {
+          const [occ] = await tx
+            .select()
+            .from(landOccupancies)
+            .where(eq(landOccupancies.id, input.id))
+            .for("update")
+            .limit(1);
+          if (!occ) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Zapis o boravku na kopnu nije pronađen.",
+            });
+          }
 
-        await createAuditEntry({
-          actorId: ctx.user.id,
-          action: "admin_land_occupancy_deleted",
-          entityType: "land_occupancy",
-          entityId: occ.id,
-          payload: {
-            reason: input.reason,
-            deletedOccupancy: {
-              vesselId: occ.vesselId,
-              userId: occ.userId,
-              zoneId: occ.zoneId,
-              spotNumber: occ.spotNumber,
-              liftedAt: occ.liftedAt,
+          await assertNoIssuedDocumentsTx(tx, [occ.reservationId, occ.returnReservationId]);
+
+          await tx.delete(landOccupancies).where(eq(landOccupancies.id, occ.id));
+
+          await createAuditEntry(
+            {
+              actorId: ctx.user.id,
+              action: "admin_land_occupancy_deleted",
+              entityType: "land_occupancy",
+              entityId: occ.id,
+              payload: {
+                reason: input.reason,
+                deletedOccupancy: {
+                  vesselId: occ.vesselId,
+                  userId: occ.userId,
+                  zoneId: occ.zoneId,
+                  spotId: occ.spotId,
+                  spotNumber: occ.spotNumber,
+                  liftedAt: occ.liftedAt,
+                  returnedAt: occ.returnedAt,
+                  reservationId: occ.reservationId,
+                  returnReservationId: occ.returnReservationId,
+                },
+              },
             },
-          },
+            tx
+          );
         });
 
         return { success: true };

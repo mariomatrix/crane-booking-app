@@ -709,23 +709,28 @@ export async function updateSetting(key: string, value: string) {
 }
 
 // ─── Audit Log ────────────────────────────────────────────────────────
-export async function createAuditEntry(data: {
-  actorId?: string;
-  action: string;
-  entityType: string;
-  entityId?: string;
-  payload?: unknown;
-  ipAddress?: string;
-}) {
-  const db = await getDb();
-  if (db) await db.insert(auditLog).values({
-    actorId: data.actorId,
-    action: data.action,
-    entityType: data.entityType,
-    entityId: data.entityId,
-    payload: data.payload,
-    ipAddress: data.ipAddress,
-  });
+export async function createAuditEntry(
+  data: {
+    actorId?: string;
+    action: string;
+    entityType: string;
+    entityId?: string;
+    payload?: unknown;
+    ipAddress?: string;
+  },
+  tx?: any
+) {
+  const executor = tx || (await getDb());
+  if (executor) {
+    await executor.insert(auditLog).values({
+      actorId: data.actorId,
+      action: data.action,
+      entityType: data.entityType,
+      entityId: data.entityId,
+      payload: data.payload,
+      ipAddress: data.ipAddress,
+    });
+  }
 }
 
 export async function listAuditLog(limit = 50) {
