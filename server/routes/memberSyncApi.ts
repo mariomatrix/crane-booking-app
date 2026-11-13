@@ -21,6 +21,9 @@ import {
     craneZoneAffinities,
     reservations,
     workOrders,
+    userCardEntries,
+    memberStatutoryRights,
+    craneOperationLog,
 } from "../../drizzle/schema";
 
 const router = Router();
@@ -968,8 +971,6 @@ router.post("/fix-crane-only-order", requireSyncApiKey, async (req: Request, res
             };
         });
 
-        console.log(`[MemberSync API] Uspješno ispravljen radni nalog ${orderNumber} (uklonjeno zauzeće kopna).`);
-
         res.json({
             success: true,
             message: `Radni nalog ${orderNumber} i rezervacija su uspješno ispravljeni: uklonjena Servisna zona i obrisano ${result.deletedOccupanciesCount} zauzeće kopna.`,
@@ -977,6 +978,300 @@ router.post("/fix-crane-only-order", requireSyncApiKey, async (req: Request, res
         });
     } catch (err: any) {
         console.error("[MemberSync API] Greška pri ispravku radnog naloga:", err);
+        res.status(500).json({ success: false, error: err.message || err });
+    }
+});
+
+/**
+ * @route POST /api/v1/member-sync/fix-drinkovic-and-polic
+ * 
+ * Siguran i kontroliran ispravak operaterskih pogrešaka:
+ * 1. Zamjena plovila i vlasnika:
+ *    - 11.11.2026. izvađen je JL-247206 (Ivan Drinković), a ne JL-240008 (Martin Drinković).
+ *      Ažurira se: Radni nalog RN-2026-00019, rezervacija REZ-2026-DDAA18, zauzeće kopna, kartica člana i statutarna kvota.
+ *    - 17.11.2026. rezerviran je termin za vađenje JL-240008 (Martin Drinković), koji je bio privremeno rezerviran na Ivana.
+ *      Ažurira se: Rezervacija REZ-2026-E8AF8D.
+ * 2. Ispravak datuma vađenja za Nikolu Polića (ST-5150) u servisnu zonu:
+ *    - Umjesto 09.12.2026. (buduća godina upisana greškom) postavlja se stvarni datum 09.12.2025.
+ * 
+ * Podržava { dryRun: true } za prethodnu inspekciju bez izmjena.
+ */
+router.post("/fix-drinkovic-and-polic", requireSyncApiKey, async (req: Request, res: Response) => {
+    try {
+        const db = await getDb();
+        if (!db) return res.status(500).json({ success: false, error: "Baza nije dostupna" });
+
+        const isDryRun = req.body.dryRun !== false && req.body.confirm !== true;
+
+        // 1. Dohvat plovila JL-240008 (Martin) i JL-247206 (Ivan)
+        const [vessel240008] = await db
+            .select()
+            .from(vessels)
+            .where(sql`UPPER(REPLACE(REPLACE(COALESCE(registration, ''), ' ', ''), '-', '')) = 'JL240008'`);
+        if (!vessel240008) {
+            return res.status(404).json({ success: false, error: "Plovilo JL-240008 nije pronađeno u bazi" });
+        }
+
+        const [vessel247206] = await db
+            .select()
+            .from(vessels)
+            .where(sql`UPPER(REPLACE(REPLACE(COALESCE(registration, ''), ' ', ''), '-', '')) = 'JL247206'`);
+        if (!vessel247206) {
+            return res.status(404).json({ success: false, error: "Plovilo JL-247206 nije pronađeno u bazi" });
+        }
+
+        // Dohvat vlasnika
+        const [ownerMartin] = await db.select().from(users).where(eq(users.id, vessel240008.ownerId));
+        const [ownerIvan] = await db.select().from(users).where(eq(users.id, vessel247206.ownerId));
+
+        // 2. Radni nalog RN-2026-00019 i rezervacija REZ-2026-DDAA18 (11.11.2026.)
+        const [order19] = await db.select().from(workOrders).where(eq(workOrders.orderNumber, "RN-2026-00019"));
+        if (!order19) {
+            return res.status(404).json({ success: false, error: "Radni nalog RN-2026-00019 nije pronađen" });
+        }
+
+        const [res11] = await db.select().from(reservations).where(eq(reservations.reservationNumber, "REZ-2026-DDAA18"));
+        if (!res11) {
+            return res.status(404).json({ success: false, error: "Rezervacija REZ-2026-DDAA18 nije pronađena" });
+        }
+
+        // Zauzeće kopna za 11.11.
+        const [occDrinkovic] = await db
+            .select()
+            .from(landOccupancies)
+            .where(and(eq(landOccupancies.vesselId, vessel240008.id), isNull(landOccupancies.returnedAt)));
+
+        // Kartica člana za RN-2026-00019
+        const cardEntriesDrinkovic = await db
+            .select()
+            .from(userCardEntries)
+            .where(eq(userCardEntries.workOrderId, order19.id));
+
+        // Statutarna prava za Martina i Ivana
+        const [rightsMartin] = await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, ownerMartin.id));
+        const [rightsIvan] = await db.select().from(memberStatutoryRights).where(eq(memberStatutoryRights.userId, ownerIvan.id));
+
+        // 3. Rezervacija REZ-2026-E8AF8D (17.11.2026.)
+        const [res17] = await db.select().from(reservations).where(eq(reservations.reservationNumber, "REZ-2026-E8AF8D"));
+        if (!res17) {
+            return res.status(404).json({ success: false, error: "Rezervacija REZ-2026-E8AF8D nije pronađena" });
+        }
+
+        // 4. Plovilo ST-5150 i zauzeće u Servisnoj zoni (Nikola Polić)
+        const [vessel5150] = await db
+            .select()
+            .from(vessels)
+            .where(sql`UPPER(REPLACE(REPLACE(COALESCE(registration, ''), ' ', ''), '-', '')) = 'ST5150'`);
+        if (!vessel5150) {
+            return res.status(404).json({ success: false, error: "Plovilo ST-5150 nije pronađeno u bazi" });
+        }
+
+        const [occPolic] = await db
+            .select()
+            .from(landOccupancies)
+            .where(and(eq(landOccupancies.vesselId, vessel5150.id), isNull(landOccupancies.returnedAt)));
+        if (!occPolic) {
+            return res.status(404).json({ success: false, error: "Aktivno zauzeće kopna za ST-5150 nije pronađeno" });
+        }
+
+        const preview = {
+            drinkovic: {
+                vesselCurrent11: { id: vessel240008.id, reg: vessel240008.registration, name: vessel240008.name, owner: ownerMartin?.name },
+                vesselActual11: { id: vessel247206.id, reg: vessel247206.registration, name: vessel247206.name, owner: ownerIvan?.name },
+                workOrder19: { id: order19.id, orderNumber: order19.orderNumber, currentUserId: order19.userId, currentVesselId: order19.vesselId },
+                reservation11: { id: res11.id, resNumber: res11.reservationNumber, currentReg: res11.vesselRegistration },
+                reservation17: { id: res17.id, resNumber: res17.reservationNumber, currentReg: res17.vesselRegistration },
+                occupancy11: occDrinkovic ? { id: occDrinkovic.id, currentVesselId: occDrinkovic.vesselId, note: occDrinkovic.note } : null,
+                cardEntriesCount: cardEntriesDrinkovic.length,
+                rightsMartin: rightsMartin ? { userId: rightsMartin.userId, liftAvailable: rightsMartin.liftAvailable } : null,
+                rightsIvan: rightsIvan ? { userId: rightsIvan.userId, liftAvailable: rightsIvan.liftAvailable } : null,
+            },
+            polic: {
+                vessel: { id: vessel5150.id, reg: vessel5150.registration },
+                occupancy: {
+                    id: occPolic.id,
+                    currentLiftedAt: occPolic.liftedAt,
+                    newLiftedAt: "2025-12-09T08:00:00.000Z",
+                    currentNote: occPolic.note,
+                },
+            },
+        };
+
+        if (isDryRun) {
+            return res.json({
+                success: true,
+                dryRun: true,
+                message: "Dry run: Prikaz stanja prije izmjena. Za primjenu pošaljite { confirm: true }.",
+                preview,
+            });
+        }
+
+        // Primjena izmjena unutar transakcije
+        const result = await db.transaction(async (tx) => {
+            const now = new Date();
+
+            // 1. Radni nalog RN-2026-00019
+            await tx
+                .update(workOrders)
+                .set({
+                    userId: ownerIvan.id,
+                    vesselId: vessel247206.id,
+                    vesselLengthM: vessel247206.lengthM || "11.92",
+                    operatorNotes: order19.operatorNotes
+                        ? `${order19.operatorNotes} | Ispravak 13.11.2026: Zamijenjeno pogrešno plovilo JL-240008 stvarno izvađenim plovilom JL-247206 (Ivan Drinković)`.trim()
+                        : "Ispravak 13.11.2026: Zamijenjeno pogrešno plovilo JL-240008 stvarno izvađenim plovilom JL-247206 (Ivan Drinković)",
+                    updatedAt: now,
+                })
+                .where(eq(workOrders.id, order19.id));
+
+            // 2. Rezervacija REZ-2026-DDAA18 (11.11.)
+            await tx
+                .update(reservations)
+                .set({
+                    userId: ownerIvan.id,
+                    vesselId: vessel247206.id,
+                    vesselRegistration: vessel247206.registration || "JL-247206",
+                    vesselName: vessel247206.name || "MAREUS 2",
+                    vesselLengthM: vessel247206.lengthM || "11.92",
+                    vesselBeamM: vessel247206.beamM || "3.78",
+                    adminNote: res11.adminNote
+                        ? `${res11.adminNote} | Ispravak 13.11.2026: Plovilo ispravljeno na JL-247206 (Ivan Drinković)`.trim()
+                        : "Ispravak 13.11.2026: Plovilo ispravljeno na JL-247206 (Ivan Drinković)",
+                    updatedAt: now,
+                })
+                .where(eq(reservations.id, res11.id));
+
+            // 3. Zauzeće kopna za 11.11.
+            if (occDrinkovic) {
+                await tx
+                    .update(landOccupancies)
+                    .set({
+                        userId: ownerIvan.id,
+                        vesselId: vessel247206.id,
+                        note: occDrinkovic.note
+                            ? `${occDrinkovic.note} | Ispravak 13.11.2026: JL-247206 Ivan Drinković`.trim()
+                            : "Ispravak 13.11.2026: JL-247206 Ivan Drinković",
+                        updatedAt: now,
+                    })
+                    .where(eq(landOccupancies.id, occDrinkovic.id));
+            }
+
+            // 4. Kartica člana (user_card_entries) za RN-2026-00019
+            await tx
+                .update(userCardEntries)
+                .set({
+                    userId: ownerIvan.id,
+                    vesselName: vessel247206.name || "MAREUS 2",
+                    vesselRegistration: vessel247206.registration || "JL-247206",
+                    note: `Radni nalog RN-2026-00019 - Pokriveno godišnjom članarinom (Ispravak: JL-247206 Ivan Drinković)`,
+                })
+                .where(eq(userCardEntries.workOrderId, order19.id));
+
+            // 5. Statutarna prava (member_statutory_rights)
+            // Vraćamo kvotu Martinu Drinkoviću (jer njegov brod nije izvađen 11.11.)
+            await tx
+                .update(memberStatutoryRights)
+                .set({
+                    liftAvailable: true,
+                    updatedAt: now,
+                })
+                .where(eq(memberStatutoryRights.userId, ownerMartin.id));
+
+            // Skida se kvota Ivanu Drinkoviću (jer je njegov brod izvađen 11.11.)
+            await tx
+                .update(memberStatutoryRights)
+                .set({
+                    liftAvailable: false,
+                    liftAcquiredYear: 2026,
+                    updatedAt: now,
+                })
+                .where(eq(memberStatutoryRights.userId, ownerIvan.id));
+
+            // 6. Rezervacija REZ-2026-E8AF8D (17.11.) - prebacujemo na Martina Drinkovića (JL-240008)
+            await tx
+                .update(reservations)
+                .set({
+                    userId: ownerMartin.id,
+                    vesselId: vessel240008.id,
+                    vesselRegistration: vessel240008.registration || "JL-240008",
+                    vesselName: vessel240008.name || "MAREUS III",
+                    vesselLengthM: vessel240008.lengthM || "11.00",
+                    vesselBeamM: vessel240008.beamM || "3.75",
+                    adminNote: res17.adminNote
+                        ? `${res17.adminNote} | Ispravak 13.11.2026: Prebačeno na stvarno plovilo JL-240008 (Martin Drinković)`.trim()
+                        : "Ispravak 13.11.2026: Prebačeno na stvarno plovilo JL-240008 (Martin Drinković)",
+                    updatedAt: now,
+                })
+                .where(eq(reservations.id, res17.id));
+
+            // 7. Nikola Polić (ST-5150) - ispravak godine vađenja 2026 -> 2025
+            const correctedDate = new Date("2025-12-09T08:00:00.000Z");
+            const correctedNote = occPolic.note
+                ? occPolic.note.replace("09.12.26.", "09.12.25. (ispravljena pogrešna godina 2026->2025)")
+                : "Izvorno vađenje: 09.12.25. (ispravljena pogrešna godina 2026->2025)";
+
+            await tx
+                .update(landOccupancies)
+                .set({
+                    liftedAt: correctedDate,
+                    note: correctedNote,
+                    updatedAt: now,
+                })
+                .where(eq(landOccupancies.id, occPolic.id));
+
+            // 8. Audit log zapisi
+            const actorId = order19.operatorId || ownerIvan.id;
+
+            await tx.insert(auditLog).values({
+                actorId,
+                action: "admin_fix_drinkovic_swap",
+                entityType: "work_orders",
+                entityId: order19.id,
+                payload: {
+                    reason: "Operaterska greška: 11.11.2026. izvađen JL-247206 Ivan Drinković, a upisan JL-240008 Martin Drinković. 17.11. se vadi JL-240008.",
+                    workOrder: order19.orderNumber,
+                    previousVessel: vessel240008.registration,
+                    newVessel: vessel247206.registration,
+                    previousUser: ownerMartin.name,
+                    newUser: ownerIvan.name,
+                    swappedReservationNov17: res17.reservationNumber,
+                    correctedAt: now.toISOString(),
+                },
+            });
+
+            await tx.insert(auditLog).values({
+                actorId,
+                action: "admin_fix_polic_date",
+                entityType: "land_occupancy",
+                entityId: occPolic.id,
+                payload: {
+                    reason: "Operaterska greška u Excel tablici: ST-5150 Nikola Polić je izvađen 09.12.2025., a ne 2026.",
+                    vesselRegistration: vessel5150.registration,
+                    previousLiftedAt: occPolic.liftedAt,
+                    newLiftedAt: correctedDate.toISOString(),
+                    correctedAt: now.toISOString(),
+                },
+            });
+
+            return {
+                workOrder19: { id: order19.id, orderNumber: order19.orderNumber, updatedToVessel: vessel247206.registration, updatedToUser: ownerIvan.name },
+                reservation11: { id: res11.id, resNumber: res11.reservationNumber, updatedToVessel: vessel247206.registration },
+                reservation17: { id: res17.id, resNumber: res17.reservationNumber, updatedToVessel: vessel240008.registration, updatedToUser: ownerMartin.name },
+                occupancy11: occDrinkovic ? { id: occDrinkovic.id, updatedToVessel: vessel247206.registration } : null,
+                policOccupancy: { id: occPolic.id, updatedLiftedAt: correctedDate.toISOString() },
+            };
+        });
+
+        console.log("[MemberSync API] Uspješno primijenjeni ispravci za Drinkovića i Polića.");
+
+        res.json({
+            success: true,
+            dryRun: false,
+            message: "Uspješno ispravljene operaterske greške za Drinkovića (zamjena 11.11. i 17.11.) i Polića (godina 2025.)",
+            result,
+        });
+    } catch (err: any) {
+        console.error("[MemberSync API] Greška pri ispravku operaterskih unosa:", err);
         res.status(500).json({ success: false, error: err.message || err });
     }
 });
